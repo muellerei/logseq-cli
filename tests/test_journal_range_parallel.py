@@ -1,5 +1,6 @@
 """Tests for parallel fetching in get-journal-range."""
 
+import datetime as _dt
 import json as _json
 import threading
 import time as _time
@@ -140,3 +141,35 @@ class TestJournalRangeParallel:
         assert result.exit_code == 0, result.output
         data = _json.loads(result.output)
         assert [e["date"] for e in data] == dates
+
+    def test_keyword_today_yesterday_resolves(self):
+        # --from yesterday --to today should resolve to a 2-day inclusive range
+        today = _dt.date.today()
+        yesterday = today - _dt.timedelta(days=1)
+        dates = [yesterday.isoformat(), today.isoformat()]
+        api = MagicMock()
+        api.get_all_pages.return_value = _make_journal_pages(dates)
+        api.get_page_blocks_tree.return_value = []
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "get-journal-range",
+                "--from", "yesterday",
+                "--to", "today",
+                "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = _json.loads(result.output)
+        assert [e["date"] for e in data] == dates
+
+    def test_keyword_invalid_date_rejected(self):
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=MagicMock()):
+            result = runner.invoke(cli, [
+                "get-journal-range",
+                "--from", "tomorrowww",
+                "--to", "today",
+                "--json",
+            ])
+        assert result.exit_code != 0
+        assert "Invalid date" in result.output or "Invalid" in result.output
