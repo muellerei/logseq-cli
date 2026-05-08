@@ -216,11 +216,15 @@ def _blocks_with_ids(blocks, indent=0):
 
 
 def _extract_section(blocks, heading_text):
-    """Return the block matching heading_text (with its children), searched recursively."""
-    target = heading_text.strip().lstrip("- ").strip()
+    """Return the block matching heading_text (with its children), searched recursively.
+
+    Uses :func:`normalize_heading` so renderer macros (e.g. ``{{renderer :todomaster}}``)
+    and whitespace variations on the stored block do not prevent a match.
+    """
+    target = normalize_heading(heading_text)
     for block in blocks:
-        content = (block.get("content") or "").strip().lstrip("- ").strip()
-        if content == target:
+        content = block.get("content") or ""
+        if normalize_heading(content) == target:
             return [block]
         children = block.get("children", [])
         if children:
@@ -602,8 +606,8 @@ Notes:
   Always pass --resolve-refs if downstream parses ((uuid)) refs.
   Per-day errors embed as {error: "..."} per entry; range continues.
 """)
-@click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD, inclusive)")
-@click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD, inclusive)")
+@click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
+@click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
 @click.option("--format", "output_format", type=click.Choice(["text", "markdown"]), default="text", help="Output format: text (default) or markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -621,11 +625,8 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
     """
     api = ctx.obj["api"]
 
-    try:
-        start = datetime.datetime.strptime(from_date, "%Y-%m-%d")
-        end = datetime.datetime.strptime(to_date, "%Y-%m-%d")
-    except ValueError as e:
-        raise click.BadParameter(f"Date must be YYYY-MM-DD: {e}")
+    start = datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
+    end = datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
 
     if start > end:
         raise click.BadParameter("--from must be before or equal to --to")
@@ -2409,8 +2410,8 @@ Notes:
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
 @click.option("--page", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
-@click.option("--from", "from_date", default=None, help="Only TODOs from journal pages on or after this date (YYYY-MM-DD). Non-journal pages are always included.")
-@click.option("--to", "to_date", default=None, help="Only TODOs from journal pages on or before this date (YYYY-MM-DD). Non-journal pages are always included.")
+@click.option("--from", "from_date", default=None, help="Only TODOs from journal pages on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
+@click.option("--to", "to_date", default=None, help="Only TODOs from journal pages on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -2467,11 +2468,14 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
 
     # Filter by date range (journal pages only; non-journal pages always pass through)
     if from_date or to_date:
-        try:
-            date_start = datetime.datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
-            date_end = datetime.datetime.strptime(to_date, "%Y-%m-%d") if to_date else None
-        except ValueError as e:
-            raise click.BadParameter(f"Date must be YYYY-MM-DD: {e}")
+        date_start = (
+            datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
+            if from_date else None
+        )
+        date_end = (
+            datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
+            if to_date else None
+        )
         filtered = []
         for t in todos:
             jd = t.get("_journal_day")

@@ -133,3 +133,59 @@ class TestGetPageWithIds:
         assert "outer-uuid" in result.output
         assert "INNER" in result.output
         assert f"(({target_uuid}))" not in result.output
+
+
+class TestGetPageHeading:
+    """Verify --heading uses tolerant matching (renderer macros, whitespace)."""
+
+    def test_heading_matches_despite_renderer_suffix(self):
+        # Real-world: journal heading is stored as "## Tasks {{renderer :todomaster}}"
+        # but user queries with the bare "## Tasks".
+        blocks = [
+            {"content": "## Tasks {{renderer :todomaster}}",
+             "uuid": "h-uuid",
+             "children": [
+                 {"content": "TODO Sub-Task", "uuid": "t-uuid", "children": []}
+             ]},
+            {"content": "## Log", "uuid": "log-uuid", "children": [
+                {"content": "log-entry", "uuid": "l-uuid", "children": []}
+            ]},
+        ]
+        api = _api_with_blocks(blocks)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-page", "--name", "Journal", "--heading", "## Tasks"]
+            )
+        assert result.exit_code == 0, result.output
+        assert "TODO Sub-Task" in result.output
+        # The Log section must NOT leak into the output
+        assert "log-entry" not in result.output
+
+    def test_heading_matches_with_extra_whitespace(self):
+        blocks = [
+            {"content": "##   Meeting   ", "uuid": "h", "children": [
+                {"content": "Notes", "uuid": "n", "children": []}
+            ]},
+        ]
+        api = _api_with_blocks(blocks)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-page", "--name", "X", "--heading", "## Meeting"]
+            )
+        assert result.exit_code == 0, result.output
+        assert "Notes" in result.output
+
+    def test_heading_not_found_emits_warning(self):
+        blocks = [{"content": "## Other", "uuid": "h", "children": []}]
+        api = _api_with_blocks(blocks)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-page", "--name", "X", "--heading", "## Tasks"]
+            )
+        assert result.exit_code == 0, result.output
+        # Either stderr (mix_stderr default) or stdout carries a not-found warning.
+        combined = result.output.lower()
+        assert "not found" in combined or "warning" in combined
