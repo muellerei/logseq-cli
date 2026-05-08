@@ -5,6 +5,35 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-08
+
+### Added
+
+- `--help` epilogs for all 34 commands. Each command's `--help` now ends with
+  one or more concrete invocation examples plus tight notes on common
+  footguns (e.g. `set-property` vs `update-block`, `--resolve-refs` hint,
+  `--dry-run` for `replace-text`, `set-todo-status` as the preferred TODO
+  transition, deprecation of `add-journal-entry`). Reduces the LLM/agent
+  failure mode of guessing flag syntax from related tools.
+- `get-journal-range --from/--to` and `get-todos --from/--to` now accept the
+  keywords `today`, `yesterday`, and `tomorrow` in addition to `YYYY-MM-DD`.
+  Brings parity with `--date` and `--journal-date`, which already supported
+  these keywords via `parse_date_keyword`.
+
+### Fixed
+
+- `get-page --heading` now matches headings tolerantly via
+  `normalize_heading()`, so a query for `"## Tasks"` correctly returns
+  the section even if the stored block is `"## Tasks {{renderer :todomaster}}"`
+  or has extra whitespace. Previously the naive equality check caused
+  `--heading` to silently miss any Logseq journal that uses renderer macros.
+
+### Chore
+
+- Untracked 8 `.pyc` bytecode files that were accidentally committed in an
+  earlier version. `*.pyc` and `__pycache__/` were already in `.gitignore`;
+  the index is now consistent with that rule.
+
 ## [0.4.0] - 2026-05-06
 
 ### Added
