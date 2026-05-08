@@ -128,7 +128,10 @@ def cli(ctx, host, port, token, no_cache):
 # ---------------------------------------------------------------------------
 # 1. get-all-pages
 # ---------------------------------------------------------------------------
-@cli.command("get-all-pages")
+@cli.command("get-all-pages", epilog="""\b
+Example:
+  logseq-cli --token TOKEN get-all-pages --json | head
+""")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
@@ -230,7 +233,17 @@ def _extract_section(blocks, heading_text):
 # ---------------------------------------------------------------------------
 # 2. get-page
 # ---------------------------------------------------------------------------
-@cli.command("get-page")
+@cli.command("get-page", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN get-page --name "Project Alpha"
+  logseq-cli --token TOKEN get-page --name "2026-05-08, friday" --resolve-refs --with-ids
+  logseq-cli --token TOKEN get-page --name "Project Alpha" --heading "## Open Points"
+  logseq-cli --token TOKEN get-page --name A --name B    # batch read
+Notes:
+  --resolve-refs inlines ((uuid)) block-refs (saves N×get-block).
+  --with-ids prefixes each line with the block UUID (replaces --json | jq).
+  --heading returns only the matching heading-block + its children.
+""")
 @click.option("--page", "--name", required=True, multiple=True, help="Page name (repeatable for batch: --name A --name B)")
 @click.option("--no-backlinks", is_flag=True, help="Skip backlink computation")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
@@ -288,7 +301,12 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
 # ---------------------------------------------------------------------------
 # 3. get-block
 # ---------------------------------------------------------------------------
-@cli.command("get-block")
+@cli.command("get-block", epilog="""\b
+Example:
+  logseq-cli --token TOKEN get-block --id 12345678-90ab-cdef-1234-567890abcdef
+Note:
+  UUID accepts "((uuid))" or bare uuid form. Use get-page --resolve-refs for bulk.
+""")
 @click.option("--id", "block_id", required=True, help="Block UUID (with or without (()))")
 @click.option("--no-children", is_flag=True, help="Exclude child blocks")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -337,7 +355,14 @@ def get_block(ctx, block_id, no_children, as_json):
 # ---------------------------------------------------------------------------
 # 3b. find-block
 # ---------------------------------------------------------------------------
-@cli.command("find-block")
+@cli.command("find-block", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN find-block --content "Tag-Support" --page "Project Alpha" --first
+  logseq-cli --token TOKEN find-block --content "^### " --page "X" --use-regex
+Note:
+  Output gives uuid + page + content preview. Use --first to disambiguate; pipe to
+  insert-block --child-of, update-block, remove-block downstream.
+""")
 @click.option("--content", required=True, help="Content text (substring match or regex with --regex)")
 @click.option("--page", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
@@ -413,7 +438,12 @@ def find_block(ctx, content, page, use_regex, first_only, as_json):
 # ---------------------------------------------------------------------------
 # 4. search-pages
 # ---------------------------------------------------------------------------
-@cli.command("search-pages")
+@cli.command("search-pages", epilog="""\b
+Example:
+  logseq-cli --token TOKEN search-pages --query "Roadmap"
+Note:
+  Case-insensitive substring match on page names. For content search use find-block.
+""")
 @click.option("--query", required=True, help="Search query (case-insensitive)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -443,7 +473,10 @@ def search_pages(ctx, query, as_json):
 # ---------------------------------------------------------------------------
 # 5. get-backlinks
 # ---------------------------------------------------------------------------
-@cli.command("get-backlinks")
+@cli.command("get-backlinks", epilog="""\b
+Example:
+  logseq-cli --token TOKEN get-backlinks --name "Alice"
+""")
 @click.option("--page", "--name", required=True, help="Page name to find backlinks for")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -478,7 +511,13 @@ def get_backlinks(ctx, page, as_json):
 # ---------------------------------------------------------------------------
 # 6. get-journal-summary
 # ---------------------------------------------------------------------------
-@cli.command("get-journal-summary")
+@cli.command("get-journal-summary", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN get-journal-summary --range "this week"
+  logseq-cli --token TOKEN get-journal-summary --range "last month"
+Note:
+  Aggregated overview. For raw block content use get-journal-range.
+""")
 @click.option("--range", "date_range", default="today", help="Date range: today, this week, last 30 days, this month, this year")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -554,7 +593,15 @@ def _count_unresolved_refs(blocks) -> int:
 # ---------------------------------------------------------------------------
 # 6b. get-journal-range
 # ---------------------------------------------------------------------------
-@cli.command("get-journal-range")
+@cli.command("get-journal-range", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN get-journal-range --from 2026-04-20 --to 2026-04-26 --resolve-refs
+  LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli --token TOKEN get-journal-range --from 2026-01-01 --to 2026-04-30
+Notes:
+  Parallel pool (default 5 workers, 1-16 via LOGSEQ_CLI_RANGE_WORKERS).
+  Always pass --resolve-refs if downstream parses ((uuid)) refs.
+  Per-day errors embed as {error: "..."} per entry; range continues.
+""")
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD, inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD, inclusive)")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
@@ -674,7 +721,12 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
 # ---------------------------------------------------------------------------
 # 7. analyze-graph
 # ---------------------------------------------------------------------------
-@cli.command("analyze-graph")
+@cli.command("analyze-graph", epilog="""\b
+Example:
+  logseq-cli --token TOKEN analyze-graph --days 30
+Note:
+  Requires Logseq running — no filesystem fallback possible.
+""")
 @click.option("--days", default=None, type=int, help="Limit to pages modified in last N days")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -792,7 +844,10 @@ def analyze_graph(ctx, days, as_json):
 # ---------------------------------------------------------------------------
 # 8. find-knowledge-gaps
 # ---------------------------------------------------------------------------
-@cli.command("find-knowledge-gaps")
+@cli.command("find-knowledge-gaps", epilog="""\b
+Example:
+  logseq-cli --token TOKEN find-knowledge-gaps --min-refs 3 --include-orphans
+""")
 @click.option("--min-refs", default=2, type=int, help="Min references for underdeveloped detection")
 @click.option("--include-orphans/--no-orphans", default=True, help="Include orphaned pages")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -892,7 +947,10 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
 # ---------------------------------------------------------------------------
 # 9. analyze-journal-patterns
 # ---------------------------------------------------------------------------
-@cli.command("analyze-journal-patterns")
+@cli.command("analyze-journal-patterns", epilog="""\b
+Example:
+  logseq-cli --token TOKEN analyze-journal-patterns --timeframe "last 30 days" --mood --topics
+""")
 @click.option("--timeframe", default="last 30 days", help="Date range for analysis")
 @click.option("--mood/--no-mood", default=True, help="Include mood detection")
 @click.option("--topics/--no-topics", default=True, help="Include topic analysis")
@@ -1171,7 +1229,14 @@ def _print_results(results):
 # ---------------------------------------------------------------------------
 # 10. smart-query
 # ---------------------------------------------------------------------------
-@cli.command("smart-query")
+@cli.command("smart-query", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN smart-query --request "offene aufgaben"
+  logseq-cli --token TOKEN smart-query --request '[:find ?n :where [?p :block/name ?n]]' --advanced
+Note:
+  Without --advanced: keyword-template match (fragile for complex queries).
+  With --advanced: raw Datalog passes through untouched.
+""")
 @click.option("--request", required=True, help="Natural language query request (or raw Datalog with --advanced)")
 @click.option("--include-query", is_flag=True, help="Include the generated Datalog query in output")
 @click.option("--advanced", is_flag=True, help="Pass --request as raw Datalog query (bypass template matching)")
@@ -1402,7 +1467,10 @@ def smart_query(ctx, request, include_query, advanced, as_json):
 # ---------------------------------------------------------------------------
 # 11. suggest-connections
 # ---------------------------------------------------------------------------
-@cli.command("suggest-connections")
+@cli.command("suggest-connections", epilog="""\b
+Example:
+  logseq-cli --token TOKEN suggest-connections --min-confidence 0.7 --max-suggestions 10
+""")
 @click.option("--min-confidence", default=0.3, type=float, help="Minimum confidence score (0-1)")
 @click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return")
 @click.option("--focus", default=None, help="Focus on specific page/topic")
@@ -1497,7 +1565,14 @@ def suggest_connections(ctx, min_confidence, max_suggestions, focus, as_json):
 # ---------------------------------------------------------------------------
 # 12. create-page
 # ---------------------------------------------------------------------------
-@cli.command("create-page")
+@cli.command("create-page", epilog="""\b
+Example:
+  logseq-cli --token TOKEN create-page --name "Alice Example"
+Note:
+  For pages with properties, use create-page (no --content) + multiple set-property,
+  THEN add-note-content for the body. Properties via --content land as bullet-blocks
+  (NOT as real properties).
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -1523,7 +1598,10 @@ def create_page(ctx, page, content, as_json):
 # ---------------------------------------------------------------------------
 # 13. add-journal-entry
 # ---------------------------------------------------------------------------
-@cli.command("add-journal-entry")
+@cli.command("add-journal-entry", epilog="""\b
+DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
+--under-heading / --upsert-heading.
+""")
 @click.option("--content", required=True, help="Content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--as-block/--multi-block", default=True, help="Add as single block or split into multiple")
@@ -1584,7 +1662,19 @@ def add_journal_entry(ctx, content, date, as_block, as_json):
 # ---------------------------------------------------------------------------
 # 14. add-journal-block
 # ---------------------------------------------------------------------------
-@cli.command("add-journal-block")
+@cli.command("add-journal-block", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting mit [[Bob]]"
+  logseq-cli --token TOKEN add-journal-block --date 2026-05-07 --content "**14:30** Nachtrag"
+  logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" --content "..."
+  logseq-cli --token TOKEN add-journal-block --content "TODO A" --content "TODO B"   # batch
+  logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" \\
+                                              --upsert-heading "### [[Carol]]" --content "..."
+Notes:
+  Default heading from LOGSEQ_JOURNAL_HEADING env (e.g. "## Log").
+  --upsert-heading replaces a placeholder block under --under-heading without needing UUID.
+  Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
+""")
 @click.option("--content", "contents", required=True, multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
@@ -1812,7 +1902,14 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
 # ---------------------------------------------------------------------------
 # 15. add-journal-content
 # ---------------------------------------------------------------------------
-@cli.command("add-journal-content")
+@cli.command("add-journal-content", epilog="""\b
+Example:
+  logseq-cli --token TOKEN add-journal-content \\
+    --content "- ## Log\\n\\t- 14:30 Meeting [[Bob]]" --date $(date +%Y-%m-%d)
+Note:
+  Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
+  it now auto-detects hierarchy.
+""")
 @click.option("--content", required=True, help="Hierarchical content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert under this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
@@ -1896,7 +1993,15 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
 # ---------------------------------------------------------------------------
 # 16. add-note-content
 # ---------------------------------------------------------------------------
-@cli.command("add-note-content")
+@cli.command("add-note-content", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN add-note-content --page "Alice Example" --content "Body text"
+  logseq-cli --token TOKEN add-note-content --page "Project Alpha" \\
+    --under-heading "## Roadmap" --content "Phase 2 - Kickoff"
+Note:
+  Counterpart of add-journal-block --under-heading for non-journal pages.
+  Heading is created if missing.
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", required=True, help="Content to add")
 @click.option("--create/--no-create", default=True, help="Create page if it doesn't exist")
@@ -1956,7 +2061,13 @@ def add_note_content(ctx, page, content, create, under_heading, as_json):
 # --- Block editing commands ---
 
 
-@cli.command("update-block")
+@cli.command("update-block", epilog="""\b
+Example:
+  logseq-cli --token TOKEN update-block --id 12345678-... --content "Neuer Text"
+Note:
+  Use set-property/remove-property for properties — never edit them via update-block.
+  Use set-todo-status to change TODO/DOING/DONE markers.
+""")
 @click.option("--id", "block_id", required=True, help="UUID of the block to update")
 @click.option("--content", required=True, help="New content for the block")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
@@ -1987,7 +2098,12 @@ def update_block(ctx, block_id, content, as_json):
         click.echo(f"  now: {preview}")
 
 
-@cli.command("remove-block")
+@cli.command("remove-block", epilog="""\b
+Example:
+  logseq-cli --token TOKEN remove-block --id 12345678-...
+Note:
+  Destructive. Children are removed too. Check get-backlinks first if the block has id::.
+""")
 @click.option("--id", "block_id", required=True, help="UUID of the block to remove")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
@@ -2015,7 +2131,14 @@ def remove_block_cmd(ctx, block_id, as_json):
             click.echo(f"  was: {preview}")
 
 
-@cli.command("replace-text")
+@cli.command("replace-text", epilog="""\b
+Example:
+  logseq-cli --token TOKEN replace-text --page "X" --find "alt" --replace "neu" --dry-run
+  logseq-cli --token TOKEN replace-text --page "X" --find "alt" --replace "neu"
+Note:
+  ALWAYS run with --dry-run first to preview matches. Prefer set-todo-status
+  for TODO->DONE transitions and update-block for block content edits.
+""")
 @click.option("--page", "--name", required=True, help="Page name to search in")
 @click.option("--find", "find_text", required=True, help="Text to find")
 @click.option("--replace", "replace_text", required=True, help="Replacement text")
@@ -2077,7 +2200,20 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
                 click.echo(f"         →  {new_preview}")
 
 
-@cli.command("insert-block")
+@cli.command("insert-block", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN insert-block --child-of UUID --content "Sub-Block"
+  logseq-cli --token TOKEN insert-block --after UUID --content "Sibling block"
+  logseq-cli --token TOKEN insert-block --child-of UUID \\
+    --tree "Parent\\n\\tChild1\\n\\tChild2\\n\\t\\tGrandchild"
+  logseq-cli --token TOKEN insert-block --page "X" --top-level \\
+    --tree '[{"content":"...","children":[{"content":"..."}]}]'
+Notes:
+  --tree accepts tab-indented text OR JSON (auto-detected). Use it instead of
+  N×insert-block for hierarchies — single API roundtrip.
+  --content and --tree are mutually exclusive.
+  --child-of UUID also accepts hierarchical --content (same tab-indent format).
+""")
 @click.option("--page", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
 @click.option("--before", default=None, help="UUID of block to insert before (as sibling)")
@@ -2181,7 +2317,16 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
 # ---------------------------------------------------------------------------
 # 20b. add-block-ref
 # ---------------------------------------------------------------------------
-@cli.command("add-block-ref")
+@cli.command("add-block-ref", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN add-block-ref --source-id UUID --under-heading "## Tasks"
+  logseq-cli --token TOKEN add-block-ref --source-id UUID --journal-date 2026-04-23 \\
+                                          --under-heading "## Tasks"
+  logseq-cli --token TOKEN add-block-ref --source-id UUID --page "Project Alpha" \\
+                                          --under-heading "## Offene TODOs"
+Note:
+  Default target: today's journal. Auto-creates the journal page if missing.
+""")
 @click.option("--source-id", required=True, help="UUID of the block to reference")
 @click.option("--journal-date", default=None, help="Target journal date (YYYY-MM-DD), defaults to today")
 @click.option("--page", default=None, help="Target page name (alternative to --journal-date)")
@@ -2250,7 +2395,16 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
 # ---------------------------------------------------------------------------
 # 21. get-todos
 # ---------------------------------------------------------------------------
-@cli.command("get-todos")
+@cli.command("get-todos", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN get-todos --status TODO --status DOING
+  logseq-cli --token TOKEN get-todos --page "Projects" --tag urgent
+  logseq-cli --token TOKEN get-todos --from 2026-05-01 --to 2026-05-31 --include-done
+Notes:
+  --status repeatable. Default: TODO, DOING, NOW, LATER (no DONE).
+  Returns ORIGINAL blocks only — TODO Block-Refs ((uuid)) inside journals are NOT listed.
+  Plain-text output: "MARKER [Page] preview" — page name inline, no grouping needed.
+""")
 @click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
 @click.option("--page", default=None, help="Filter by page name (substring, case-insensitive)")
@@ -2359,7 +2513,17 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
 # ---------------------------------------------------------------------------
 # 21b. set-todo-status
 # ---------------------------------------------------------------------------
-@cli.command("set-todo-status")
+@cli.command("set-todo-status", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN set-todo-status --id UUID --status DONE
+  logseq-cli --token TOKEN set-todo-status --content "ship the parser" \\
+                                            --page "Project Alpha" --status DONE
+  logseq-cli --token TOKEN set-todo-status --id JOURNAL-UUID --status DONE --follow-refs
+Notes:
+  Status values: TODO, DOING, DONE, LATER, NOW, CANCELED.
+  --follow-refs: when block is a ((uuid)) ref to a project page, updates the original.
+  Prefer this over replace-text for marker changes — 1 call, deterministic.
+""")
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
 @click.option("--page", default=None, help="Page to search in (used with --content)")
@@ -2452,7 +2616,11 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, as_json):
 # ---------------------------------------------------------------------------
 # 22. get-properties
 # ---------------------------------------------------------------------------
-@cli.command("get-properties")
+@cli.command("get-properties", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN get-properties --name "Alice Example"
+  logseq-cli --token TOKEN get-properties --name "Alice" --property "team"
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--property", "prop_name", default=None, help="Get a specific property by name")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -2500,7 +2668,15 @@ def get_properties(ctx, page, prop_name, as_json):
 # ---------------------------------------------------------------------------
 # 23. set-property
 # ---------------------------------------------------------------------------
-@cli.command("set-property")
+@cli.command("set-property", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN set-property --name "Alice" --key "team" --value "[[Platform]]"
+  logseq-cli --token TOKEN set-property --name "X" --key "type" --value "Person"
+Note:
+  Properties land at page-top (above first block). NEVER use update-block for
+  properties — that creates a text-block, not a real property.
+  Verify with: get-properties --name X
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
 @click.option("--value", required=True, help="Property value")
@@ -2544,7 +2720,10 @@ def set_property(ctx, page, key, value, as_json):
 # ---------------------------------------------------------------------------
 # 24. remove-property
 # ---------------------------------------------------------------------------
-@cli.command("remove-property")
+@cli.command("remove-property", epilog="""\b
+Example:
+  logseq-cli --token TOKEN remove-property --name "X" --key "deprecated_key"
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key to remove")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -2577,7 +2756,10 @@ def remove_property(ctx, page, key, as_json):
 # ---------------------------------------------------------------------------
 # 25. set-block-property
 # ---------------------------------------------------------------------------
-@cli.command("set-block-property")
+@cli.command("set-block-property", epilog="""\b
+Example:
+  logseq-cli --token TOKEN set-block-property --id UUID --key "id" --value "abc-123"
+""")
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
 @click.option("--value", required=True, help="Property value")
@@ -2609,7 +2791,12 @@ def set_block_property(ctx, block_id, key, value, as_json):
 # ---------------------------------------------------------------------------
 # 26. rename-page
 # ---------------------------------------------------------------------------
-@cli.command("rename-page")
+@cli.command("rename-page", epilog="""\b
+Example:
+  logseq-cli --token TOKEN rename-page --name "Old Name" --new-name "New Name"
+Note:
+  Updates all [[Old Name]] references in the graph automatically.
+""")
 @click.option("--page", "--name", required=True, help="Current page name")
 @click.option("--new-name", required=True, help="New page name")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -2637,7 +2824,13 @@ def rename_page(ctx, page, new_name, as_json):
 # ---------------------------------------------------------------------------
 # 27. delete-page
 # ---------------------------------------------------------------------------
-@cli.command("delete-page")
+@cli.command("delete-page", epilog="""\b
+Example:
+  logseq-cli --token TOKEN delete-page --name "Obsolete Page" --force
+Note:
+  Destructive. Without --force, prompts for confirmation.
+  Backlinks ((uuid)) pointing to deleted blocks become dangling.
+""")
 @click.option("--page", "--name", required=True, help="Page name to delete")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -2671,7 +2864,14 @@ def delete_page(ctx, page, force, as_json):
 # ---------------------------------------------------------------------------
 # 28. query-pages-by-property
 # ---------------------------------------------------------------------------
-@cli.command("query-pages-by-property")
+@cli.command("query-pages-by-property", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN query-pages-by-property --key "type" --value "Person"
+  logseq-cli --token TOKEN query-pages-by-property --key "team"
+Note:
+  Without --value: lists all pages that have the key (with their values).
+  With --value: exact-match filter.
+""")
 @click.option("--key", required=True, help="Property key to filter by (e.g. 'type', 'team', 'role')")
 @click.option("--value", default=None, help="Property value to match (omit to find all pages with this key)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -2750,7 +2950,13 @@ def query_pages_by_property(ctx, key, value, as_json):
 # ---------------------------------------------------------------------------
 # 29. copy-block
 # ---------------------------------------------------------------------------
-@cli.command("copy-block")
+@cli.command("copy-block", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page"
+  logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page" --remove
+Note:
+  Copies block + all children. With --remove: original is deleted (move).
+""")
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
 @click.option("--remove", is_flag=True, help="Remove source block after copying (move)")
@@ -2800,7 +3006,12 @@ def copy_block(ctx, block_id, to_page, remove, as_json):
 # ---------------------------------------------------------------------------
 # 30. get-page-stats
 # ---------------------------------------------------------------------------
-@cli.command("get-page-stats")
+@cli.command("get-page-stats", epilog="""\b
+Example:
+  logseq-cli --token TOKEN get-page-stats --name "Alice"
+Note:
+  Shows blocks, words, inbound/outbound link counts.
+""")
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
