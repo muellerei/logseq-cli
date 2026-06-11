@@ -5,6 +5,8 @@ import sys
 import datetime
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+from pathlib import Path
 
 import click
 import requests
@@ -22,11 +24,21 @@ from logseq_cli.helpers import (
     parse_hierarchical_content,
     parse_tree_input,
     contains_hierarchical_content,
+    has_mixed_indentation,
+    normalize_indentation,
     insert_formatted_content,
     find_or_create_heading,
     insert_block_tree,
     insert_block_tree_with_uuids,
+    insert_block_tree_as_siblings,
     insert_block_tree_at_page_top,
+    insert_formatted_content_with_uuids,
+    block_uuid_from_result,
+    require_insert,
+    parse_property_pairs,
+    apply_block_properties,
+    coerce_property_value,
+    uuid_fields,
     normalize_heading,
     extract_page_links,
     extract_topics,
@@ -109,8 +121,30 @@ def _swap_todo_marker(content: str, new_status: str) -> str:
     return f"{new_status} {content}"
 
 
+def _resolve_version() -> str:
+    """Single source of truth for the CLI version.
+
+    Reads pyproject.toml when running from a source checkout (the authoritative
+    value during development), else falls back to the installed package metadata.
+    Avoids the stale hardcoded-version drift that previously made --version lie.
+    """
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    try:
+        for line in pyproject.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("version"):
+                # version = "0.5.0"
+                return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    try:
+        return _pkg_version("logseq-cli")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 @click.group()
-@click.version_option(version="0.3.0", prog_name="logseq-cli")
+@click.version_option(version=_resolve_version(), prog_name="logseq-cli")
 @click.option("--host", default=None, help="Logseq API host (default: 127.0.0.1)")
 @click.option("--port", default=None, help="Logseq API port (default: 12315)")
 @click.option("--token", default=None, help="Logseq API Bearer token")
@@ -362,13 +396,13 @@ def get_block(ctx, block_id, no_children, as_json):
 @cli.command("find-block", epilog="""\b
 Examples:
   logseq-cli --token TOKEN find-block --content "Tag-Support" --page "Project Alpha" --first
-  logseq-cli --token TOKEN find-block --content "^### " --page "X" --use-regex
+  logseq-cli --token TOKEN find-block --content "^### " --page "X" --regex
 Note:
   Output gives uuid + page + content preview. Use --first to disambiguate; pipe to
   insert-block --child-of, update-block, remove-block downstream.
 """)
 @click.option("--content", required=True, help="Content text (substring match or regex with --regex)")
-@click.option("--page", default=None, help="Restrict search to this page name")
+@click.option("--page", "--name", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
 @click.option("--first", "first_only", is_flag=True, help="Output only the first match")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -478,38 +512,47 @@ def search_pages(ctx, query, as_json):
 # 5. get-backlinks
 # ---------------------------------------------------------------------------
 @cli.command("get-backlinks", epilog="""\b
-Example:
+Examples:
   logseq-cli --token TOKEN get-backlinks --name "Alice"
+  logseq-cli --token TOKEN get-backlinks --name "Alice" --name "Bob"    # batch
 """)
-@click.option("--page", "--name", required=True, help="Page name to find backlinks for")
+@click.option("--page", "--name", required=True, multiple=True, help="Page name to find backlinks for (repeatable for batch: --name A --name B)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
 def get_backlinks(ctx, page, as_json):
-    """Find pages that link to the given page (uses native Logseq API)."""
+    """Find pages that link to the given page(s) (uses native Logseq API). Pass --name multiple times for batch."""
     api = ctx.obj["api"]
-    try:
-        refs = api.get_page_linked_references(page)
-        backlinks = _extract_backlink_names(refs) if refs else []
-    except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
-        backlinks = find_backlinks(api, page)
-    except Exception as e:
-        click.echo(f"Warning: Native backlinks API returned unexpected format ({e}), trying brute-force...", err=True)
+
+    def _fetch_one(page_name):
         try:
-            backlinks = find_backlinks(api, page)
-        except Exception:
-            backlinks = []
+            refs = api.get_page_linked_references(page_name)
+            return _extract_backlink_names(refs) if refs else []
+        except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
+            return find_backlinks(api, page_name)
+        except Exception as e:
+            click.echo(f"Warning: Native backlinks API returned unexpected format ({e}), trying brute-force...", err=True)
+            try:
+                return find_backlinks(api, page_name)
+            except Exception:
+                return []
+
+    results = [{"page": p, "backlinks": (bl := _fetch_one(p)), "count": len(bl)} for p in page]
 
     if as_json:
-        output({"page": page, "backlinks": backlinks, "count": len(backlinks)}, True)
+        output(results if len(results) > 1 else results[0], True)
     else:
-        if not backlinks:
-            click.echo(f"No backlinks found for '{page}'.")
-        else:
-            click.echo(f"Backlinks to '{page}' ({len(backlinks)}):")
-            for bl in backlinks:
-                click.echo(f"  <- {bl}")
+        for result in results:
+            p, backlinks = result["page"], result["backlinks"]
+            if not backlinks:
+                click.echo(f"No backlinks found for '{p}'.")
+            else:
+                click.echo(f"Backlinks to '{p}' ({len(backlinks)}):")
+                for bl in backlinks:
+                    click.echo(f"  <- {bl}")
+            if len(results) > 1:
+                click.echo()
 
 
 # ---------------------------------------------------------------------------
@@ -1727,28 +1770,55 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
         if not existing:
             api.create_page(page_name, {"journal?": True})
 
+        # Plan each --content value the same way for dry-run and live, so the
+        # reported block count matches what is actually written (a value with
+        # tab sub-bullets expands to a header + children, not one flat block).
+        planned = []  # list of (kind, payload) where kind in {"tree", "flat"}
+        any_hierarchical = False
+        for c in contents:
+            c = strip_title_heading(c, page_name)
+            if preserve_formatting and contains_hierarchical_content(c):
+                any_hierarchical = True
+                planned.append(("tree", parse_hierarchical_content(c)))
+            else:
+                if has_mixed_indentation(c):
+                    c = normalize_indentation(c)
+                planned.append(("flat", c))
+        planned_total = sum(count_blocks(p) if k == "tree" else 1 for k, p in planned)
+
         if dry_run:
             if as_json:
-                output({"page": page_name, "date": str(d), "contents": list(contents), "dry_run": True}, True)
+                output({"page": page_name, "date": str(d), "blocks": planned_total, "contents": list(contents), "dry_run": True}, True)
             else:
-                click.echo(f"[DRY RUN] Would add {len(contents)} block(s) to journal: {page_name}")
+                if any_hierarchical:
+                    click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
+                click.echo(f"[DRY RUN] Would add {planned_total} block(s) to journal: {page_name}")
                 for c in contents:
                     click.echo(f"  {c[:80]}")
             return
 
         heading_uuid = find_or_create_heading(api, page_name, under_heading) if under_heading else None
-        total = 0
-        for c in contents:
-            c = strip_title_heading(c, page_name)
-            if heading_uuid:
-                api.insert_block(heading_uuid, c, {"sibling": False})
+        uuids = []
+        for kind, payload in planned:
+            if kind == "tree":
+                if heading_uuid:
+                    uuids.extend(insert_block_tree_with_uuids(api, payload, heading_uuid, strict=True))
+                else:
+                    # payload is the parsed tree; insert top nodes + children at page level
+                    uuids.extend(insert_block_tree_at_page_top(api, payload, page_name))
             else:
-                api.append_block_in_page(page_name, c)
-            total += 1
+                if heading_uuid:
+                    r = api.insert_block(heading_uuid, payload, {"sibling": False})
+                else:
+                    r = api.append_block_in_page(page_name, payload)
+                uuids.append(require_insert(r, "a journal block"))
+        total = len(uuids)
+        if any_hierarchical:
+            click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
 
         position = f"under '{under_heading}'" if under_heading else "top-level"
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks_added": total}, True)
+            output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)
         else:
             click.echo(f"Added {total} block(s) to journal: {page_name} ({position})")
         return
@@ -1805,6 +1875,7 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
                     break
 
         if found_uuid:
+            root_uuid = found_uuid
             if contains_hierarchical_content(content):
                 tree = parse_hierarchical_content(content)
                 if tree:
@@ -1822,19 +1893,23 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
         elif heading_uuid:
             if contains_hierarchical_content(content):
                 tree = parse_hierarchical_content(content)
-                n = insert_block_tree(api, tree, heading_uuid)
+                created = insert_block_tree_with_uuids(api, tree, heading_uuid)
+                n = len(created)
+                root_uuid = created[0] if created else None
             else:
-                api.insert_block(heading_uuid, content, {"sibling": False})
+                r = api.insert_block(heading_uuid, content, {"sibling": False})
                 n = 1
+                root_uuid = r.get("uuid") if isinstance(r, dict) else None
             status = "created"
         else:
-            api.append_block_in_page(page_name, content)
+            r = api.append_block_in_page(page_name, content)
             n = 1
+            root_uuid = r.get("uuid") if isinstance(r, dict) else None
             status = "top-level (heading not found)"
 
         position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks": n}, True)
+            output({"page": page_name, "date": str(d), "position": position, "blocks": n, **uuid_fields([u for u in [root_uuid] if u])}, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
         return
@@ -1857,16 +1932,17 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
         if under_heading:
             heading_uuid = find_or_create_heading(api, page_name, under_heading)
             if heading_uuid:
-                n = insert_block_tree(api, tree, heading_uuid)
+                uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
             else:
                 click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-                n = insert_formatted_content(api, page_name, content)
+                uuids = insert_formatted_content_with_uuids(api, page_name, content)
                 position = "top-level (heading not found)"
         else:
-            n = insert_formatted_content(api, page_name, content)
+            uuids = insert_formatted_content_with_uuids(api, page_name, content)
 
+        n = len(uuids)
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks_added": n}, True)
+            output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, **uuid_fields(uuids)}, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
         return
@@ -1894,7 +1970,8 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
         position = "top-level"
 
     if as_json:
-        output({"page": page_name, "date": str(d), "position": position, "result": result}, True)
+        _u = result.get("uuid") if isinstance(result, dict) else (result if isinstance(result, str) else None)
+        output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([u for u in [_u] if u])}, True)
     else:
         click.echo(f"Added block to journal: {page_name} ({position})")
         click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
@@ -1977,16 +2054,17 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
             tree = parse_hierarchical_content(content)
-            n = insert_block_tree(api, tree, heading_uuid)
+            uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
         else:
             click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-            n = insert_formatted_content(api, page_name, content)
+            uuids = insert_formatted_content_with_uuids(api, page_name, content)
             position = "top-level (heading not found)"
     else:
-        n = insert_formatted_content(api, page_name, content)
+        uuids = insert_formatted_content_with_uuids(api, page_name, content)
 
+    n = len(uuids)
     if as_json:
-        output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, "content_added": True}, True)
+        output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, "content_added": True, **uuid_fields(uuids)}, True)
     else:
         click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
 
@@ -2007,12 +2085,23 @@ Note:
 @click.option("--content", required=True, help="Content to add")
 @click.option("--create/--no-create", default=True, help="Create page if it doesn't exist")
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
+@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_note_content(ctx, page, content, create, under_heading, as_json):
+def add_note_content(ctx, page, content, create, under_heading, properties, as_json):
     """Add content to any page."""
     api = ctx.obj["api"]
+
+    # Validate property pairs up-front so a bad pair fails before any write.
+    try:
+        parse_property_pairs(properties)
+    except ValueError as e:
+        if as_json:
+            output({"error": str(e)}, True)
+        else:
+            click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
     # Check if page exists
     existing = None
@@ -2039,11 +2128,21 @@ def add_note_content(ctx, page, content, create, under_heading, as_json):
             click.echo(f"Failed to find or create heading '{under_heading}' on '{page}'", err=True)
             sys.exit(1)
         tree = parse_hierarchical_content(content)
-        n = insert_block_tree(api, tree, heading_uuid)
+        uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
         position = f"under '{under_heading}' on '{page}'"
     else:
-        n = insert_formatted_content(api, page, content)
+        uuids = insert_formatted_content_with_uuids(api, page, content)
         position = page
+
+    n = len(uuids)
+    root_uuid = uuids[0] if uuids else None
+
+    applied = {}
+    if properties:
+        if root_uuid:
+            applied = apply_block_properties(api, root_uuid, properties)
+        else:
+            click.echo("Warning: no block created, --property ignored", err=True)
 
     if as_json:
         output({
@@ -2052,11 +2151,17 @@ def add_note_content(ctx, page, content, create, under_heading, as_json):
             "blocks_added": n,
             "content_added": True,
             "under_heading": under_heading,
+            **uuid_fields(uuids),
+            "properties": applied,
         }, True)
     else:
         if existing is None:
             click.echo(f"Created page: {page}")
         click.echo(f"Added {n} block(s) to {position}")
+        if root_uuid:
+            click.echo(f"  uuid: {root_uuid}")
+        for key, value in applied.items():
+            click.echo(f"  {key}:: {value}")
 
 
 # --- Block editing commands ---
@@ -2215,19 +2320,31 @@ Notes:
   --content and --tree are mutually exclusive.
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
 """)
-@click.option("--page", default=None, help="Page name (append to end of page)")
+@click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
 @click.option("--before", default=None, help="UUID of block to insert before (as sibling)")
 @click.option("--child-of", default=None, help="UUID of parent block (insert as child)")
 @click.option("--top-level", is_flag=True, help="With --page and --tree: insert at page top-level")
 @click.option("--content", default=None, help="Content for the new block")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
+@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
+@click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tree_input, as_json):
+def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tree_input, properties, dry_run, as_json):
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
+
+    # Validate property pairs up-front so a bad pair fails before any write.
+    try:
+        parse_property_pairs(properties)
+    except ValueError as e:
+        if as_json:
+            output({"error": str(e)}, True)
+        else:
+            click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
     if tree_input is not None:
         if content is not None:
@@ -2238,30 +2355,60 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
             click.echo("Tree input is empty.", err=True)
             sys.exit(1)
 
+        # Resolve target + position first (no writes), so --dry-run can report
+        # the plan and bail before touching the graph.
         if child_of:
             clean_id = child_of.strip().replace("((", "").replace("))", "")
-            uuids = insert_block_tree_with_uuids(api, tree, clean_id)
             position = f"child of {clean_id[:8]}..."
+            do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+        elif after:
+            clean_id = after.strip().replace("((", "").replace("))", "")
+            position = f"after {clean_id[:8]}..."
+            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=False)
+        elif before:
+            clean_id = before.strip().replace("((", "").replace("))", "")
+            position = f"before {clean_id[:8]}..."
+            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=True)
         elif page and top_level:
-            uuids = insert_block_tree_at_page_top(api, tree, page)
             position = f"top-level of '{page}'"
+            do_insert = lambda: insert_block_tree_at_page_top(api, tree, page)
         else:
             click.echo(
-                "Tree insert requires --child-of UUID or --page NAME --top-level",
+                "Tree insert requires --child-of, --after, --before, or --page NAME --top-level",
                 err=True,
             )
             sys.exit(1)
 
+        if dry_run:
+            planned = count_blocks(tree)
+            if as_json:
+                output({"position": position, "blocks": planned, "dry_run": True}, True)
+            else:
+                click.echo(f"[DRY RUN] Would insert {planned} block(s) {position}")
+            return
+
+        uuids = do_insert()
+        root_uuid = uuids[0] if uuids else None
+        applied = {}
+        if properties:
+            if root_uuid:
+                applied = apply_block_properties(api, root_uuid, properties)
+            else:
+                click.echo("Warning: no block created, --property ignored", err=True)
+
         if as_json:
             output({
                 "position": position,
-                "uuids": uuids,
+                **uuid_fields(uuids),
                 "blocks_added": len(uuids),
+                "properties": applied,
             }, True)
         else:
             click.echo(f"Inserted {len(uuids)} block(s) {position}")
             for u in uuids:
                 click.echo(f"  uuid: {u}")
+            for key, value in applied.items():
+                click.echo(f"  {key}:: {value}")
         return
 
     if content is None:
@@ -2278,41 +2425,89 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
 
     result = None
     position = ""
+    new_uuid = None
+    hierarchical = contains_hierarchical_content(content)
+
+    if dry_run:
+        planned = count_blocks(parse_hierarchical_content(content)) if hierarchical else 1
+        target = page or (f"after {after[:8]}..." if after else
+                          f"before {before[:8]}..." if before else
+                          f"child of {child_of[:8]}...")
+        target_desc = f"end of '{page}'" if page else target
+        if as_json:
+            output({"position": target_desc, "blocks": planned, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would insert {planned} block(s) {target_desc}")
+        return
 
     if page:
-        result = api.append_block_in_page(page, content)
-        position = f"end of '{page}'"
+        if hierarchical:
+            tree = parse_hierarchical_content(content)
+            uuids = insert_formatted_content_with_uuids(api, page, content)
+            new_uuid = uuids[0] if uuids else None
+            result = {"blocks_added": len(uuids), "uuids": uuids}
+            position = f"end of '{page}' ({len(uuids)} block(s))"
+        else:
+            result = api.append_block_in_page(page, content)
+            new_uuid = require_insert(result, f"a block in '{page}'")
+            position = f"end of '{page}'"
     elif after:
         clean_id = after.strip().replace("((", "").replace("))", "")
-        result = api.insert_block(clean_id, content, {"sibling": True, "before": False})
-        position = f"after {clean_id[:8]}..."
+        if hierarchical:
+            tree = parse_hierarchical_content(content)
+            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False)
+            new_uuid = uuids[0] if uuids else None
+            result = {"blocks_added": len(uuids), "uuids": uuids}
+            position = f"after {clean_id[:8]}... ({len(uuids)} block(s))"
+        else:
+            result = api.insert_block(clean_id, content, {"sibling": True, "before": False})
+            new_uuid = require_insert(result, f"a block after {clean_id[:8]}...")
+            position = f"after {clean_id[:8]}..."
     elif before:
         clean_id = before.strip().replace("((", "").replace("))", "")
-        result = api.insert_block(clean_id, content, {"sibling": True, "before": True})
-        position = f"before {clean_id[:8]}..."
+        if hierarchical:
+            tree = parse_hierarchical_content(content)
+            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True)
+            new_uuid = uuids[0] if uuids else None
+            result = {"blocks_added": len(uuids), "uuids": uuids}
+            position = f"before {clean_id[:8]}... ({len(uuids)} block(s))"
+        else:
+            result = api.insert_block(clean_id, content, {"sibling": True, "before": True})
+            new_uuid = require_insert(result, f"a block before {clean_id[:8]}...")
+            position = f"before {clean_id[:8]}..."
     elif child_of:
         clean_id = child_of.strip().replace("((", "").replace("))", "")
-        if contains_hierarchical_content(content):
+        if hierarchical:
             tree = parse_hierarchical_content(content)
-            n = insert_block_tree(api, tree, clean_id)
-            result = {"blocks_added": n}
-            position = f"child of {clean_id[:8]}... ({n} block(s))"
+            uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+            new_uuid = uuids[0] if uuids else None
+            result = {"blocks_added": len(uuids), "uuids": uuids}
+            position = f"child of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = api.insert_block(clean_id, content, {"sibling": False})
+            new_uuid = require_insert(result, f"a child of {clean_id[:8]}...")
             position = f"child of {clean_id[:8]}..."
 
-    new_uuid = None
-    if isinstance(result, dict):
+    if new_uuid is None and isinstance(result, dict):
         new_uuid = result.get("uuid")
 
+    applied = {}
+    if properties:
+        if new_uuid:
+            applied = apply_block_properties(api, new_uuid, properties)
+        else:
+            click.echo("Warning: no block uuid returned, --property ignored", err=True)
+
     if as_json:
-        output({"position": position, "content": content, "uuid": new_uuid, "result": result}, True)
+        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u])}, True)
     else:
         click.echo(f"Inserted block {position}")
         preview = content[:80] + ("..." if len(content) > 80 else "")
         click.echo(f"  {preview}")
         if new_uuid:
             click.echo(f"  uuid: {new_uuid}")
+        for key, value in applied.items():
+            click.echo(f"  {key}:: {value}")
 
 
 # ---------------------------------------------------------------------------
@@ -2330,7 +2525,7 @@ Note:
 """)
 @click.option("--source-id", required=True, help="UUID of the block to reference")
 @click.option("--journal-date", default=None, help="Target journal date (YYYY-MM-DD), defaults to today")
-@click.option("--page", default=None, help="Target page name (alternative to --journal-date)")
+@click.option("--page", "--name", default=None, help="Target page name (alternative to --journal-date)")
 @click.option("--under-heading", default=None, help="Insert under this heading. Defaults to LOGSEQ_JOURNAL_HEADING env var, or top-level.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -2408,7 +2603,7 @@ Notes:
 """)
 @click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
-@click.option("--page", default=None, help="Filter by page name (substring, case-insensitive)")
+@click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
 @click.option("--from", "from_date", default=None, help="Only TODOs from journal pages on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
 @click.option("--to", "to_date", default=None, help="Only TODOs from journal pages on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
@@ -2530,7 +2725,7 @@ Notes:
 """)
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
-@click.option("--page", default=None, help="Page to search in (used with --content)")
+@click.option("--page", "--name", default=None, help="Page to search in (used with --content)")
 @click.option("--status", required=True,
               type=click.Choice(["TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED"]),
               help="New task status")
@@ -2695,22 +2890,16 @@ def set_property(ctx, page, key, value, as_json):
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
         click.echo(f"Error: Page '{page}' not found or has no blocks", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
     first_block = blocks[0]
     block_uuid = first_block.get("uuid")
     if not block_uuid:
         click.echo("Error: Could not find block UUID", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
-    # Auto-detect value type: try int, then float, then keep as string
-    try:
-        value = int(value)
-    except ValueError:
-        try:
-            value = float(value)
-        except ValueError:
-            pass  # keep as string
+    # Auto-detect value type (shared with set-block-property / --property)
+    value = coerce_property_value(value)
 
     api.upsert_block_property(str(block_uuid), key, value)
 
@@ -2740,13 +2929,13 @@ def remove_property(ctx, page, key, as_json):
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
         click.echo(f"Error: Page '{page}' not found or has no blocks", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
     first_block = blocks[0]
     block_uuid = first_block.get("uuid")
     if not block_uuid:
         click.echo("Error: Could not find block UUID", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
     api.remove_block_property(str(block_uuid), key)
 
@@ -2774,14 +2963,8 @@ def set_block_property(ctx, block_id, key, value, as_json):
     """Set or update a property on a specific block."""
     api = ctx.obj["api"]
 
-    # Auto-detect value type
-    try:
-        value = int(value)
-    except ValueError:
-        try:
-            value = float(value)
-        except ValueError:
-            pass
+    # Auto-detect value type (shared coercion with the inline --property option)
+    value = coerce_property_value(value)
 
     api.upsert_block_property(block_id, key, value)
 
@@ -2814,7 +2997,7 @@ def rename_page(ctx, page, new_name, as_json):
     page_data = api.get_page(page)
     if not page_data:
         click.echo(f"Error: Page '{page}' not found", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
     api.rename_page(page, new_name)
 
@@ -2848,7 +3031,7 @@ def delete_page(ctx, page, force, as_json):
     page_data = api.get_page(page)
     if not page_data:
         click.echo(f"Error: Page '{page}' not found", err=True)
-        raise SystemExit(1)
+        sys.exit(1)
 
     # Confirmation unless --force
     if not force and not as_json:

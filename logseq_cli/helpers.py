@@ -282,12 +282,58 @@ def contains_hierarchical_content(content: str) -> bool:
     return bool(re.search(r'\n[\t ]+- ', content))
 
 
+def has_mixed_indentation(content: str) -> bool:
+    """True if any indented line mixes tabs and spaces in its leading whitespace.
+
+    Logseq's block model requires tab-only indentation; a ``\\t  \\t`` style
+    prefix breaks the outline. This catches a content string that would write
+    such a line, so callers can reject or normalize it instead of silently
+    persisting a broken block.
+    """
+    for line in content.split("\n"):
+        lead = line[:len(line) - len(line.lstrip(" \t"))]
+        if "\t" in lead and " " in lead:
+            return True
+    return False
+
+
+def normalize_indentation(content: str) -> str:
+    """Rewrite each line's leading whitespace to tabs only (2 spaces = 1 tab).
+
+    Mirrors the tab/space counting in :func:`parse_hierarchical_content` so a
+    string with mixed or space-based indentation is coerced to the tab-only
+    form Logseq expects, without changing the (non-leading) line text.
+    """
+    out = []
+    for line in content.split("\n"):
+        raw = line
+        level = 0
+        i = 0
+        while i < len(raw):
+            if raw[i] == '\t':
+                level += 1
+                i += 1
+            elif raw[i] == ' ':
+                spaces = 0
+                while i < len(raw) and raw[i] == ' ':
+                    spaces += 1
+                    i += 1
+                level += spaces // 2
+            else:
+                break
+        out.append('\t' * level + raw[i:])
+    return "\n".join(out)
+
+
 def parse_hierarchical_content(content: str) -> list:
     """Parse indented content into a block tree.
 
     Each line becomes a block. Indentation (tab or 2 spaces) creates children.
-    Leading '- ' is stripped from each line.
+    Leading '- ' is stripped from each line. Mixed tab/space indentation is
+    normalized to tab-only first, so a node's leading whitespace can never
+    carry the ``\\t  \\t`` form that would break Logseq's outline.
     """
+    content = normalize_indentation(content)
     lines = content.split("\n")
     root = []
     stack = [(root, -1)]  # (children_list, indent_level)
@@ -364,14 +410,18 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 def normalize_heading(text: str) -> str:
     """Normalize a heading string for comparison.
 
-    Strips trailing Logseq renderer macros (e.g. ``{{renderer :todomaster}}``)
-    and collapses whitespace so equivalent headings compare equal regardless
-    of decoration. Enables matching ``## Tasks`` against an existing block
-    ``## Tasks {{renderer :todomaster}}``.
+    Uses only the first line: a heading block can carry trailing Logseq
+    block-properties (``id::``, ``collapsed::``, ...) on the lines *after* the
+    heading text, so the heading itself is line one. Then strips trailing renderer
+    macros (e.g. ``{{renderer :todomaster}}``) and collapses whitespace, so
+    equivalent headings compare equal regardless of decoration. Enables matching
+    ``## Tasks`` against ``## Tasks {{renderer :todomaster}}`` or against
+    ``## Focus Topics W24\nid:: fedcba98-...\ncollapsed:: true``.
     """
     if not text:
         return ""
-    stripped = _HEADING_SUFFIX_RE.sub('', text.strip())
+    first_line = text.strip().split('\n', 1)[0]
+    stripped = _HEADING_SUFFIX_RE.sub('', first_line)
     return ' '.join(stripped.split())
 
 
@@ -453,24 +503,93 @@ def parse_tree_input(raw: str) -> list:
     return parse_hierarchical_content(raw)
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str) -> list:
+def block_uuid_from_result(result):
+    """Extract a block UUID from a Logseq insert/append API result.
+
+    The API returns a block map ``{"uuid": "...", ...}`` on success, a bare
+    UUID string in some paths, or ``None`` when the operation silently failed
+    (e.g. an unknown anchor UUID — the API answers HTTP 200 with ``null``).
+    Returns the UUID string or ``None``.
+    """
+    if isinstance(result, dict):
+        return result.get("uuid")
+    if isinstance(result, str):
+        return result
+    return None
+
+
+def require_insert(result, what: str) -> str:
+    """Return the UUID of a just-inserted block, or abort loudly.
+
+    The Logseq API answers a failed insert/append with HTTP 200 + ``null``
+    instead of an error status, so a missing UUID is the only failure signal.
+    Callers that must not continue on a silent write failure use this to turn
+    that ``null`` into a non-zero exit with a clear message, rather than
+    reporting a phantom success.
+    """
+    uuid = block_uuid_from_result(result)
+    if not uuid:
+        raise click.ClickException(
+            f"Logseq did not create {what} (API returned no block UUID). "
+            "Likely cause: the target/anchor UUID does not exist, or the page "
+            "is not loaded. Nothing was written."
+        )
+    return uuid
+
+
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = False) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
-    children, siblings in declaration order).
+    children, siblings in declaration order). With ``strict=True`` a silent
+    write failure (``null`` result) aborts via :func:`require_insert` instead
+    of pushing a ``None`` UUID and skipping that block's children.
     """
     uuids = []
     for block in tree:
         result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
-        new_uuid = None
-        if isinstance(result, dict):
-            new_uuid = result.get("uuid")
-        elif isinstance(result, str):
-            new_uuid = result
+        if strict:
+            new_uuid = require_insert(result, "a block")
+        else:
+            new_uuid = block_uuid_from_result(result)
         uuids.append(new_uuid)
         children = block.get("children") or []
         if new_uuid and children:
-            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid))
+            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, strict=strict))
+    return uuids
+
+
+def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True) -> list:
+    """Insert a parsed tree as sibling(s) after (or before) ``anchor_uuid``.
+
+    The first top-level node is inserted as a sibling of the anchor; its
+    children are nested beneath it; each further top-level node is inserted as
+    a sibling after the previous top-level node, preserving declaration order.
+    This is the ``--after``/``--before`` counterpart to
+    :func:`insert_block_tree_with_uuids` (which only nests under a parent).
+
+    Returns inserted UUIDs in DFS pre-order. ``strict`` (default True) aborts
+    on a silent write failure rather than orphaning the remaining nodes.
+    """
+    uuids = []
+    cursor = anchor_uuid
+    for block in tree:
+        result = api.insert_block(cursor, block["content"], {"sibling": True, "before": before})
+        if strict:
+            new_uuid = require_insert(result, "a block")
+        else:
+            new_uuid = block_uuid_from_result(result)
+        uuids.append(new_uuid)
+        if not new_uuid:
+            # non-strict and the insert failed: stop walking this chain
+            break
+        children = block.get("children") or []
+        if children:
+            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, strict=strict))
+        # When inserting "before", keep each new top node before the anchor in
+        # order by advancing the cursor to the node just placed; when "after",
+        # the next sibling must follow the one we just inserted.
+        cursor = new_uuid
     return uuids
 
 
@@ -514,6 +633,86 @@ def insert_block_tree(api, tree: list, parent_uuid: str) -> int:
             if child_uuid:
                 n += insert_block_tree(api, block["children"], child_uuid)
     return n
+
+
+def insert_formatted_content_with_uuids(api, page_name: str, content: str) -> list:
+    """Like ``insert_formatted_content`` but returns the inserted block UUIDs.
+
+    Top-level nodes are appended to the page; children use insert_block.
+    Returns UUIDs in DFS pre-order (parent before children).
+    """
+    tree = parse_hierarchical_content(content)
+    uuids = []
+
+    def insert_tree(blocks, parent_uuid=None):
+        for block in blocks:
+            if parent_uuid:
+                result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
+            else:
+                result = api.append_block_in_page(page_name, block["content"])
+            new_uuid = None
+            if isinstance(result, dict):
+                new_uuid = result.get("uuid")
+            elif isinstance(result, str):
+                new_uuid = result
+            uuids.append(new_uuid)
+            if new_uuid and block["children"]:
+                insert_tree(block["children"], new_uuid)
+
+    insert_tree(tree)
+    return uuids
+
+
+def coerce_property_value(value: str):
+    """Coerce a property value string to int/float when possible, else leave as str.
+
+    Single source of truth for property-value typing (shared by set-block-property
+    and the inline --property option).
+    """
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return value
+
+
+def parse_property_pairs(pairs) -> list:
+    """Parse ('key=value', ...) strings into [(key, coerced_value), ...].
+
+    Splits on the FIRST '=' only, so values may contain '=', commas and spaces
+    (e.g. ``tags=mcp, agents``). Raises ValueError on a missing '=' or empty key.
+    """
+    out = []
+    for raw in pairs:
+        if "=" not in raw:
+            raise ValueError(f"Invalid --property '{raw}', expected KEY=VALUE")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Invalid --property '{raw}', empty key")
+        out.append((key, coerce_property_value(value)))
+    return out
+
+
+def apply_block_properties(api, block_uuid: str, pairs) -> dict:
+    """Upsert parsed KEY=VALUE pairs onto a block. Returns the applied {key: value}."""
+    applied = {}
+    for key, value in parse_property_pairs(pairs):
+        api.upsert_block_property(block_uuid, key, value)
+        applied[key] = value
+    return applied
+
+
+def uuid_fields(uuids: list) -> dict:
+    """Standard {uuid, uuids} pair for command JSON output.
+
+    uuid = root/first created block (or None); uuids = all created in DFS pre-order.
+    Single source of truth for the creation-command output shape so add-note-content,
+    insert-block, add-journal-block and add-journal-content stay consistent.
+    """
+    return {"uuid": uuids[0] if uuids else None, "uuids": list(uuids)}
 
 
 def extract_page_links(text: str) -> list:
