@@ -2987,9 +2987,26 @@ def get_properties(ctx, page, prop_name, as_json):
     if not page_data:
         fail(f"Page '{page}' not found.", as_json=as_json, page=page)
 
-    properties = page_data.get("properties", {})
-    text_values = page_data.get("propertiesTextValues", {})
+    properties = page_data.get("properties") or {}
+    text_values = page_data.get("propertiesTextValues") or {}
     page_name = page_data.get("originalName") or page_data.get("name", page)
+
+    # Logseq does not always expose page properties on the page object itself:
+    # for pages written via set-property they live on the first block instead
+    # (the property block). Without this fallback the command reported
+    # "No properties" for pages whose properties were perfectly intact on disk,
+    # which is what made set-property look like it had silently failed.
+    if not properties:
+        try:
+            blocks = api.get_page_blocks_tree(page) or []
+        except Exception:
+            blocks = []
+        if blocks:
+            first = blocks[0] or {}
+            block_props = first.get("properties") or {}
+            if block_props:
+                properties = block_props
+                text_values = first.get("propertiesTextValues") or text_values
 
     if prop_name:
         prop_lower = prop_name.lower()

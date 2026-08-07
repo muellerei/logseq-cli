@@ -105,3 +105,52 @@ class TestDeleteBlockAlias:
         api.get_block.return_value = {"uuid": "u1", "content": "x"}
         via_canonical = runner.invoke(cli, ["remove-block", "--id", "u1", "--dry-run", "--json"])
         assert json.loads(via_alias.stdout) == json.loads(via_canonical.stdout)
+
+
+class TestGetPropertiesFallback:
+    """Page properties may live on the first block, not on the page object.
+
+    Logseq exposes properties written via set-property on the page's first
+    block (the property block) while page_data["properties"] stays empty.
+    Reading only the page object made get-properties report "No properties"
+    for pages whose properties were perfectly intact on disk — which in turn
+    made set-property look like it had silently failed.
+    """
+
+    def test_falls_back_to_first_block(self, api):
+        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page_blocks_tree.return_value = [
+            {"uuid": "p", "content": "type:: Person\nstatus:: Active",
+             "properties": {"type": "Person", "status": "Active"}},
+            {"uuid": "b", "content": "Body", "properties": {}},
+        ]
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["properties"] == {"type": "Person", "status": "Active"}
+
+    def test_single_property_via_fallback(self, api):
+        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page_blocks_tree.return_value = [
+            {"uuid": "p", "content": "type:: Person", "properties": {"type": "Person"}}]
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X",
+                                          "--property", "type"])
+        assert result.exit_code == 0
+        assert "Person" in result.output
+
+    def test_page_level_properties_still_win(self, api):
+        """When the page object carries them, no extra block fetch is needed."""
+        api.get_page.return_value = {"name": "x", "originalName": "X",
+                                     "properties": {"type": "Project"}}
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
+        payload = json.loads(result.stdout)
+        assert payload["properties"] == {"type": "Project"}
+        api.get_page_blocks_tree.assert_not_called()
+
+    def test_genuinely_empty_page_reports_none(self, api):
+        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page_blocks_tree.return_value = [
+            {"uuid": "b", "content": "nur Text", "properties": {}}]
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X"])
+        assert result.exit_code == 0
+        assert "No properties" in result.output

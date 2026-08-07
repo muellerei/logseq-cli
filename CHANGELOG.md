@@ -47,6 +47,17 @@ ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
   Top-Level-Append ebenfalls ueber `require_insert()`. `strict=False` bleibt
   fuer Aufrufer verfuegbar, die Teilschreibungen bewusst tolerieren.
 
+- **`get-properties` meldete faelschlich "No properties".** Der Befehl las nur
+  `page_data["properties"]`, Logseq legt Page-Properties aber auf dem ersten
+  Block ab (dem Property-Block), wenn sie per `set-property` geschrieben
+  wurden - dort blieb das Page-Objekt leer. Ergebnis: intakte Properties wurden
+  als nicht vorhanden gemeldet, was `set-property` so aussehen liess, als haette
+  es still versagt. Genau das steht als Symptom in der Projekt-Doku ("Properties
+  kaputt", "Reparatur nur per delete-page + Neuaufbau") - tatsaechlich war es
+  ein Lesefehler, kein Datenverlust. Jetzt mit Fallback auf den ersten Block;
+  liefert das Page-Objekt Properties, bleibt es beim bisherigen Pfad ohne
+  Zusatz-Call.
+
 ### Changed
 
 - `delete-page` entscheidet die Bestaetigung jetzt ueber `sys.stdin.isatty()`
