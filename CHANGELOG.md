@@ -25,6 +25,15 @@ ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
   `--tail`/`--limit` filtern vor dem Abruf, ausgelassene Tage kosten keinen
   API-Call. Gemessen an einem realen Graph: Range ueber 30 Tage 431.996 ->
   136.289 Zeichen, Summary "this week" 143.733 -> 793 Zeichen.
+- **`doctor`**: read-only Health-Check in einem Aufruf. Prueft Listener auf dem
+  API-Port, Token, eine echte API-Antwort und ob ein Graph geladen ist. Trennt
+  dabei die Faelle, die sonst manuell auseinanderzuhalten sind: Logseq laeuft
+  nicht / laeuft, aber die HTTP-API ist aus / API antwortet, aber der Token wird
+  abgelehnt / API und Token ok, aber kein Graph offen. Jeder Fall bekommt eine
+  eigene Handlungsempfehlung (`remedy`, auch im JSON). Exit 0 = les- und
+  schreibbereit, 1 = nicht. Anlass: am 2026-08-05 lief der Logseq-Prozess,
+  aber nichts lauschte auf Port 12315 - die Klaerung kostete sieben manuelle
+  Diagnoseschritte.
 - `delete-block` als Alias auf `remove-block`. Der Name ist die haeufigste
   Fehlannahme, weil `delete-page` danebensteht.
 - `fail()`-Helper: bei gesetztem `--json` werden Fehler als JSON-Objekt

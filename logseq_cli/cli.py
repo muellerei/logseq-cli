@@ -3470,6 +3470,165 @@ def get_page_stats(ctx, page, as_json):
             click.echo(f"\n  Inbound:  {', '.join(inbound)}")
 
 
+# ---------------------------------------------------------------------------
+# 31. doctor
+# ---------------------------------------------------------------------------
+def _port_has_listener(host: str, port: str, timeout: float = 2.0) -> bool:
+    """True if something accepts TCP connections on host:port."""
+    import socket
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _logseq_process_running() -> "bool | None":
+    """True/False if a Logseq desktop process is detectable, None if unknown.
+
+    Best-effort and platform-dependent: used only to tell "app not running" from
+    "app running but its HTTP API is off", which is the distinction that costs
+    the most time to work out by hand.
+    """
+    import shutil
+    import subprocess
+    if not shutil.which("pgrep"):
+        return None
+    try:
+        for pattern in ("Logseq", "logseq"):
+            res = subprocess.run(["pgrep", "-x", pattern],
+                                 capture_output=True, timeout=5)
+            if res.returncode == 0:
+                return True
+        return False
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+@cli.command("doctor", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN doctor
+  logseq-cli --token TOKEN doctor --json
+Note:
+  Read-only. Exit 0 = ready to read and write, 1 = something is wrong.
+  Distinguishes "Logseq not running" from "running but HTTP API off" and
+  from "API up but token rejected" - each needs a different fix.
+""")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_context
+def doctor(ctx, as_json):
+    """Check connectivity, auth and graph access in one call."""
+    api = ctx.obj["api"]
+    checks = []
+    remedy = None
+
+    def add(name, ok, detail):
+        checks.append({"check": name, "ok": ok, "detail": detail})
+
+    # 1. Is anything listening? Separates "app closed" from "API disabled",
+    #    the exact ambiguity that turned a real outage into a manual hunt.
+    listener = _port_has_listener(api.host, api.port)
+    add("port", listener,
+        f"{api.host}:{api.port} " + ("accepting connections" if listener else "no listener"))
+
+    if not listener:
+        proc = _logseq_process_running()
+        if proc is True:
+            add("process", False,
+                "Logseq is running but nothing listens on the API port")
+            remedy = ("Logseq runs, but its HTTP API is off or bound elsewhere. "
+                      "Enable it in Logseq: Settings -> Features -> HTTP APIs Server, "
+                      "then start the server and confirm the port.")
+        elif proc is False:
+            add("process", False, "no Logseq process found")
+            remedy = "Logseq is not running. Start it, then enable the HTTP API server."
+        else:
+            add("process", None, "process state unknown (pgrep unavailable)")
+            remedy = (f"Nothing listens on {api.host}:{api.port}. Check that Logseq runs "
+                      "and its HTTP API server is enabled.")
+
+    # 2. Token: only meaningful once the port answers.
+    token_set = bool(api.token)
+    if listener:
+        add("token", token_set,
+            "token provided" if token_set else "no token (--token or LOGSEQ_TOKEN)")
+
+    # 3. Live API call. This is what actually proves usability.
+    graph = None
+    if listener:
+        try:
+            configs = api.call("logseq.App.getUserConfigs")
+            add("api", True, "API responded")
+            if isinstance(configs, dict):
+                graph = configs.get("currentGraph") or configs.get("preferredWorkflow")
+        except requests.HTTPError as e:
+            code = e.response.status_code if e.response is not None else "?"
+            add("api", False, f"HTTP {code}")
+            if code == 401:
+                # Distinguish "none supplied" from "supplied but wrong": the
+                # first is a missing flag, the second a wrong value.
+                remedy = (
+                    "No token was supplied. Pass the value from Logseq's API "
+                    "settings via --token or the LOGSEQ_TOKEN env var."
+                    if not token_set else
+                    "The API rejected the token. Check that it matches the value "
+                    "in Logseq: Settings -> Features -> HTTP APIs Server."
+                )
+            else:
+                remedy = f"API answered HTTP {code}. Check the Logseq API settings."
+        except requests.RequestException as e:
+            add("api", False, f"{type(e).__name__}: {e}")
+            remedy = "Port is open but the API did not answer. Is another service on that port?"
+        except Exception as e:  # noqa: BLE001 - doctor must never crash
+            add("api", False, f"{type(e).__name__}: {e}")
+            remedy = "Unexpected error talking to the API."
+
+    # 4. Graph read: proves a graph is actually loaded, not just the API alive.
+    if any(c["check"] == "api" and c["ok"] for c in checks):
+        try:
+            pages = api.get_all_pages()
+            count = len(pages) if isinstance(pages, list) else 0
+            add("graph", count > 0, f"{count} page(s) visible")
+            if count == 0:
+                remedy = "API works but no pages are visible. Is a graph open in Logseq?"
+        except Exception as e:  # noqa: BLE001
+            add("graph", False, f"{type(e).__name__}: {e}")
+            remedy = "API works but the graph could not be read."
+
+    healthy = all(c["ok"] for c in checks if c["ok"] is not None)
+
+    result = {
+        "healthy": healthy,
+        "endpoint": api.base_url,
+        "version": _resolve_version(),
+        "checks": checks,
+    }
+    if graph:
+        result["graph"] = graph
+    if remedy:
+        result["remedy"] = remedy
+
+    if as_json:
+        output(result, True)
+    else:
+        click.echo(f"logseq-cli {result['version']}  ->  {api.base_url}")
+        for c in checks:
+            mark = "ok  " if c["ok"] else ("??  " if c["ok"] is None else "FAIL")
+            click.echo(f"  [{mark}] {c['check']}: {c['detail']}")
+        if graph:
+            click.echo(f"  graph: {graph}")
+        click.echo()
+        if healthy:
+            click.echo("Ready: reads and writes should work.")
+        else:
+            click.echo("Not ready.")
+            if remedy:
+                click.echo(f"  {remedy}")
+
+    if not healthy:
+        sys.exit(1)
+
+
 def main():
     cli()
 
