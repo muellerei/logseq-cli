@@ -5,6 +5,47 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-07
+
+Ergebnis eines Audits gegen gaengige CLI-Konventionen (clig.dev, POSIX/grep,
+Tool-Design-Empfehlungen). Alle Defaults bleiben unveraendert:
+ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
+
+### Added
+
+- `--dry-run` fuer `update-block`, `remove-block`, `copy-block` und
+  `delete-page`. Diese vier Operationen kaskadieren oder ueberschreiben
+  (`remove-block` nimmt alle Kinder mit, `copy-block --remove` loescht die
+  Quelle), hatten aber bisher keine Vorschau. `remove-block --dry-run` meldet
+  zusaetzlich die Zahl der Nachfahren, die mitgeloescht wuerden.
+- Output-Begrenzung fuer die Journal-Lesepfade:
+  `get-journal-range --tail N` (neueste N Tage), `--limit N` (aelteste N Tage)
+  und `--heading X` (pro Tag nur eine Sektion); `get-journal-summary
+  --no-content` (Volltexte weglassen, Datum/Zeichenzahl/Topics behalten).
+  `--tail`/`--limit` filtern vor dem Abruf, ausgelassene Tage kosten keinen
+  API-Call. Gemessen an einem realen Graph: Range ueber 30 Tage 431.996 ->
+  136.289 Zeichen, Summary "this week" 143.733 -> 793 Zeichen.
+- `delete-block` als Alias auf `remove-block`. Der Name ist die haeufigste
+  Fehlannahme, weil `delete-page` danebensteht.
+- `fail()`-Helper: bei gesetztem `--json` werden Fehler als JSON-Objekt
+  ausgegeben, sonst als Klartext. In beiden Faellen ausschliesslich auf
+  stderr, damit stdout den Nutzdaten vorbehalten bleibt.
+
+### Changed
+
+- `delete-page` entscheidet die Bestaetigung jetzt ueber `sys.stdin.isatty()`
+  statt ueber `--json`. Bisher wirkte `--json` als impliziter Force-Schalter;
+  ein Skript kann JSON aber rein zur Datenverarbeitung anfordern. Interaktiv
+  wird gefragt, nicht-interaktiv ist `--force` Pflicht (sonst Exit 1).
+  Trennt Ausgabeformat von Sicherheitsbestaetigung.
+- `get-page` liefert Exit 1, wenn eine angeforderte Seite nicht existiert
+  (Ausgabe `(page does not exist)`, im JSON `"exists": false`). Eine
+  existierende leere Seite bleibt Exit 0 mit `(empty page)`. Bisher waren
+  beide Faelle ununterscheidbar. Batch-Reads geben weiterhin alle vorhandenen
+  Seiten aus und melden den Fehler erst am Ende.
+- Gekuerzte Journal-Ergebnisse melden auf stderr, wie viele Tage ausgelassen
+  wurden (`showing N of M ... K omitted`). Ohne Kuerzung kein Hinweis.
+
 ## [0.5.0] - 2026-05-08
 
 ### Added

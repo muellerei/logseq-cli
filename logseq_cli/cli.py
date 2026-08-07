@@ -171,7 +171,7 @@ def _resolve_version() -> str:
 @click.option("--no-cache", "no_cache", is_flag=True, help="Bypass the in-memory read cache for this invocation")
 @click.pass_context
 def cli(ctx, host, port, token, no_cache):
-    """CLI for Logseq knowledge graph - 30 commands for pages, journals, blocks, search, and graph analysis."""
+    """CLI for Logseq knowledge graph - pages, journals, blocks, search, and graph analysis."""
     ctx.ensure_object(dict)
     api = LogseqAPI(host=host, port=port, token=token)
     if no_cache:
@@ -2227,11 +2227,8 @@ def add_note_content(ctx, page, content, create, under_heading, properties, as_j
         pass
 
     if not existing and not create:
-        if as_json:
-            output({"error": f"Page '{page}' not found", "created": False}, True)
-        else:
-            click.echo(f"Error: Page '{page}' not found. Use --create to create it.", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found. Use --create to create it.",
+             as_json=as_json, page=page, created=False)
 
     if not existing and create:
         api.create_page(page)
@@ -2417,8 +2414,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
 
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
-        click.echo(f"Page '{page}' not found or empty.", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found or empty.", as_json=as_json, page=page)
 
     if use_regex:
         pattern = re.compile(find_text)
@@ -2989,8 +2985,7 @@ def get_properties(ctx, page, prop_name, as_json):
     page_data = api.get_page(page)
 
     if not page_data:
-        click.echo(f"Page '{page}' not found.", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found.", as_json=as_json, page=page)
 
     properties = page_data.get("properties", {})
     text_values = page_data.get("propertiesTextValues", {})
@@ -3002,8 +2997,8 @@ def get_properties(ctx, page, prop_name, as_json):
         value = properties.get(prop_lower)
         text_value = text_values.get(prop_lower)
         if value is None:
-            click.echo(f"Property '{prop_name}' not found on '{page_name}'.", err=True)
-            sys.exit(1)
+            fail(f"Property '{prop_name}' not found on '{page_name}'.",
+                 as_json=as_json, page=page_name, property=prop_name)
 
         if as_json:
             output({"page": page_name, "property": prop_lower, "value": value, "text": text_value}, True)
@@ -3047,14 +3042,12 @@ def set_property(ctx, page, key, value, as_json):
     # Get page blocks to find the first block (properties block)
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
-        click.echo(f"Error: Page '{page}' not found or has no blocks", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
 
     first_block = blocks[0]
     block_uuid = first_block.get("uuid")
     if not block_uuid:
-        click.echo("Error: Could not find block UUID", err=True)
-        sys.exit(1)
+        fail("Could not find block UUID", as_json=as_json, page=page)
 
     # Auto-detect value type (shared with set-block-property / --property)
     value = coerce_property_value(value)
@@ -3086,14 +3079,12 @@ def remove_property(ctx, page, key, as_json):
 
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
-        click.echo(f"Error: Page '{page}' not found or has no blocks", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
 
     first_block = blocks[0]
     block_uuid = first_block.get("uuid")
     if not block_uuid:
-        click.echo("Error: Could not find block UUID", err=True)
-        sys.exit(1)
+        fail("Could not find block UUID", as_json=as_json, page=page)
 
     api.remove_block_property(str(block_uuid), key)
 
@@ -3154,8 +3145,7 @@ def rename_page(ctx, page, new_name, as_json):
     # Verify page exists first
     page_data = api.get_page(page)
     if not page_data:
-        click.echo(f"Error: Page '{page}' not found", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found", as_json=as_json, page=page)
 
     api.rename_page(page, new_name)
 
@@ -3407,8 +3397,7 @@ def get_page_stats(ctx, page, as_json):
     api = ctx.obj["api"]
     blocks = api.get_page_blocks_tree(page)
     if blocks is None:
-        click.echo(f"Error: Page '{page}' not found.", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found.", as_json=as_json, page=page)
 
     def _collect(tree):
         total_blocks = 0
