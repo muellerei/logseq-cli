@@ -607,15 +607,19 @@ def get_backlinks(ctx, page, as_json):
 @cli.command("get-journal-summary", epilog="""\b
 Examples:
   logseq-cli --token TOKEN get-journal-summary --range "this week"
-  logseq-cli --token TOKEN get-journal-summary --range "last month"
+  logseq-cli --token TOKEN get-journal-summary --range "last month" --no-content
 Note:
-  Aggregated overview. For raw block content use get-journal-range.
+  Despite the name this embeds each day's FULL text by default, so a month-long
+  range is large. --no-content drops the bodies and keeps dates + topics +
+  top concepts, which is what an overview usually needs.
+  For raw block content use get-journal-range (supports --tail/--heading).
 """)
 @click.option("--range", "date_range", default="today", help="Date range: today, this week, last 30 days, this month, this year")
+@click.option("--no-content", "no_content", is_flag=True, help="Omit per-day body text; keep dates, topics and top concepts")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_journal_summary(ctx, date_range, as_json):
+def get_journal_summary(ctx, date_range, no_content, as_json):
     """Summarize journal entries within a date range."""
     api = ctx.obj["api"]
     start, end = parse_date_range(date_range)
@@ -639,12 +643,18 @@ def get_journal_summary(ctx, date_range, as_json):
             content = get_page_content(api, page_name)
             topics = extract_page_links(content)
             all_topics.update(topics)
-            journal_entries.append({
+            entry = {
                 "date": format_journal_date(d),
                 "page": page_name,
-                "content": content,
                 "topics": topics,
-            })
+            }
+            # Keep the character count even when the body is dropped, so the
+            # caller can see how much was withheld and re-fetch deliberately.
+            if no_content:
+                entry["content_length"] = len(content or "")
+            else:
+                entry["content"] = content
+            journal_entries.append(entry)
 
     journal_entries.sort(key=lambda e: e["date"])
     top_concepts = all_topics.most_common(10)
@@ -655,12 +665,19 @@ def get_journal_summary(ctx, date_range, as_json):
         "entries": journal_entries,
         "top_concepts": [{"topic": t, "count": c} for t, c in top_concepts],
     }
+    if no_content:
+        result["content_omitted"] = True
 
     if as_json:
         output(result, True)
     else:
         click.echo(f"Journal Summary ({date_range}): {len(journal_entries)} entries\n")
         for entry in journal_entries:
+            if no_content:
+                topics = entry.get("topics") or []
+                topic_str = f" — {', '.join(topics[:8])}" if topics else ""
+                click.echo(f"--- {entry['date']} ({entry['content_length']} chars){topic_str}")
+                continue
             click.echo(f"--- {entry['date']} ---")
             click.echo(entry["content"] or "(empty)")
             click.echo()
@@ -689,8 +706,14 @@ def _count_unresolved_refs(blocks) -> int:
 @cli.command("get-journal-range", epilog="""\b
 Examples:
   logseq-cli --token TOKEN get-journal-range --from 2026-04-20 --to 2026-04-26 --resolve-refs
+  logseq-cli --token TOKEN get-journal-range --from 2026-01-01 --to 2026-04-30 --tail 5
+  logseq-cli --token TOKEN get-journal-range --from 2026-04-01 --to 2026-04-30 \\
+                                              --heading "## Log" --tail 7
   LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli --token TOKEN get-journal-range --from 2026-01-01 --to 2026-04-30
 Notes:
+  Output grows with the range - a month of journals is large. Narrow it with
+  --tail N (newest N days), --limit N (oldest N days) and/or --heading "## Log".
+  --tail/--limit apply BEFORE fetching, so skipped days cost no API calls.
   Parallel pool (default 5 workers, 1-16 via LOGSEQ_CLI_RANGE_WORKERS).
   Always pass --resolve-refs if downstream parses ((uuid)) refs.
   Per-day errors embed as {error: "..."} per entry; range continues.
@@ -698,11 +721,14 @@ Notes:
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
+@click.option("--tail", "tail", default=None, type=int, help="Only the newest N journal days of the range (applied before fetching)")
+@click.option("--limit", "limit", default=None, type=int, help="Only the oldest N journal days of the range (applied before fetching)")
+@click.option("--heading", default=None, help="Return only the section under this heading per day (e.g. '## Log')")
 @click.option("--format", "output_format", type=click.Choice(["text", "markdown"]), default="text", help="Output format: text (default) or markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_json):
+def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, heading, output_format, as_json):
     """Get full block content for all journal pages in a date range (inclusive).
 
     Returns one entry per journal day, with blocks and page name.
@@ -711,8 +737,16 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
     Example:
         logseq-cli get-journal-range --from 2026-04-20 --to 2026-04-24
         logseq-cli get-journal-range --from 2026-04-20 --to 2026-04-24 --resolve-refs --json
+        logseq-cli get-journal-range --from 2026-04-01 --to 2026-04-30 --heading "## Log" --tail 7
     """
     api = ctx.obj["api"]
+
+    if tail is not None and tail < 1:
+        raise click.BadParameter("--tail must be >= 1")
+    if limit is not None and limit < 1:
+        raise click.BadParameter("--limit must be >= 1")
+    if tail is not None and limit is not None:
+        raise click.BadParameter("--tail and --limit are mutually exclusive")
 
     start = datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
     end = datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
@@ -737,6 +771,15 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
             page_name = page.get("originalName") or page.get("name", "")
             targets.append((d, page_name))
 
+    # Narrow BEFORE fetching: skipped days must not cost API calls.
+    targets.sort(key=lambda t: t[0])
+    total_days = len(targets)
+    if tail is not None:
+        targets = targets[-tail:]
+    elif limit is not None:
+        targets = targets[:limit]
+    omitted = total_days - len(targets)
+
     try:
         worker_setting = int(os.getenv("LOGSEQ_CLI_RANGE_WORKERS", "5"))
     except ValueError:
@@ -747,6 +790,8 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
         d, page_name = target
         try:
             blocks = api.get_page_blocks_tree(page_name)
+            if heading and blocks:
+                blocks = _extract_section(blocks, heading)
             if resolve_refs and blocks:
                 _resolve_refs_in_blocks(api, blocks)
             return {
@@ -774,6 +819,16 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, output_format, as_j
                 entries.append(future.result())
 
     entries.sort(key=lambda e: e["date"])
+
+    # Never truncate silently: a shortened result must not read as the full range.
+    if omitted > 0:
+        which = "newest" if tail is not None else "oldest"
+        click.echo(
+            f"Note: showing {len(entries)} of {total_days} journal day(s) "
+            f"({which} {len(entries)}); {omitted} omitted. "
+            f"Widen with --tail/--limit or drop the flag for the full range.",
+            err=True,
+        )
 
     if not resolve_refs:
         total_refs = sum(_count_unresolved_refs(e.get("blocks", [])) for e in entries)
