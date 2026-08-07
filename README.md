@@ -211,6 +211,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `get-todos [--page NAME] [--status S] [--tag TAG]` | List tasks (page name shown inline in plain-text output) |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
+| `doctor` | Health-check: connectivity, token, API, graph. Exit 0 = ready |
 
 ### Properties (3)
 
