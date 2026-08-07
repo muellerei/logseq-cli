@@ -314,8 +314,15 @@ Notes:
 def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_format, as_json):
     """Get page content with backlinks. Pass --name multiple times for batch reads."""
     api = ctx.obj["api"]
+    missing = []
 
     def _fetch_one(page_name):
+        # A page that does not exist is an error, not an empty result: Logseq's
+        # getPage returns null for it but a real object for an existing-but-empty
+        # page. Without this check both render as "(empty page)" and the caller
+        # cannot tell "typo in the name" from "nothing written yet".
+        if api.get_page(page_name) is None:
+            missing.append(page_name)
         blocks = api.get_page_blocks_tree(page_name)
         if no_backlinks or heading:
             backlinks = []
@@ -335,25 +342,44 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
 
     results = [_fetch_one(p) for p in page]
 
+    for result in results:
+        if result["page"] in missing:
+            result["exists"] = False
+
     if as_json:
         output(results if len(results) > 1 else results[0], True)
     else:
         for result in results:
             p, blocks, backlinks = result["page"], result["blocks"], result["backlinks"]
+            absent = p in missing
+            placeholder = "(page does not exist)" if absent else "(empty page)"
             if with_ids:
                 click.echo(f"=== {p} ===\n")
-                click.echo(_blocks_with_ids(blocks) if blocks else "(empty page)")
+                click.echo(_blocks_with_ids(blocks) if blocks else placeholder)
             elif output_format == "markdown":
-                click.echo(_blocks_to_markdown(blocks) if blocks else "(empty page)")
+                click.echo(_blocks_to_markdown(blocks) if blocks else placeholder)
             else:
                 click.echo(f"=== {p} ===\n")
-                click.echo(process_blocks(blocks) if blocks else "(empty page)")
+                click.echo(process_blocks(blocks) if blocks else placeholder)
                 if backlinks:
                     click.echo(f"\nBacklinks ({len(backlinks)}):")
                     for bl in backlinks:
                         click.echo(f"  <- {bl}")
             if len(results) > 1:
                 click.echo()
+
+    # Exit non-zero if any requested page is absent. Batch reads still print every
+    # page that does exist first, so one typo does not cost the whole result.
+    # The payload already went to stdout; the error goes to stderr only.
+    if missing:
+        if as_json:
+            click.echo(json.dumps(
+                {"error": "Page(s) not found", "missing": missing},
+                indent=2, default=str), err=True)
+        else:
+            for page_name in missing:
+                click.echo(f"Error: Page '{page_name}' not found", err=True)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -2305,6 +2331,13 @@ def remove_block_cmd(ctx, block_id, dry_run, as_json):
         click.echo(f"Removed block {clean_id} ({descendants + 1} block(s) total)")
         if preview:
             click.echo(f"  was: {preview}")
+
+
+# `remove-block` is the canonical name (Logseq's API verb is removeBlock), but
+# `delete-page` sits right next to it, so `delete-block` is the single most common
+# wrong guess. Register it as an alias
+# so the guess works instead of erroring out.
+cli.add_command(remove_block_cmd, "delete-block")
 
 
 @cli.command("replace-text", epilog="""\b

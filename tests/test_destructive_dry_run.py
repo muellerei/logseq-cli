@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 MUTATING = ("update_block", "remove_block", "delete_page",
@@ -31,19 +32,6 @@ def api(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
     return mock
-
-
-def split_runner():
-    """CliRunner that captures stderr separately.
-
-    Click <8.2 needs ``mix_stderr=False`` for that; in 8.2+ streams are always
-    separate and the argument was removed. Support both so the stderr
-    assertions keep working across Click versions.
-    """
-    try:
-        return CliRunner(mix_stderr=False)
-    except TypeError:
-        return CliRunner()
 
 
 class TestUpdateBlockDryRun:
