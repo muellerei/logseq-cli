@@ -282,6 +282,27 @@ def contains_hierarchical_content(content: str) -> bool:
     return bool(re.search(r'\n[\t ]+- ', content))
 
 
+def has_flush_newline_bullets(content: str) -> bool:
+    """True if content has a bullet line (``- ``) after a newline with NO indentation.
+
+    This is the silent-failure case for ``add-journal-block``: a single
+    ``--content`` string like ``"**09:16** Header\\n- point a\\n- point b"``
+    is neither detected as hierarchy (``contains_hierarchical_content`` requires
+    indentation) nor written as separate blocks. It ends up as ONE block whose
+    body carries raw ``\\n- `` lines — a broken outline. Callers should reject
+    such content and tell the user to indent (children), split into multiple
+    ``--content`` (siblings), or use ``insert-block --tree``.
+
+    Only flush (column-0) bullets on line 2+ count. A leading bullet on line 1
+    and any indented sub-bullet are fine.
+    """
+    lines = content.split("\n")
+    for line in lines[1:]:
+        if line.startswith("- "):
+            return True
+    return False
+
+
 def has_mixed_indentation(content: str) -> bool:
     """True if any indented line mixes tabs and spaces in its leading whitespace.
 

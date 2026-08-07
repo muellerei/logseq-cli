@@ -24,6 +24,7 @@ from logseq_cli.helpers import (
     parse_hierarchical_content,
     parse_tree_input,
     contains_hierarchical_content,
+    has_flush_newline_bullets,
     has_mixed_indentation,
     normalize_indentation,
     insert_formatted_content,
@@ -1741,6 +1742,21 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
       logseq-cli add-journal-block --under-heading "## Tasks" --content "TODO Task A" --content "TODO Task B"
       logseq-cli add-journal-block --date 2026-04-03 --content "Retroactive entry"
     """
+    # Guard: reject flush (non-indented) newline bullets in ANY --content value.
+    # Such content is neither detected as hierarchy (needs indentation) nor split
+    # into siblings — it would silently become ONE block with raw "\n- " lines,
+    # breaking the outline. Fail loudly with a fix instruction instead.
+    for c in contents:
+        if has_flush_newline_bullets(c):
+            raise click.UsageError(
+                "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
+                "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
+                "als EIN Block mit rohen Newline-Bullets.\n"
+                "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
+                "  - Geschwister gewollt? -> mehrere --content nutzen\n"
+                "  - Voller Tree?        -> insert-block --tree"
+            )
+
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
         content = contents[0]

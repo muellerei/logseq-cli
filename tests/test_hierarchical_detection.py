@@ -5,10 +5,44 @@ from unittest.mock import MagicMock, call
 
 from logseq_cli.helpers import (
     contains_hierarchical_content,
+    has_flush_newline_bullets,
     parse_hierarchical_content,
     find_or_create_heading,
     insert_block_tree,
 )
+
+
+class TestHasFlushNewlineBullets:
+    """Tests for the flush (non-indented) newline-bullet guard."""
+
+    def test_flush_bullets_after_header_returns_true(self):
+        """The exact silent-failure case: header + column-0 bullets."""
+        content = "**09:16** Header\n- point a\n- point b"
+        assert has_flush_newline_bullets(content) is True
+
+    def test_single_line_returns_false(self):
+        assert has_flush_newline_bullets("**14:30** just a log line") is False
+
+    def test_leading_bullet_line1_only_returns_false(self):
+        """A bullet on line 1 is fine; nothing flush follows."""
+        assert has_flush_newline_bullets("- single item") is False
+
+    def test_indented_sub_bullets_return_false(self):
+        """Properly indented children are handled by the hierarchy path, not the guard."""
+        content = "**17:00** Main\n\t- sub 1\n\t- sub 2"
+        assert has_flush_newline_bullets(content) is False
+
+    def test_space_indented_sub_bullets_return_false(self):
+        content = "**17:00** Main\n  - sub 1"
+        assert has_flush_newline_bullets(content) is False
+
+    def test_plain_multiline_no_bullets_returns_false(self):
+        assert has_flush_newline_bullets("line1\nline2\nline3") is False
+
+    def test_flush_bullet_among_indented_returns_true(self):
+        """One flush bullet is enough to trip the guard."""
+        content = "**09:16** Header\n\t- indented\n- flush"
+        assert has_flush_newline_bullets(content) is True
 
 
 class TestContainsHierarchicalContent:
