@@ -1,6 +1,6 @@
 # logseq-cli
 
-CLI for Logseq knowledge graph with 34 commands for pages, journals, blocks, search, properties, and graph analysis.
+CLI for Logseq knowledge graph: pages, journals, blocks, search, properties, and graph analysis.
 
 ## Installation
 
@@ -41,6 +41,43 @@ logseq-cli add-journal-block --under-heading "## Notes" --content "..."
 
 # Force top-level (ignore env var)
 logseq-cli add-journal-block --top-level --content "..."
+```
+
+## What's new in v0.6
+
+Safety and output-size work from an audit against common CLI conventions
+(clig.dev, POSIX/grep, agent tool-design guidance). **Defaults are
+unchanged** — without the new flags every command behaves exactly as before.
+
+```bash
+# 1. --dry-run for the destructive commands (they cascade: children, source blocks)
+logseq-cli remove-block --id "$UUID" --dry-run
+#   [DRY RUN] Would remove block 6a76533e-...
+#     descendants that would be removed too: 2
+#     total blocks affected: 3
+logseq-cli update-block --id "$UUID" --content "neu" --dry-run
+logseq-cli copy-block --id "$UUID" --to-page "Target" --remove --dry-run
+logseq-cli delete-page --page "Alt" --dry-run
+
+# 2. delete-page: --json is no longer an implicit --force
+logseq-cli delete-page --page "Alt" --json < /dev/null
+#   {"error": "Refusing to delete page 'Alt' non-interactively without --force. ..."}
+#   exit 1 — the output format no longer doubles as a confirmation.
+
+# 3. get-page separates "missing" from "empty"
+logseq-cli get-page --page "Tippfehler"   # (page does not exist) -> exit 1
+logseq-cli get-page --page "Leere Seite"  # (empty page)          -> exit 0
+
+# 4. Bounded journal reads (see "Bounded output" below)
+logseq-cli get-journal-range --from 2026-07-08 --to 2026-08-07 \
+  --tail 7 --heading "## Log"
+logseq-cli get-journal-summary --range "this week" --no-content
+
+# 5. delete-block works as an alias for remove-block
+logseq-cli delete-block --id "$UUID" --dry-run
+
+# 6. Errors are JSON when --json is set — always on stderr, never on stdout
+logseq-cli get-properties --page "Missing" --json 2>err.json
 ```
 
 ## What's new in v0.4
@@ -136,10 +173,10 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `get-all-pages` | List all pages |
 | `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line |
 | `get-block --id UUID` | Block by UUID |
-| `get-journal-range --from DATE --to DATE [--resolve-refs]` | Batch journal read; parallel (5 workers default) |
+| `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME` | Pages linking to NAME |
-| `get-journal-summary --range RANGE` | Journal summary (today, this week, last 30 days) |
+| `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
 | `analyze-graph [--days N]` | Graph structure analysis |
 | `find-knowledge-gaps` | Missing/underdeveloped/orphaned pages |
 | `analyze-journal-patterns` | Journal entry patterns |
@@ -161,12 +198,12 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `update-block --id UUID --content TEXT` | Update block content |
-| `remove-block --id UUID` | Delete a block |
+| `update-block --id UUID --content TEXT [--dry-run]` | Update block content |
+| `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
 | `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned) |
-| `copy-block --id UUID --to-page NAME` | Copy/move block with children to another page |
+| `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
 
 ### Meta (2)
 
@@ -188,13 +225,39 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `rename-page --page NAME --new-name NAME` | Rename page (updates all references) |
-| `delete-page --page NAME [--force]` | Delete page (with confirmation prompt) |
+| `delete-page --page NAME [--force] [--dry-run]` | Delete page. Prompts on a TTY; `--force` required non-interactively |
 
 ### Query (1)
 
 | Command | Description |
 |---------|-------------|
 | `query-pages-by-property --key KEY [--value VAL]` | Find pages by property value |
+
+## Bounded output
+
+Journal reads grow with the range. On a real graph (four years of daily entries)
+the unbounded commands produce far more text than an LLM agent can hold:
+
+| Call | Output |
+|------|--------|
+| `get-journal-range` over 30 days | 431,996 chars (~108k tokens) |
+| `get-journal-range --tail 7` | 188,149 chars |
+| `get-journal-range --tail 7 --heading "## Log"` | 136,289 chars |
+| `get-journal-summary --range "this week"` | 143,733 chars |
+| `get-journal-summary --range "this week" --no-content` | 793 chars |
+
+For scale: Claude Code caps tool responses at 25,000 tokens by default.
+
+- `--tail N` / `--limit N` pick the newest / oldest N journal days. They are
+  applied **before** fetching, so omitted days cost no API call. Mutually
+  exclusive.
+- `--heading "## Log"` returns only that section per day.
+- `--no-content` (summary only) drops the bodies but keeps date, character
+  count, topics and top concepts — enough for an overview, without the text.
+
+Truncation is never silent: whenever days are omitted, a note goes to **stderr**
+(`showing 3 of 20 journal day(s) ... 17 omitted`) while stdout stays pure
+payload. Without truncation there is no note.
 
 ## Internationalization
 
@@ -222,7 +285,7 @@ logseq-cli/
 ├── logseq_cli/
 │   ├── api.py       # HTTP API client (requests.post against Logseq)
 │   ├── helpers.py   # Date parsing, block processing, backlink search
-│   └── cli.py       # Click CLI with all 34 commands
+│   └── cli.py       # Click CLI with all commands
 ├── examples/        # Shell scripts for scripting/cronjobs
 └── pyproject.toml
 ```
