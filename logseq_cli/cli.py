@@ -79,6 +79,25 @@ def output(data, as_json: bool, human_formatter=None):
         click.echo(data)
 
 
+def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
+    """Report an error and exit with ``exit_code`` (never returns).
+
+    Errors always go to **stderr**, never stdout — stdout stays reserved for
+    payload, so a caller parsing stdout as JSON is never handed an error object
+    where data was expected. With ``--json`` the error is emitted as a JSON
+    object (``{"error": ..., ...fields}``) so agents can parse it structurally
+    instead of scraping prose; without it, a plain ``Error: ...`` line.
+
+    ``fields`` adds context keys (e.g. ``id=...``, ``page=...``) to the JSON form.
+    """
+    if as_json:
+        payload = {"error": message, **fields}
+        click.echo(json.dumps(payload, indent=2, default=str), err=True)
+    else:
+        click.echo(f"Error: {message}", err=True)
+    sys.exit(exit_code)
+
+
 _BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
 
@@ -2192,10 +2211,11 @@ Note:
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to update")
 @click.option("--content", required=True, help="New content for the block")
+@click.option("--dry-run", is_flag=True, help="Show the block that would be overwritten, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def update_block(ctx, block_id, content, as_json):
+def update_block(ctx, block_id, content, dry_run, as_json):
     """Update the content of an existing block."""
     api = ctx.obj["api"]
     clean_id = block_id.strip().replace("((", "").replace("))", "")
@@ -2203,10 +2223,23 @@ def update_block(ctx, block_id, content, as_json):
     # Verify block exists
     block = api.get_block(clean_id, include_children=False)
     if not block:
-        click.echo(f"Block not found: {clean_id}", err=True)
-        sys.exit(1)
+        fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
 
     old_content = block.get("content", "") if isinstance(block, dict) else ""
+
+    if dry_run:
+        if as_json:
+            output({"id": clean_id, "old_content": old_content,
+                    "new_content": content, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would overwrite block {clean_id}")
+            if old_content:
+                preview = old_content[:60] + ("..." if len(old_content) > 60 else "")
+                click.echo(f"  was: {preview}")
+            preview = content[:60] + ("..." if len(content) > 60 else "")
+            click.echo(f"  now: {preview}")
+        return
+
     api.update_block(clean_id, content)
 
     if as_json:
@@ -2221,34 +2254,55 @@ def update_block(ctx, block_id, content, as_json):
 
 
 @cli.command("remove-block", epilog="""\b
-Example:
+Examples:
+  logseq-cli --token TOKEN remove-block --id 12345678-... --dry-run
   logseq-cli --token TOKEN remove-block --id 12345678-...
 Note:
-  Destructive. Children are removed too. Check get-backlinks first if the block has id::.
+  Destructive. Children are removed too — --dry-run reports how many.
+  Check get-backlinks first if the block has id::.
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to remove")
+@click.option("--dry-run", is_flag=True, help="Show the block and its descendant count, without deleting")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def remove_block_cmd(ctx, block_id, as_json):
+def remove_block_cmd(ctx, block_id, dry_run, as_json):
     """Remove a block by UUID."""
     api = ctx.obj["api"]
     clean_id = block_id.strip().replace("((", "").replace("))", "")
 
-    # Verify block exists and show what will be deleted
-    block = api.get_block(clean_id, include_children=False)
+    # Fetch WITH children: removal cascades, so the descendant count is the
+    # decisive fact for --dry-run (and for the confirmation the caller may want).
+    block = api.get_block(clean_id, include_children=True)
     if not block:
-        click.echo(f"Block not found: {clean_id}", err=True)
-        sys.exit(1)
+        fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
 
     content = block.get("content", "") if isinstance(block, dict) else ""
+    children = block.get("children", []) if isinstance(block, dict) else []
+    descendants = count_blocks(children) if children else 0
+
+    if dry_run:
+        if as_json:
+            output({"id": clean_id, "content": content,
+                    "descendants": descendants, "blocks_removed": descendants + 1,
+                    "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would remove block {clean_id}")
+            preview = content[:80] + ("..." if len(content) > 80 else "")
+            if preview:
+                click.echo(f"  content: {preview}")
+            click.echo(f"  descendants that would be removed too: {descendants}")
+            click.echo(f"  total blocks affected: {descendants + 1}")
+        return
+
     api.remove_block(clean_id)
 
     if as_json:
-        output({"id": clean_id, "removed": True, "content": content}, True)
+        output({"id": clean_id, "removed": True, "content": content,
+                "descendants": descendants, "blocks_removed": descendants + 1}, True)
     else:
         preview = content[:80] + ("..." if len(content) > 80 else "")
-        click.echo(f"Removed block {clean_id}")
+        click.echo(f"Removed block {clean_id} ({descendants + 1} block(s) total)")
         if preview:
             click.echo(f"  was: {preview}")
 
@@ -3028,40 +3082,64 @@ def rename_page(ctx, page, new_name, as_json):
 # 27. delete-page
 # ---------------------------------------------------------------------------
 @cli.command("delete-page", epilog="""\b
-Example:
+Examples:
+  logseq-cli --token TOKEN delete-page --name "Obsolete Page" --dry-run
   logseq-cli --token TOKEN delete-page --name "Obsolete Page" --force
 Note:
-  Destructive. Without --force, prompts for confirmation.
+  Destructive. Interactively (TTY) it prompts; non-interactively it REQUIRES
+  --force and fails otherwise — --json alone is not a confirmation.
   Backlinks ((uuid)) pointing to deleted blocks become dangling.
 """)
 @click.option("--page", "--name", required=True, help="Page name to delete")
-@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt (required when non-interactive)")
+@click.option("--dry-run", is_flag=True, help="Show what would be deleted, without deleting")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def delete_page(ctx, page, force, as_json):
+def delete_page(ctx, page, force, dry_run, as_json):
     """Delete a page from the graph."""
     api = ctx.obj["api"]
 
     # Verify page exists first
     page_data = api.get_page(page)
     if not page_data:
-        click.echo(f"Error: Page '{page}' not found", err=True)
-        sys.exit(1)
+        fail(f"Page '{page}' not found", as_json=as_json, page=page)
 
-    # Confirmation unless --force
-    if not force and not as_json:
-        if not click.confirm(f"Delete page '{page}'?"):
-            click.echo("Aborted.")
-            return
+    try:
+        blocks = api.get_page_blocks_tree(page) or []
+    except Exception:
+        blocks = []
+    block_count = count_blocks(blocks)
+
+    if dry_run:
+        if as_json:
+            output({"page": page, "blocks": block_count, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would delete page '{page}' ({block_count} block(s))")
+        return
+
+    # Confirmation gate. Prompt only when stdin is an interactive terminal;
+    # otherwise --force is mandatory. The output format (--json) must never
+    # double as a confirmation: a script may request JSON purely to parse data.
+    if not force:
+        if sys.stdin.isatty():
+            if not click.confirm(f"Delete page '{page}' ({block_count} block(s))?"):
+                click.echo("Aborted.")
+                return
+        else:
+            fail(
+                f"Refusing to delete page '{page}' non-interactively without --force. "
+                f"Re-run with --force to confirm, or --dry-run to preview.",
+                as_json=as_json, page=page, blocks=block_count,
+            )
 
     api.delete_page(page)
 
-    result = {"page": page, "status": "deleted"}
+    result = {"page": page, "status": "deleted", "blocks": block_count}
     if as_json:
         output(result, True)
     else:
-        click.echo(f"Deleted page '{page}'")
+        click.echo(f"Deleted page '{page}' ({block_count} block(s))")
 
 
 # ---------------------------------------------------------------------------
@@ -3163,17 +3241,34 @@ Note:
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
 @click.option("--remove", is_flag=True, help="Remove source block after copying (move)")
+@click.option("--dry-run", is_flag=True, help="Show what would be copied/moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def copy_block(ctx, block_id, to_page, remove, as_json):
+def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)
     if not source:
-        click.echo("Error: Block not found.", err=True)
-        sys.exit(1)
+        fail("Block not found.", as_json=as_json, id=block_id)
+
+    if dry_run:
+        planned = count_blocks([source])
+        action = "move" if remove else "copy"
+        content = source.get("content", "") if isinstance(source, dict) else ""
+        if as_json:
+            output({"action": action, "blocks": planned, "to_page": to_page,
+                    "source_id": block_id, "removes_source": bool(remove),
+                    "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would {action} {planned} block(s) to '{to_page}'")
+            preview = content[:80] + ("..." if len(content) > 80 else "")
+            if preview:
+                click.echo(f"  root: {preview}")
+            if remove:
+                click.echo(f"  source block {block_id} WOULD BE REMOVED after copying")
+        return
 
     def _copy_tree(block, parent_uuid=None):
         content = block.get("content", "")
