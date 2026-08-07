@@ -558,13 +558,19 @@ def require_insert(result, what: str) -> str:
     return uuid
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = False) -> list:
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
-    children, siblings in declaration order). With ``strict=True`` a silent
-    write failure (``null`` result) aborts via :func:`require_insert` instead
-    of pushing a ``None`` UUID and skipping that block's children.
+    children, siblings in declaration order).
+
+    ``strict`` (the default) turns a silent write failure into a hard abort via
+    :func:`require_insert`. Logseq answers a failed insert with HTTP 200 +
+    ``null``, so without this the function pushes a ``None`` UUID, skips that
+    block's children, and the caller reports success for content that was never
+    written — the worst outcome for a journal entry, since the text is gone and
+    nothing says so. ``strict=False`` is only for callers that deliberately
+    tolerate partial writes; it must never be the default.
     """
     uuids = []
     for block in tree:
@@ -620,18 +626,18 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str) -> list:
     Top-level nodes use ``append_block_in_page`` (which currently appends; the
     Logseq API has no first-block primitive). Children use insert_block.
     Returns DFS pre-order UUIDs.
+
+    A failed append answers HTTP 200 + ``null``; :func:`require_insert` turns
+    that into a hard abort so the caller cannot report success for text that
+    was never written.
     """
     uuids = []
     for block in tree:
         result = api.append_block_in_page(page_name, block["content"])
-        new_uuid = None
-        if isinstance(result, dict):
-            new_uuid = result.get("uuid")
-        elif isinstance(result, str):
-            new_uuid = result
+        new_uuid = require_insert(result, f"a block on '{page_name}'")
         uuids.append(new_uuid)
         children = block.get("children") or []
-        if new_uuid and children:
+        if children:
             uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid))
     return uuids
 

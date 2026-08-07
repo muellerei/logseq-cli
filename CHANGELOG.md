@@ -31,6 +31,22 @@ ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
   ausgegeben, sonst als Klartext. In beiden Faellen ausschliesslich auf
   stderr, damit stdout den Nutzdaten vorbehalten bleibt.
 
+### Fixed
+
+- **Stille Schreibfehler werden nicht mehr als Erfolg gemeldet.**
+  `insert_block_tree_with_uuids()` hatte `strict=False` als Default: Logseq
+  beantwortet einen fehlgeschlagenen Insert mit HTTP 200 + `null`, die Funktion
+  legte daraufhin eine `None`-UUID ab, uebersprang die Kinder des Blocks - und
+  das Kommando meldete "Added N block(s)" mit Exit 0, obwohl nichts geschrieben
+  wurde. Bei einem Journal-Eintrag heisst das: der Text ist weg und nichts sagt
+  es. Betroffen waren fuenf von acht Aufrufern, darunter `add-journal-block`
+  und `add-note-content` (die Schwesterfunktion
+  `insert_block_tree_as_siblings` hatte bereits `strict=True`; die
+  Inkonsistenz war unbeabsichtigt).
+  `strict` ist jetzt Default; `insert_block_tree_at_page_top()` prueft den
+  Top-Level-Append ebenfalls ueber `require_insert()`. `strict=False` bleibt
+  fuer Aufrufer verfuegbar, die Teilschreibungen bewusst tolerieren.
+
 ### Changed
 
 - `delete-page` entscheidet die Bestaetigung jetzt ueber `sys.stdin.isatty()`
