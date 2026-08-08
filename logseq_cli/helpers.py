@@ -2,6 +2,7 @@ import re
 import json
 import datetime
 from collections import Counter
+from pathlib import Path
 
 import click
 
@@ -524,6 +525,33 @@ def parse_tree_input(raw: str) -> list:
     return parse_hierarchical_content(raw)
 
 
+def read_content_file(path: str) -> str:
+    """Read block content from a file, for ``--content-file``.
+
+    The file is read as UTF-8 and returned verbatim (minus a trailing newline),
+    so tab-indented hierarchies and flush top-level bullets survive unchanged.
+    Unlike ``--content``, no shell quoting sits between the text and the CLI,
+    which is why this is the safe path for content with apostrophes, quotes or
+    umlauts.
+
+    Raises :class:`click.BadParameter` for a missing, unreadable, non-UTF-8 or
+    effectively empty file, so the caller fails before any write.
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise click.BadParameter(f"--content-file not found: {path}")
+    except IsADirectoryError:
+        raise click.BadParameter(f"--content-file is a directory: {path}")
+    except UnicodeDecodeError as e:
+        raise click.BadParameter(f"--content-file is not valid UTF-8: {path} ({e})")
+    except OSError as e:
+        raise click.BadParameter(f"--content-file cannot be read: {path} ({e})")
+    if not raw.strip():
+        raise click.BadParameter(f"--content-file is empty: {path}")
+    return raw.rstrip("\n")
+
+
 def block_uuid_from_result(result):
     """Extract a block UUID from a Logseq insert/append API result.
 
@@ -539,7 +567,7 @@ def block_uuid_from_result(result):
     return None
 
 
-def require_insert(result, what: str) -> str:
+def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     """Return the UUID of a just-inserted block, or abort loudly.
 
     The Logseq API answers a failed insert/append with HTTP 200 + ``null``
@@ -547,18 +575,32 @@ def require_insert(result, what: str) -> str:
     Callers that must not continue on a silent write failure use this to turn
     that ``null`` into a non-zero exit with a clear message, rather than
     reporting a phantom success.
+
+    ``written_so_far`` is the number of blocks already persisted in this
+    operation. There is no rollback (the API offers none), so on a multi-block
+    insert those blocks stay. Saying "Nothing was written" there would be a
+    lie that invites a retry and thus duplicates, so the message names the
+    partial state instead.
     """
     uuid = block_uuid_from_result(result)
     if not uuid:
+        if written_so_far:
+            tail = (
+                f"{written_so_far} block(s) were already written and remain "
+                "(no rollback available) — check the page before retrying, or "
+                "the retry will duplicate them."
+            )
+        else:
+            tail = "Nothing was written."
         raise click.ClickException(
             f"Logseq did not create {what} (API returned no block UUID). "
             "Likely cause: the target/anchor UUID does not exist, or the page "
-            "is not loaded. Nothing was written."
+            f"is not loaded. {tail}"
         )
     return uuid
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True) -> list:
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
@@ -576,17 +618,18 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     for block in tree:
         result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
         if strict:
-            new_uuid = require_insert(result, "a block")
+            new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
         else:
             new_uuid = block_uuid_from_result(result)
         uuids.append(new_uuid)
         children = block.get("children") or []
         if new_uuid and children:
-            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, strict=strict))
+            uuids.extend(insert_block_tree_with_uuids(
+                api, children, new_uuid, strict=strict, _written=_written + len(uuids)))
     return uuids
 
 
-def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True) -> list:
+def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True, _written: int = 0) -> list:
     """Insert a parsed tree as sibling(s) after (or before) ``anchor_uuid``.
 
     The first top-level node is inserted as a sibling of the anchor; its
@@ -603,7 +646,7 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     for block in tree:
         result = api.insert_block(cursor, block["content"], {"sibling": True, "before": before})
         if strict:
-            new_uuid = require_insert(result, "a block")
+            new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
         else:
             new_uuid = block_uuid_from_result(result)
         uuids.append(new_uuid)
@@ -612,7 +655,8 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
             break
         children = block.get("children") or []
         if children:
-            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, strict=strict))
+            uuids.extend(insert_block_tree_with_uuids(
+                api, children, new_uuid, strict=strict, _written=_written + len(uuids)))
         # When inserting "before", keep each new top node before the anchor in
         # order by advancing the cursor to the node just placed; when "after",
         # the next sibling must follow the one we just inserted.
@@ -620,7 +664,7 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     return uuids
 
 
-def insert_block_tree_at_page_top(api, tree: list, page_name: str) -> list:
+def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, _written: int = 0) -> list:
     """Insert tree starting at the top of ``page_name``.
 
     Top-level nodes use ``append_block_in_page`` (which currently appends; the
@@ -634,11 +678,13 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str) -> list:
     uuids = []
     for block in tree:
         result = api.append_block_in_page(page_name, block["content"])
-        new_uuid = require_insert(result, f"a block on '{page_name}'")
+        new_uuid = require_insert(
+            result, f"a block on '{page_name}'", written_so_far=_written + len(uuids))
         uuids.append(new_uuid)
         children = block.get("children") or []
         if children:
-            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid))
+            uuids.extend(insert_block_tree_with_uuids(
+                api, children, new_uuid, _written=_written + len(uuids)))
     return uuids
 
 
@@ -662,11 +708,18 @@ def insert_block_tree(api, tree: list, parent_uuid: str) -> int:
     return n
 
 
-def insert_formatted_content_with_uuids(api, page_name: str, content: str) -> list:
+def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True) -> list:
     """Like ``insert_formatted_content`` but returns the inserted block UUIDs.
 
     Top-level nodes are appended to the page; children use insert_block.
     Returns UUIDs in DFS pre-order (parent before children).
+
+    ``strict`` (the default) aborts on a silent write failure, the same
+    contract the other tree inserters follow. Without it this was the one
+    remaining path where a page that Logseq has not loaded answers every
+    append with HTTP 200 + ``null``, the ``None`` UUIDs still get counted, and
+    the caller reports "Added N block(s)" with exit 0 for a journal entry that
+    was never written.
     """
     tree = parse_hierarchical_content(content)
     uuids = []
@@ -675,13 +728,14 @@ def insert_formatted_content_with_uuids(api, page_name: str, content: str) -> li
         for block in blocks:
             if parent_uuid:
                 result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
+                what = "a block"
             else:
                 result = api.append_block_in_page(page_name, block["content"])
-            new_uuid = None
-            if isinstance(result, dict):
-                new_uuid = result.get("uuid")
-            elif isinstance(result, str):
-                new_uuid = result
+                what = f"a block on '{page_name}'"
+            if strict:
+                new_uuid = require_insert(result, what, written_so_far=len(uuids))
+            else:
+                new_uuid = block_uuid_from_result(result)
             uuids.append(new_uuid)
             if new_uuid and block["children"]:
                 insert_tree(block["children"], new_uuid)

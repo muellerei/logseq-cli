@@ -5,6 +5,62 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-08
+
+### Added
+
+- `add-journal-block --content-file DATEI` und `insert-block --tree-file DATEI`:
+  Blockinhalt aus einer Datei statt aus `--content`/`--tree`. Zwei Probleme
+  loest das:
+  - **Shell-Quoting entfaellt.** `--content "$(cat datei)"` bricht an einem
+    Apostroph im Text; der Reflex, dann alle Sonderzeichen zu entschaerfen,
+    verstuemmelt Umlaute gleich mit. Der Datei-Pfad hat keine Shell dazwischen.
+  - **Mehrere buendige `- `-Wurzeln sind erlaubt.** Inline lehnt der Guard sie
+    ab, weil sie dort still zu EINEM Block mit rohen Newline-Bullets wuerden.
+    Aus der Datei wird der gesamte Text als Baum geparst, buendige Bullets sind
+    dort legitime Geschwister-Wurzeln mit eigenen Kindern.
+
+  `--content-file` schliesst `--content` aus, `--tree-file` schliesst `--tree`
+  und `--content` aus. Eine fehlende, leere, nicht lesbare oder nicht
+  UTF-8-kodierte Datei bricht ab, bevor irgendetwas geschrieben wird.
+
+### Fixed
+
+Vier Wege, auf denen die gemeldete Blockzahl von den tatsaechlich
+geschriebenen Bloecken abweichen konnte. Drei davon endeten mit Exit 0 und
+einer Erfolgsmeldung fuer Text, der nie im Graph ankam. Gefunden beim
+adversarischen Pruefen des neuen Datei-Pfads, drei sind aelter als er.
+
+- **`--upsert-heading` verwarf alle Wurzeln ausser der ersten** und meldete
+  trotzdem `count_blocks(tree)`. Eine Datei mit drei Wurzeln schrieb eine und
+  meldete neun. Weitere Wurzeln werden jetzt als Geschwister eingefuegt, und
+  die gemeldete Zahl stammt aus den tatsaechlich zurueckgegebenen UUIDs.
+- **Der Upsert-Pfad schrieb nicht-strict** (`insert_block_tree`): ein stiller
+  Schreibfehler wurde uebersprungen und die Soll-Zahl gemeldet. Laeuft jetzt
+  ueber `insert_block_tree_with_uuids(strict=True)`.
+- **`insert_formatted_content_with_uuids` hatte als einzige Insert-Helferin
+  keinen strict-Vertrag.** Bei einer Page, die Logseq nicht geladen hat,
+  antwortet jeder Append mit HTTP 200 + `null`; die `None`-UUIDs wurden
+  mitgezaehlt und als `Added N block(s)` gemeldet. Betrifft
+  `add-journal-block --top-level`, den Heading-Fallback,
+  `add-journal-content` und `add-note-content`.
+- **`insert_block_tree_at_page_top` zaehlte im Batch-Pfad pro `--content`-Wert
+  neu ab 0**, sodass ein Fehler im zweiten Wert `Nothing was written` meldete,
+  obwohl der erste bereits stand.
+
+Zusaetzlich: Bricht ein Baum-Insert mitten drin ab, nennt die Meldung jetzt
+die Zahl der bereits geschriebenen Bloecke statt `Nothing was written`. Es
+gibt kein Rollback (die API bietet keins), und die alte Formulierung lud zu
+einem Retry ein, der die Bloecke dupliziert haette.
+
+### Changed
+
+- Der Guard von `add-journal-block --content` nennt jetzt `--content-file` als
+  vierten Ausweg. Fuer den Inline-Pfad bleibt er unveraendert scharf.
+- `--content-file` zusammen mit `--no-preserve` bricht ab, statt die Hierarchie
+  still zu einem Block zusammenzufalten. `--no-preserve` bleibt fuer
+  `--content` unveraendert nutzbar.
+
 ## [0.6.0] - 2026-08-07
 
 Ergebnis eines Audits gegen gaengige CLI-Konventionen (clig.dev, POSIX/grep,

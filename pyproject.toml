@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logseq-cli"
-version = "0.6.0"
+version = "0.7.0"
 description = "CLI for Logseq knowledge graph — pages, journals, blocks, search, properties, and graph analysis"
 requires-python = ">=3.10"
 dependencies = [

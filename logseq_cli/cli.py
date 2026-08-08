@@ -23,6 +23,7 @@ from logseq_cli.helpers import (
     find_backlinks,
     parse_hierarchical_content,
     parse_tree_input,
+    read_content_file,
     contains_hierarchical_content,
     has_flush_newline_bullets,
     has_mixed_indentation,
@@ -1813,14 +1814,19 @@ Examples:
   logseq-cli --token TOKEN add-journal-block --date 2026-05-07 --content "**14:30** Nachtrag"
   logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" --content "..."
   logseq-cli --token TOKEN add-journal-block --content "TODO A" --content "TODO B"   # batch
+  logseq-cli --token TOKEN add-journal-block --content-file entry.md                 # tree from file
   logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" \\
                                               --upsert-heading "### [[Carol]]" --content "..."
 Notes:
   Default heading from LOGSEQ_JOURNAL_HEADING env (e.g. "## Log").
   --upsert-heading replaces a placeholder block under --under-heading without needing UUID.
   Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
+  --content-file reads the whole file as ONE tree: flush "- " lines become
+  sibling roots, tab-indented lines their children. No shell quoting, so
+  apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
 """)
-@click.option("--content", "contents", required=True, multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
+@click.option("--content", "contents", multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
+@click.option("--content-file", "content_file", default=None, help="Read block content from a file and insert it as a tree (multiple flush '- ' roots allowed). Mutually exclusive with --content.")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--upsert-heading", default=None, help="Find child block matching this heading under --under-heading and update it; insert as new block if not found.")
@@ -1830,7 +1836,7 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_level, preserve_formatting, dry_run, as_json):
+def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, top_level, preserve_formatting, dry_run, as_json):
     """Add one or more blocks to a journal page.
 
     Pass --content multiple times for batch inserts under the same heading.
@@ -1842,20 +1848,48 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
       logseq-cli add-journal-block --under-heading "## Tasks" --content "TODO Task A" --content "TODO Task B"
       logseq-cli add-journal-block --date 2026-04-03 --content "Retroactive entry"
     """
+    # --content and --content-file are mutually exclusive; exactly one is required.
+    if content_file is not None and contents:
+        raise click.UsageError("Specify either --content or --content-file, not both.")
+    if content_file is None and not contents:
+        raise click.UsageError("Missing option '--content' (or '--content-file').")
+
+    # --content-file: the file IS the tree. Flush "- " roots are siblings here,
+    # not the silent-failure case the guard below protects against, because the
+    # whole text is parsed hierarchically instead of written as one raw block.
+    from_file = content_file is not None
+    if from_file:
+        # --no-preserve collapses all whitespace, which would flatten the very
+        # tree --content-file exists to insert (and leave raw "- " markers in
+        # the text). The guard that catches this inline is skipped here, so the
+        # combination must be rejected rather than silently written.
+        if not preserve_formatting:
+            raise click.UsageError(
+                "--content-file und --no-preserve sind unvereinbar: "
+                "--no-preserve wuerde die Hierarchie zu EINEM Block "
+                "zusammenfalten.\n"
+                "  - Struktur gewollt?  -> --no-preserve weglassen\n"
+                "  - Fliesstext gewollt? -> --content nutzen"
+            )
+        contents = (read_content_file(content_file),)
+
     # Guard: reject flush (non-indented) newline bullets in ANY --content value.
     # Such content is neither detected as hierarchy (needs indentation) nor split
     # into siblings — it would silently become ONE block with raw "\n- " lines,
     # breaking the outline. Fail loudly with a fix instruction instead.
-    for c in contents:
-        if has_flush_newline_bullets(c):
-            raise click.UsageError(
-                "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
-                "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
-                "als EIN Block mit rohen Newline-Bullets.\n"
-                "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
-                "  - Geschwister gewollt? -> mehrere --content nutzen\n"
-                "  - Voller Tree?        -> insert-block --tree"
-            )
+    # Skipped for --content-file, which always takes the structured path.
+    if not from_file:
+        for c in contents:
+            if has_flush_newline_bullets(c):
+                raise click.UsageError(
+                    "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
+                    "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
+                    "als EIN Block mit rohen Newline-Bullets.\n"
+                    "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
+                    "  - Geschwister gewollt? -> mehrere --content nutzen\n"
+                    "  - Voller Tree?        -> insert-block --tree\n"
+                    "  - Aus Datei?          -> --content-file DATEI"
+                )
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -1918,16 +1952,18 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
         for kind, payload in planned:
             if kind == "tree":
                 if heading_uuid:
-                    uuids.extend(insert_block_tree_with_uuids(api, payload, heading_uuid, strict=True))
+                    uuids.extend(insert_block_tree_with_uuids(
+                        api, payload, heading_uuid, strict=True, _written=len(uuids)))
                 else:
                     # payload is the parsed tree; insert top nodes + children at page level
-                    uuids.extend(insert_block_tree_at_page_top(api, payload, page_name))
+                    uuids.extend(insert_block_tree_at_page_top(
+                        api, payload, page_name, _written=len(uuids)))
             else:
                 if heading_uuid:
                     r = api.insert_block(heading_uuid, payload, {"sibling": False})
                 else:
                     r = api.append_block_in_page(page_name, payload)
-                uuids.append(require_insert(r, "a journal block"))
+                uuids.append(require_insert(r, "a journal block", written_so_far=len(uuids)))
         total = len(uuids)
         if any_hierarchical:
             click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
@@ -1992,13 +2028,28 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
 
         if found_uuid:
             root_uuid = found_uuid
-            if contains_hierarchical_content(content):
+            if from_file or contains_hierarchical_content(content):
                 tree = parse_hierarchical_content(content)
                 if tree:
+                    # The first root replaces the matched block; its children
+                    # nest under it. Any further roots are siblings after it —
+                    # dropping them would lose content while still reporting
+                    # count_blocks(tree) as written.
+                    #
+                    # Both inserts run strict and n counts the UUIDs actually
+                    # returned, plus 1 for the update. Using count_blocks(tree)
+                    # here would report the intended size even when a write
+                    # silently failed, which is the exact "text is gone and
+                    # nothing says so" case require_insert exists to prevent.
                     api.update_block(found_uuid, tree[0]["content"])
-                    for sub in tree[0].get("children", []):
-                        insert_block_tree(api, [sub], found_uuid)
-                    n = count_blocks(tree)
+                    n = 1
+                    kids = tree[0].get("children", [])
+                    if kids:
+                        n += len(insert_block_tree_with_uuids(
+                            api, kids, found_uuid, strict=True, _written=n))
+                    if len(tree) > 1:
+                        n += len(insert_block_tree_as_siblings(
+                            api, tree[1:], found_uuid, _written=n))
                 else:
                     api.update_block(found_uuid, content)
                     n = 1
@@ -2007,7 +2058,7 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
                 n = 1
             status = "updated"
         elif heading_uuid:
-            if contains_hierarchical_content(content):
+            if from_file or contains_hierarchical_content(content):
                 tree = parse_hierarchical_content(content)
                 created = insert_block_tree_with_uuids(api, tree, heading_uuid)
                 n = len(created)
@@ -2015,12 +2066,12 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
             else:
                 r = api.insert_block(heading_uuid, content, {"sibling": False})
                 n = 1
-                root_uuid = r.get("uuid") if isinstance(r, dict) else None
+                root_uuid = require_insert(r, "the upsert block")
             status = "created"
         else:
             r = api.append_block_in_page(page_name, content)
             n = 1
-            root_uuid = r.get("uuid") if isinstance(r, dict) else None
+            root_uuid = require_insert(r, f"a block on '{page_name}'")
             status = "top-level (heading not found)"
 
         position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
@@ -2030,8 +2081,10 @@ def add_journal_block(ctx, contents, date, under_heading, upsert_heading, top_le
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
         return
 
-    # Auto-detect hierarchical content and delegate to structured insertion
-    if preserve_formatting and contains_hierarchical_content(content):
+    # Auto-detect hierarchical content and delegate to structured insertion.
+    # --content-file always takes this path: its flush "- " lines are roots,
+    # which contains_hierarchical_content (indentation-based) would not detect.
+    if preserve_formatting and (from_file or contains_hierarchical_content(content)):
         click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
         tree = parse_hierarchical_content(content)
         n = count_blocks(tree)
@@ -2471,7 +2524,9 @@ Examples:
 Notes:
   --tree accepts tab-indented text OR JSON (auto-detected). Use it instead of
   N×insert-block for hierarchies — single API roundtrip.
-  --content and --tree are mutually exclusive.
+  --content, --tree and --tree-file are mutually exclusive.
+  --tree-file reads the same tab-indented text (or JSON) from a file, so
+  apostrophes/quotes/umlauts need no shell quoting.
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
@@ -2481,14 +2536,23 @@ Notes:
 @click.option("--top-level", is_flag=True, help="With --page and --tree: insert at page top-level")
 @click.option("--content", default=None, help="Content for the new block")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
+@click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tree_input, properties, dry_run, as_json):
+def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tree_input, tree_file, properties, dry_run, as_json):
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
+
+    # --tree-file is --tree from a file; resolve it before any other validation
+    # so the rest of the command sees a single tree_input.
+    if tree_file is not None:
+        if tree_input is not None:
+            click.echo("Specify either --tree or --tree-file, not both.", err=True)
+            sys.exit(1)
+        tree_input = read_content_file(tree_file)
 
     # Validate property pairs up-front so a bad pair fails before any write.
     try:
