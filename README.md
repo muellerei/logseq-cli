@@ -142,6 +142,9 @@ logseq-cli add-journal-block --content "**14:30** Meeting notes"
 # Preview before writing
 logseq-cli add-journal-block --dry-run --content "**14:30** Meeting notes"
 
+# Write content from a file — no shell quoting, several flush "- " roots allowed
+logseq-cli add-journal-block --content-file entry.md
+
 # Export page as Logseq-compatible markdown
 logseq-cli get-page --page "My Page" --format markdown
 
@@ -190,7 +193,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `create-page --name NAME` | Create a new page |
 | `add-journal-entry --content TEXT` | Add journal entry (deprecated, use add-journal-block) |
-| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`) |
+| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots |
 | `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
 | `add-note-content --page NAME --content TEXT [--under-heading "## X"]` | Add content to any page; optionally under a heading (created if missing) |
 
@@ -202,7 +205,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
 | `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
-| `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned) |
+| `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
 | `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
 
 ### Meta (2)
