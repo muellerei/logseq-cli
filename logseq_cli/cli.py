@@ -25,6 +25,8 @@ from logseq_cli.helpers import (
     parse_tree_input,
     read_content_file,
     contains_hierarchical_content,
+    reject_unsupported_multiline,
+    MultilineContentError,
     has_flush_newline_bullets,
     has_mixed_indentation,
     normalize_indentation,
@@ -1880,16 +1882,12 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # Skipped for --content-file, which always takes the structured path.
     if not from_file:
         for c in contents:
-            if has_flush_newline_bullets(c):
-                raise click.UsageError(
-                    "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
-                    "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
-                    "als EIN Block mit rohen Newline-Bullets.\n"
-                    "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
-                    "  - Geschwister gewollt? -> mehrere --content nutzen\n"
-                    "  - Voller Tree?        -> insert-block --tree\n"
-                    "  - Aus Datei?          -> --content-file DATEI"
+            try:
+                reject_unsupported_multiline(
+                    c, command="add-journal-block", accepts_tree=True
                 )
+            except MultilineContentError as e:
+                raise click.UsageError(str(e))
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -2339,6 +2337,8 @@ Example:
 Note:
   Use set-property/remove-property for properties — never edit them via update-block.
   Use set-todo-status to change TODO/DOING/DONE markers.
+  --content is ONE block: newline bullets stay raw text, indented or not.
+  Children go in via insert-block --child-of UUID.
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to update")
 @click.option("--content", required=True, help="New content for the block")
@@ -2348,6 +2348,14 @@ Note:
 @handle_connection_error
 def update_block(ctx, block_id, content, dry_run, as_json):
     """Update the content of an existing block."""
+    # Guard: unlike insert-block / add-journal-block this command has no tree
+    # path — it replaces ONE block's content, so newline bullets (indented or
+    # flush) would land as raw text inside the block instead of becoming children.
+    try:
+        reject_unsupported_multiline(content, command="update-block", accepts_tree=False)
+    except MultilineContentError as e:
+        raise click.UsageError(str(e))
+
     api = ctx.obj["api"]
     clean_id = block_id.strip().replace("((", "").replace("))", "")
 

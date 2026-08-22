@@ -201,7 +201,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `update-block --id UUID --content TEXT [--dry-run]` | Update block content |
+| `update-block --id UUID --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too — use `insert-block --child-of` for children |
 | `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
 | `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
