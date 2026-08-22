@@ -304,6 +304,59 @@ def has_flush_newline_bullets(content: str) -> bool:
     return False
 
 
+class MultilineContentError(ValueError):
+    """Raised when a ``--content`` value carries bullets the command cannot write.
+
+    Carries a ready-to-print message; CLI callers re-raise it as a
+    ``click.UsageError`` so the user sees the fix instructions directly.
+    """
+
+
+def reject_unsupported_multiline(content: str, *, command: str, accepts_tree: bool) -> None:
+    """Reject newline bullets that ``command`` cannot turn into real blocks.
+
+    Two different failure modes, one rule per command:
+
+    ``accepts_tree=True`` (``insert-block``, ``add-journal-block``,
+    ``add-note-content``): indented sub-bullets are parsed into children, so only
+    a flush (column-0) ``- `` on line 2+ is broken — it is neither hierarchy nor
+    a sibling split and would land as raw text inside one block.
+
+    ``accepts_tree=False`` (``update-block``): the command replaces the content of
+    ONE existing block and has no tree path at all. *Any* newline bullet, indented
+    or not, ends up as raw text inside that block.
+
+    Raises:
+        MultilineContentError: with a message naming the fix for this command.
+    """
+    flush = has_flush_newline_bullets(content)
+    indented = contains_hierarchical_content(content)
+
+    if accepts_tree:
+        if not flush:
+            return
+        raise MultilineContentError(
+            "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
+            "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
+            "als EIN Block mit rohen Newline-Bullets.\n"
+            "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
+            "  - Geschwister gewollt? -> mehrere --content nutzen\n"
+            "  - Voller Tree?        -> insert-block --tree\n"
+            "  - Aus Datei?          -> --content-file DATEI"
+        )
+
+    if not (flush or indented):
+        return
+    raise MultilineContentError(
+        f"--content enthält mehrzeilige '- '-Bullets. {command} ersetzt den "
+        "Inhalt EINES Blocks und legt keine Kind-Blöcke an: die Zeilen landen "
+        "als roher Text im Block.\n"
+        "  - Nur die Zeile ändern? -> --content auf eine Zeile kürzen\n"
+        "  - Kinder gewollt?       -> insert-block --child-of UUID\n"
+        "  - Voller Tree?          -> insert-block --tree"
+    )
+
+
 def has_mixed_indentation(content: str) -> bool:
     """True if any indented line mixes tabs and spaces in its leading whitespace.
 

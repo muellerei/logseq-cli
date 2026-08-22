@@ -5,6 +5,20 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `update-block --content` now fails when the text carries newline `- ` bullets.
+  The command replaces the content of ONE block and has no tree path, so indented
+  sub-bullets silently became raw text *inside* the block instead of children.
+  Unlike `insert-block` / `add-journal-block`, the indented form is rejected here
+  too, not just the flush one. Changing the line itself -> shorten `--content` to
+  that one line; adding children -> `insert-block --child-of UUID`.
+- Both guards now share `reject_unsupported_multiline(content, command=...,
+  accepts_tree=...)`. Whether a command can write a tree is stated in one place
+  instead of being duplicated per command.
+
 ## [0.7.0] - 2026-08-08
 
 ### Added
