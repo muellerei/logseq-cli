@@ -620,6 +620,33 @@ def block_uuid_from_result(result):
     return None
 
 
+# Why some writes are verified by reading them back
+# ---------------------------------------------------
+# Three API methods answer ``null`` for a successful call as well as a failed
+# one, so their return value carries no success signal at all (each verified
+# against a live graph, 2026-08-22):
+#
+#   insertBatchBlock  null on success, on partial write, and on failure
+#   moveBlock         null on success, on a missing target, and on a refusal
+#                     (Logseq declines to move a block into its own subtree)
+#   updateBlock       null on success and on a non-existent block UUID
+#
+# For these, :func:`require_insert` cannot help: there is no UUID to miss. The
+# callers therefore re-read the affected blocks and compare against what they
+# intended to write. That costs one extra API call per operation and is a
+# workaround, not a design choice.
+#
+# If a future Logseq version returns the written block (or any error signal) for
+# these methods, drop the verifying read and route them through
+# ``require_insert`` like every other write, keeping the read only where a count
+# has to be compared. The affected call sites are
+# :func:`insert_block_tree_batched`, :func:`move_block_verified` and the
+# ``replace-text`` command; they are the ones to revisit.
+#
+# ``insertBlock`` and ``appendBlockInPage`` do return the new block, which is
+# why ``require_insert`` works for them and is the cheaper check to prefer.
+
+
 def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     """Return the UUID of a just-inserted block, or abort loudly.
 
@@ -653,7 +680,7 @@ def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     return uuid
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, _written: int = 0) -> list:
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
@@ -666,7 +693,24 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     written — the worst outcome for a journal entry, since the text is gone and
     nothing says so. ``strict=False`` is only for callers that deliberately
     tolerate partial writes; it must never be the default.
+
+    ``batch`` (the default) sends a multi-block tree as a single
+    ``insertBatchBlock`` call via :func:`insert_block_tree_batched`, which
+    verifies the write by re-reading. It requires ``strict``, because the
+    non-strict contract is to return a ``None`` per unwritten block, and the
+    batch path cannot say which nodes those were: the API reports neither an
+    error nor UUIDs. Set ``batch=False`` to force the per-block path when the
+    caller needs a UUID for every node as it is written.
     """
+    if strict and batch and count_blocks(tree) > 1:
+        # One round-trip instead of N. NOT atomic: a batch can still write only
+        # part of its nodes (verified against a live graph - a malformed node is
+        # skipped while its siblings land), and it answers null either way. That
+        # is why the batch path verifies by re-reading instead of trusting the
+        # response. Single blocks keep the per-block path, which returns the
+        # UUID directly and needs no verifying read.
+        return insert_block_tree_batched(api, tree, parent_uuid)
+
     uuids = []
     for block in tree:
         result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
@@ -679,6 +723,252 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
         if new_uuid and children:
             uuids.extend(insert_block_tree_with_uuids(
                 api, children, new_uuid, strict=strict, _written=_written + len(uuids)))
+    return uuids
+
+
+def _collect_child_uuids(node) -> list:
+    """UUIDs of a getBlock(includeChildren=True) subtree, DFS pre-order."""
+    out = []
+    for child in (node.get("children") or []):
+        if not isinstance(child, dict):
+            continue  # a children list of bare UUID refs carries no content
+        if child.get("uuid"):
+            out.append(child["uuid"])
+        out.extend(_collect_child_uuids(child))
+    return out
+
+
+def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
+    """Insert a tree under ``parent_uuid`` in ONE API call, then verify.
+
+    ``insertBatchBlock`` replaces N ``insertBlock`` round-trips with one. It is
+    NOT atomic: verified against a live graph, a batch containing a malformed
+    node writes its siblings and skips that node, so a partial write is still
+    possible - one call is fewer chances to fail, not none.
+
+    Worse, the API answers ``null`` whether it wrote everything, part of it, or
+    nothing, so the return value carries no success signal at all. That is
+    exactly the silent-write-failure shape this codebase refuses to accept, so
+    the write is proven instead: the parent's children are read back and the new
+    UUIDs counted. The read also recovers the UUIDs the batch call withholds.
+    See the note above :func:`require_insert` for when this read can be dropped.
+
+    Positioning: with ``sibling: false`` the batch lands at the HEAD of the child
+    list (``before: false`` does not change it), so to append we anchor on the
+    last existing child with ``sibling: true``. With no children yet, the parent
+    itself is the anchor.
+
+    Returns the new UUIDs in DFS pre-order. Raises ``ClickException`` if the
+    graph does not show the expected number of new blocks afterwards.
+    """
+    if not tree:
+        return []
+
+    before = api.get_block(parent_uuid, include_children=True)
+    if not before:
+        raise click.ClickException(
+            f"Cannot insert: block {parent_uuid[:8]}... not found "
+            "(the target UUID does not exist, or the page is not loaded). "
+            "Nothing was written."
+        )
+    existing = [c for c in (before.get("children") or []) if isinstance(c, dict)]
+    before_uuids = set(_collect_child_uuids(before))
+
+    if existing and existing[-1].get("uuid"):
+        anchor, opts = existing[-1]["uuid"], {"sibling": True}
+    else:
+        anchor, opts = parent_uuid, {"sibling": False}
+
+    api.insert_batch_block(anchor, tree, opts)
+
+    after = api.get_block(parent_uuid, include_children=True)
+    after_uuids = _collect_child_uuids(after) if after else []
+    new = [u for u in after_uuids if u not in before_uuids]
+
+    expected = count_blocks(tree)
+    if len(new) != expected:
+        raise click.ClickException(
+            f"Batch insert wrote {len(new)} of {expected} block(s) under "
+            f"{parent_uuid[:8]}... . The API reports no error for this, so the "
+            "graph was re-read to check. Verify the page before retrying, or the "
+            "retry will duplicate what did land."
+        )
+    return new
+
+
+def _child_uuids_in_order(api, parent_id) -> list:
+    """Child UUIDs of a block addressed by its numeric id, in order.
+
+    ``getBlock`` reports a parent as ``{"id": <int>}`` with no UUID, but it also
+    accepts that id as its argument, so the parent's child list is reachable in
+    one read without walking the page tree.
+    """
+    if parent_id is None:
+        return []
+    parent = api.get_block(parent_id, include_children=True) or {}
+    return [
+        c.get("uuid") for c in (parent.get("children") or [])
+        if isinstance(c, dict) and c.get("uuid")
+    ]
+
+
+def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool = False) -> list:
+    """Blocks whose content matches ``content``, optionally scoped to a page.
+
+    Single source for the content lookup shared by ``find-block`` and the
+    ``--where-content`` selectors, so a query fix cannot land in one and miss
+    the other. Substring matching happens in datalog; ``use_regex`` pulls the
+    candidates and filters them here, because datalog has no regex predicate.
+    """
+    if use_regex:
+        if page:
+            query = (
+                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+                f' :where [?p :block/name "{page.lower()}"]'
+                ' [?b :block/page ?p]'
+                ' [?b :block/content _]]'
+            )
+        else:
+            query = (
+                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+                ' :where [?b :block/content _]]'
+            )
+        raw = api.datascript_query(query) or []
+        pattern = re.compile(content)
+        return [r[0] for r in raw if r and r[0] and pattern.search(r[0].get("content", ""))]
+
+    content_escaped = content.replace('"', '\\"')
+    if page:
+        query = (
+            '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+            f' :where [?p :block/name "{page.lower()}"]'
+            ' [?b :block/page ?p]'
+            ' [?b :block/content ?c]'
+            f' [(clojure.string/includes? ?c "{content_escaped}")]]'
+        )
+    else:
+        query = (
+            '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+            ' :where [?b :block/content ?c]'
+            f' [(clojure.string/includes? ?c "{content_escaped}")]]'
+        )
+    raw = api.datascript_query(query) or []
+    return [r[0] for r in raw if r and r[0]]
+
+
+def resolve_single_block(api, content: str, page: str = None, use_regex: bool = False) -> str:
+    """UUID of the ONE block matching ``content``, or abort.
+
+    Selecting a write target by text is only safe when the text identifies
+    exactly one block. Zero matches and several matches both raise instead of
+    picking one: these commands overwrite or delete, so guessing on an ambiguous
+    match would destroy the wrong content, and the caller cannot tell afterwards.
+    Several matches are listed so the caller can narrow the search or pass --id.
+    """
+    matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
+    where = f" on page '{page}'" if page else ""
+    if not matches:
+        raise click.ClickException(
+            f"No block matches {content!r}{where}. Nothing was changed.")
+    if len(matches) > 1:
+        listing = "\n".join(
+            f"  {m.get('uuid')}  {(m.get('content') or '')[:70]}"
+            for m in matches[:10]
+        )
+        more = f"\n  ... and {len(matches) - 10} more" if len(matches) > 10 else ""
+        raise click.ClickException(
+            f"{len(matches)} blocks match {content!r}{where}; refusing to guess "
+            f"which one to write to. Narrow the search (--page, a longer text) or "
+            f"pass --id:\n{listing}{more}"
+        )
+    uuid = matches[0].get("uuid")
+    if not uuid:
+        raise click.ClickException(
+            f"Match for {content!r} carries no UUID. Nothing was changed.")
+    return uuid
+
+
+def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = False) -> None:
+    """Move ``src_uuid`` to ``target_uuid``, then prove it landed.
+
+    Unlike copy+remove, the block keeps its UUID, so every ``((block-ref))``
+    pointing at it survives the move.
+
+    Position follows what ``moveBlock`` actually does, which is narrower than
+    its option names suggest (probed against a live graph): ``before: true``
+    places the block as the sibling *before* the target; everything else,
+    including the ``sibling: true`` the option list implies, nests it as the
+    target's first child. There is no "sibling after" - anchor on the following
+    block with ``before`` instead.
+
+    ``moveBlock`` answers ``null`` for a successful move, a non-existent target
+    AND a refused one (Logseq declines to move a block into its own subtree, and
+    says so only by doing nothing), so the response proves nothing. The move is
+    verified by re-reading: the block must have changed parent, and for a child
+    move it must appear among the target's children. See the note above
+    :func:`require_insert` for when this read can be dropped.
+    """
+    src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
+    target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
+    if src_uuid == target_uuid:
+        raise click.ClickException("Source and target are the same block.")
+
+    if not api.get_block(src_uuid, include_children=False):
+        raise click.ClickException(
+            f"Source block {src_uuid[:8]}... not found. Nothing was moved.")
+    if not api.get_block(target_uuid, include_children=False):
+        raise click.ClickException(
+            f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
+    api.move_block(src_uuid, target_uuid, {"before": True} if before else {"children": True})
+
+    landed = api.get_block(target_uuid, include_children=True) or {}
+    if before:
+        # The block must sit directly in front of the target under the same
+        # parent. Checking only "same parent" would pass a move that did
+        # nothing, since source and target often already share one.
+        siblings = _child_uuids_in_order(api, (landed.get("parent") or {}).get("id"))
+        try:
+            ok = siblings.index(src_uuid) + 1 == siblings.index(target_uuid)
+        except ValueError:
+            ok = False
+    else:
+        ok = any(
+            isinstance(c, dict) and c.get("uuid") == src_uuid
+            for c in (landed.get("children") or [])
+        )
+    if not ok:
+        raise click.ClickException(
+            f"Move of {src_uuid[:8]}... did not take effect. Logseq reports no error "
+            "for this, so the graph was re-read to check. A block cannot be moved "
+            "into its own subtree; check that the target is not a descendant of the "
+            "source. Nothing was removed."
+        )
+
+
+def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, _written: int = 0) -> list:
+    """Insert a parsed tree at the HEAD of ``parent_uuid``'s child list.
+
+    ``insertBlock`` can address the first child position (``sibling: false`` +
+    ``before: true``) but has no "nth child" option. Looping over the roots with
+    ``before=True`` would therefore push each one ahead of the previous and
+    reverse the declaration order. So the first root claims the head position
+    and the remaining roots chain as siblings behind it, which preserves the
+    order the caller wrote.
+
+    Returns the UUIDs in DFS pre-order, like the sibling/child variants.
+    """
+    if not tree:
+        return []
+    head = api.insert_block(parent_uuid, tree[0]["content"], {"sibling": False, "before": True})
+    head_uuid = require_insert(head, "the first child", written_so_far=_written)
+    uuids = [head_uuid]
+    children = tree[0].get("children") or []
+    if children:
+        uuids.extend(insert_block_tree_with_uuids(
+            api, children, head_uuid, strict=True, _written=_written + len(uuids)))
+    if len(tree) > 1:
+        uuids.extend(insert_block_tree_as_siblings(
+            api, tree[1:], head_uuid, _written=_written + len(uuids)))
     return uuids
 
 

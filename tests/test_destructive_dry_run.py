@@ -50,7 +50,7 @@ class TestUpdateBlockDryRun:
         result = CliRunner().invoke(cli, ["update-block", "--id", "u1",
                                           "--content", "new text"])
         assert result.exit_code == 0
-        api.update_block.assert_called_once_with("u1", "new text")
+        api.update_block.assert_called_once_with("u1", "new text", properties=None)
 
     def test_missing_block_errors_as_json_on_stderr(self, api):
         api.get_block.return_value = None

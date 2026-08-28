@@ -29,6 +29,8 @@ _MUTATING_METHODS = frozenset({
     "logseq.Editor.removeBlockProperty",
     "logseq.Editor.setBlockProperty",
     "logseq.Editor.replaceText",
+    "logseq.Editor.insertBatchBlock",
+    "logseq.Editor.moveBlock",
 })
 
 
@@ -135,8 +137,52 @@ class LogseqAPI:
             "logseq.Editor.insertBlock", [block_uuid, content, options or {}]
         )
 
-    def update_block(self, block_uuid: str, content: str):
-        return self.call("logseq.Editor.updateBlock", [block_uuid, content])
+    def insert_batch_block(self, block_uuid: str, batch: list, options: dict = None):
+        """Insert a whole tree in ONE call. Returns null even on success.
+
+        ``insertBatchBlock`` writes an arbitrarily deep ``[{content, children}]``
+        tree against a single anchor, where :meth:`insert_block` needs one call
+        per node. It answers ``null`` both when it wrote and when it did not, so
+        the return value carries no success signal at all: callers must verify by
+        reading the anchor's children back (see
+        :func:`helpers.insert_block_tree_batched`).
+
+        Positioning also differs from :meth:`insert_block`: with
+        ``sibling: false`` the batch lands at the HEAD of the child list and
+        ``before: false`` does not change that, so appending means anchoring on
+        the last existing child with ``sibling: true``.
+        """
+        return self.call(
+            "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}]
+        )
+
+    def move_block(self, src_uuid: str, target_uuid: str, options: dict = None):
+        """Move a block (with its children) next to / under ``target_uuid``.
+
+        Structural move, unlike copy+remove: the block keeps its UUID, so
+        ``((block-ref))`` backlinks survive.
+        """
+        return self.call(
+            "logseq.Editor.moveBlock", [src_uuid, target_uuid, options or {}]
+        )
+
+    def update_block(self, block_uuid: str, content: str, properties: dict = None):
+        """Replace a block's content, optionally carrying its properties along.
+
+        Block properties live *inside* the content (``prio:: 1`` as a line of
+        the same block), so a plain content replacement drops every one of
+        them. Passing them through the documented third parameter
+        (``opts.properties``) makes Logseq re-emit them below the new text.
+
+        The round trip is lossless: a value read back as ``["Bob"]`` is
+        written out as ``link:: [[Bob]]`` again (verified against a live
+        graph). ``id::`` is not part of this dict and survives regardless, so
+        block references stay intact.
+        """
+        args = [block_uuid, content]
+        if properties:
+            args.append({"properties": properties})
+        return self.call("logseq.Editor.updateBlock", args)
 
     def remove_block(self, block_uuid: str):
         return self.call("logseq.Editor.removeBlock", [block_uuid])

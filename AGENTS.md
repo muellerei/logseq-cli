@@ -1,19 +1,32 @@
-# logseq-cli — Agent Reference
+# logseq-cli: Agent Reference
 
-Instructions for AI agents and automation tools using logseq-cli.
+Instructions for any AI agent or automation tool driving logseq-cli from a
+shell. Nothing here is specific to one assistant: the CLI is a plain Python
+package (`click`, `requests`) with no vendor coupling, and `CLAUDE.md` next to
+this file is just one client's house rules, not a requirement.
+
+What makes it scriptable:
+
+- `--json` on **every** command; payload goes to stdout, nothing else does
+- errors go to **stderr**, as a JSON object when `--json` is set, so stdout can
+  be parsed unconditionally
+- non-zero exit on failure, including "not found"
+- `--dry-run` on every command that can destroy content
 
 ## Setup Check
-
-Before using logseq-cli, verify:
 
 ```bash
 # 1. CLI is installed
 logseq-cli --version
 
-# 2. Logseq is running with HTTP API enabled
-logseq-cli --token "YOUR_TOKEN" get-all-pages --json 2>&1 | head -1
-# Success: JSON array. Failure: "Connection refused" or "401"
+# 2. Connectivity, token, API and graph access in one call
+logseq-cli --token "YOUR_TOKEN" doctor --json
 ```
+
+`doctor` checks each step separately, so a failure names which one broke rather
+than leaving you to guess between "Logseq is down" and "the token is wrong".
+Both also surface on any other command as `{"error": ..., "reason":
+"connection_refused" | "http_error"}` on stderr with exit 1.
 
 If Logseq is not running, fall back to direct filesystem access on the graph's markdown files.
 
@@ -87,10 +100,19 @@ logseq-cli --token "TOKEN" get-todos --page "Project Alpha"
 # Filter by tag
 logseq-cli --token "TOKEN" get-todos --tag urgent
 
-# Mark as done (search & replace)
-logseq-cli --token "TOKEN" replace-text --page "Page" --find "TODO Task" --replace "DONE Task" --dry-run
-logseq-cli --token "TOKEN" replace-text --page "Page" --find "TODO Task" --replace "DONE Task"
+# Mark as done
+logseq-cli --token "TOKEN" set-todo-status --id UUID --status DONE
+
+# ... or without knowing the UUID (aborts if the text matches several blocks)
+logseq-cli --token "TOKEN" set-todo-status --content "Task" --page "Page" --status DONE
+
+# Follow a ((uuid)) reference in a journal to the original block
+logseq-cli --token "TOKEN" set-todo-status --id JOURNAL-REF-UUID --status DONE --follow-refs
 ```
+
+Do not use `replace-text` to change a marker: it rewrites by text match, so it
+also hits the word elsewhere on the page and silently retypes the rest of the
+line. `set-todo-status` swaps only the marker, in one call.
 
 ### 5. Properties
 
@@ -149,7 +171,9 @@ logseq-cli --token "TOKEN" add-journal-content \
 
 ### 4. Destructive Operations
 
-Always use `--dry-run` before `replace-text`:
+`--dry-run` is available on every write that can destroy content:
+`replace-text`, `update-block`, `remove-block`, `copy-block`, `delete-page`,
+`insert-block`, `add-journal-block`, `move-block`. Use it first.
 
 ```bash
 # Preview first
@@ -158,6 +182,10 @@ logseq-cli --token "TOKEN" replace-text --page "Page" --find "X" --replace "Y" -
 # Then execute
 logseq-cli --token "TOKEN" replace-text --page "Page" --find "X" --replace "Y"
 ```
+
+To relocate a block, prefer `move-block` over `copy-block --remove`: it moves the
+block itself, so its UUID and every `((block-ref))` pointing at it survive, and
+nothing is deleted.
 
 ### 5. Connection Errors
 
@@ -190,6 +218,15 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `smart-query` | Natural language or Datalog queries |
 | `get-todos` | List and filter tasks |
 | `get-backlinks` | Find pages linking to a page |
-| `insert-block` | Insert at specific position (after/before/child-of) |
+| `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child) |
+| `find-block` | Find blocks by content; `--with-children` prints the subtree |
+| `update-block` | Change one block's content (by `--id` or `--where-content`); its properties are kept |
+| `set-todo-status` | Change a TODO/DOING/DONE marker (never `replace-text`) |
+| `move-block` | Relocate a block, keeping its UUID and refs |
+| `copy-block` | Copy a block to another page (new UUID) |
+| `remove-block` | Delete a block by UUID |
+| `get-journal-range` | Read many journal days in one call |
+| `doctor` | Check connectivity, token, API and graph access |
 | `replace-text` | Search and replace with dry-run |
 | `get-properties` / `set-property` | Read/write page properties |
+| `set-block-property` / `remove-property --id` | Read/write properties on a single block |
