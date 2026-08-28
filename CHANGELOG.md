@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference graph were affected. The query and the value lookup now match
   both spellings, so either form returns the same pages.
 
+- A fresh `pip install -e` aborted with a flat-layout error once `local/`
+  appeared as a second top-level directory: setuptools auto-discovery saw two
+  packages and refused. The package list is now explicit in `pyproject.toml`.
+
 - `get-properties --property` failed for every multi-word key, in both
   spellings: the API returns camelCase keys (`excludeFromGraphView`), and the
   lookup lowercased the typed key into a form matching neither camelCase nor
