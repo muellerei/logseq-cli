@@ -18,6 +18,8 @@ pip install -e .
 ```
 
 Requires Python 3.10+ and a running Logseq Desktop app (HTTP API on port 12315).
+Developed and tested against Logseq Desktop 0.10.15 with a file-based graph;
+newer Logseq versions are untested.
 
 ## Configuration
 
