@@ -142,3 +142,50 @@ class TestParseHierarchicalContentIntegration:
         assert len(tree) == 1
         assert tree[0]["content"] == "simple block"
         assert tree[0]["children"] == []
+
+
+class TestParseHierarchicalPropertyLines:
+    """Property lines (key:: value) must merge into the preceding block,
+    never become standalone blocks (they'd render as broken content)."""
+
+    def test_indented_property_line_merges_into_parent(self):
+        tree = parse_hierarchical_content("- ## Plan\n\tcollapsed:: true")
+        assert len(tree) == 1
+        assert tree[0]["content"] == "## Plan\ncollapsed:: true"
+        assert tree[0]["children"] == []
+
+    def test_bulleted_property_line_merges(self):
+        tree = parse_hierarchical_content("- ## Plan\n\t- collapsed:: true")
+        assert len(tree) == 1
+        assert tree[0]["content"] == "## Plan\ncollapsed:: true"
+        assert tree[0]["children"] == []
+
+    def test_property_merges_into_last_created_block(self):
+        tree = parse_hierarchical_content(
+            "- Kopf\n\t- Kind\n\tid:: fedcba98-0000-0000-0000-000000000000")
+        assert tree[0]["content"] == "Kopf"
+        assert tree[0]["children"][0]["content"] == (
+            "Kind\nid:: fedcba98-0000-0000-0000-000000000000")
+
+    def test_multiple_property_lines_merge_in_order(self):
+        tree = parse_hierarchical_content(
+            "- ## Heading\n\tid:: abc\n\tcollapsed:: true\n\t- child")
+        assert tree[0]["content"] == "## Heading\nid:: abc\ncollapsed:: true"
+        assert len(tree[0]["children"]) == 1
+        assert tree[0]["children"][0]["content"] == "child"
+
+    def test_leading_property_line_stays_a_block(self):
+        """No preceding block to merge into: keep old behavior."""
+        tree = parse_hierarchical_content("type:: Person\n- ## Kontakt")
+        assert tree[0]["content"] == "type:: Person"
+        assert tree[1]["content"] == "## Kontakt"
+
+    def test_normal_content_with_double_colon_midline_not_merged(self):
+        """Only lines *starting* with key:: are property lines."""
+        tree = parse_hierarchical_content("- A\n- Siehe key:: value Doku")
+        assert len(tree) == 2
+
+    def test_timestamp_entry_unaffected(self):
+        tree = parse_hierarchical_content("**09:30** Log-Zeile\n\t- Detail")
+        assert tree[0]["content"] == "**09:30** Log-Zeile"
+        assert tree[0]["children"][0]["content"] == "Detail"
