@@ -330,3 +330,55 @@ class TestStep4ErrorHandling:
                 cli, ["query-pages-by-property", "--key", "type", "--json"])
         assert r.exit_code == 0, r.output
         assert rec.queries
+
+
+class TestPropertyKeyCasing:
+    """query-pages-by-property must find a page whether the user types the
+    camelCase key (as Logseq displays it) or the kebab-case key (as datalog
+    stores it). Before this, camelCase found nothing without any hint.
+    """
+
+    def test_camelcase_key_query_contains_kebab_form(self):
+        rec = QueryRecorder(result=[])
+        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            r = split_runner().invoke(
+                cli, ["query-pages-by-property", "--key", "excludeFromGraphView",
+                      "--json"])
+        assert r.exit_code == 0, r.output
+        assert rec.queries, "no query was built"
+        q = rec.queries[0]
+        # The kebab form datalog actually stores must be queried.
+        assert "exclude-from-graph-view" in q
+
+    def test_kebab_key_still_works(self):
+        rec = QueryRecorder(result=[])
+        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            r = split_runner().invoke(
+                cli, ["query-pages-by-property", "--key", "exclude-from-graph-view",
+                      "--json"])
+        assert r.exit_code == 0, r.output
+        assert "exclude-from-graph-view" in rec.queries[0]
+
+    def test_both_forms_are_tried_for_a_camelcase_key(self):
+        """A camelCase key must match both spellings, since a foreign graph
+        might store either. Both appear in the built query."""
+        rec = QueryRecorder(result=[])
+        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            split_runner().invoke(
+                cli, ["query-pages-by-property", "--key", "techStack", "--json"])
+        q = rec.queries[0]
+        assert "tech-stack" in q
+        assert "techStack" in q
+
+    def test_value_is_read_despite_kebab_keys_in_pull(self):
+        """The pull returns kebab keys; a camelCase --key must still read the
+        value off the page, not an empty string."""
+        page = {"name": "P", "original-name": "P",
+                "properties": {"tech-stack": "Python"}}
+        rec = QueryRecorder(result=[[page]])
+        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            r = split_runner().invoke(
+                cli, ["query-pages-by-property", "--key", "techStack", "--json"])
+        assert r.exit_code == 0, r.output
+        data = json.loads(r.stdout)
+        assert data["pages"][0]["value"] == "Python"

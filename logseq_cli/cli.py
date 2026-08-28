@@ -1406,6 +1406,34 @@ def _extract_param_from_request(req_lower, keywords, original_request):
     return result if result else None
 
 
+def _property_key_spellings(key: str):
+    """Return the datalog spellings to try for a property key.
+
+    Logseq stores property keys kebab-cased in datalog but shows them
+    camelCased. A camelCase key gets its kebab form added so either spelling
+    the user types finds the page; the camelCase form is kept too, in case a
+    foreign graph stored it that way. Order preserved, duplicates dropped.
+    """
+    kebab = re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), key)
+    forms = [key]
+    if kebab != key:
+        forms.append(kebab)
+    return forms
+
+
+def _read_property_value(props: dict, key: str):
+    """Read a property value trying every spelling of the key.
+
+    The datalog pull returns kebab-cased keys, so a user who typed the
+    camelCase form would otherwise read an empty value off a page the query
+    did find. Try each spelling, first hit wins.
+    """
+    for form in _property_key_spellings(key):
+        if form in props:
+            return props[form]
+    return ""
+
+
 def _print_results(results):
     """Print query results in human-readable format (max 20 items)."""
     if not isinstance(results, list):
@@ -3492,14 +3520,23 @@ def query_pages_by_property(ctx, key, value, as_json):
     """Find pages by property key/value (e.g. --key type --value Person)."""
     api = ctx.obj["api"]
 
-    key_kw = edn_keyword(key)
+    # Property keys have two spellings for the same data: Logseq displays
+    # camelCase (excludeFromGraphView), datalog stores kebab-case
+    # (exclude-from-graph-view). Querying the user's spelling as-is finds
+    # nothing when they typed the displayed form. Try both, so either works;
+    # a foreign graph might store either. Both are whitelisted before use.
+    key_forms = _property_key_spellings(key)
+    key_get = " ".join(
+        f"[(get ?props :{edn_keyword(k)}) ?v]" for k in key_forms
+    )
+    key_clause = key_get if len(key_forms) == 1 else f"(or {key_get})"
     if value:
         # Query pages where property key matches value
         query = f'''[:find (pull ?p [:block/name :block/original-name :block/properties])
                      :where
                      [?p :block/name]
                      [?p :block/properties ?props]
-                     [(get ?props :{key_kw}) ?v]
+                     {key_clause}
                      [(= ?v {edn_string(value)})]]'''
     else:
         # Query pages that have this property key (any value)
@@ -3507,7 +3544,7 @@ def query_pages_by_property(ctx, key, value, as_json):
                      :where
                      [?p :block/name]
                      [?p :block/properties ?props]
-                     [(get ?props :{key_kw}) ?v]]'''
+                     {key_clause}]'''
 
     # The former full-scan fallback is gone: it existed for a malformed key,
     # which edn_keyword now rejects before any query is built, and a silent
@@ -3522,13 +3559,11 @@ def query_pages_by_property(ctx, key, value, as_json):
             page = item[0]
             if isinstance(page, dict):
                 name = page.get("original-name") or page.get("name", "?")
-                props = page.get("properties", {})
-                prop_value = props.get(key, "")
+                prop_value = _read_property_value(page.get("properties", {}), key)
                 pages_found.append({"name": name, "value": str(prop_value)})
         elif isinstance(item, dict):
             name = item.get("original-name") or item.get("name", "?")
-            props = item.get("properties", {})
-            prop_value = props.get(key, "")
+            prop_value = _read_property_value(item.get("properties", {}), key)
             pages_found.append({"name": name, "value": str(prop_value)})
 
     pages_found.sort(key=lambda x: x["name"].lower())
