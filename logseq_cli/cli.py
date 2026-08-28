@@ -1422,6 +1422,20 @@ def _property_key_spellings(key: str):
     return forms
 
 
+def _find_stored_property_key(props: dict, key: str):
+    """Find the stored spelling of a user-typed property key.
+
+    The API returns camelCase keys (excludeFromGraphView), datalog and habit
+    spell them kebab-cased; a plain .lower() matches neither. Compare with
+    dashes stripped and case folded so every spelling finds the stored key.
+    """
+    want = key.replace("-", "").lower()
+    for stored in props:
+        if stored.replace("-", "").lower() == want:
+            return stored
+    return None
+
+
 def _read_property_value(props: dict, key: str):
     """Read a property value trying every spelling of the key.
 
@@ -3268,16 +3282,16 @@ def get_properties(ctx, page, prop_name, as_json):
                 text_values = first.get("propertiesTextValues") or text_values
 
     if prop_name:
-        prop_lower = prop_name.lower()
-        # Properties are stored lowercase
-        value = properties.get(prop_lower)
-        text_value = text_values.get(prop_lower)
-        if value is None:
+        stored_key = _find_stored_property_key(properties, prop_name)
+        if stored_key is None:
             fail(f"Property '{prop_name}' not found on '{page_name}'.",
                  as_json=as_json, page=page_name, property=prop_name)
+        value = properties.get(stored_key)
+        text_key = _find_stored_property_key(text_values, prop_name)
+        text_value = text_values.get(text_key) if text_key else None
 
         if as_json:
-            output({"page": page_name, "property": prop_lower, "value": value, "text": text_value}, True)
+            output({"page": page_name, "property": stored_key, "value": value, "text": text_value}, True)
         else:
             click.echo(text_value or value)
     else:
