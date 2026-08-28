@@ -150,6 +150,10 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
 
 _BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
+# A block's content carries its property lines verbatim (id:: <uuid>, key:: val),
+# sometimes with text after them. A text replacement must skip these: rewriting
+# an id:: line breaks every ((block-ref)) to that block, irreversibly.
+_PROPERTY_LINE_RE = re.compile(r'^[A-Za-z0-9_?!*+<>=-]+:: ')
 
 # find-block --with-children costs one extra read per match (the datalog pull
 # carries no children), so the fan-out is capped and the remainder reported.
@@ -2620,8 +2624,14 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
             uuid = block.get("uuid", "")
             if not content or not uuid:
                 continue
-            if pattern.search(content):
-                new_content = pattern.sub(replace_text, content)
+            # Replace only in text lines; a property line (id::/key:: value) is
+            # left verbatim so a --find that matches inside it cannot rewrite it.
+            new_lines = [
+                ln if _PROPERTY_LINE_RE.match(ln) else pattern.sub(replace_text, ln)
+                for ln in content.split("\n")
+            ]
+            new_content = "\n".join(new_lines)
+            if new_content != content:
                 replacements.append({
                     "id": uuid,
                     "old": content,
