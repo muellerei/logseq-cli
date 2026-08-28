@@ -5,6 +5,61 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- Values entering datalog queries were interpolated via f-string: one call
+  site half-escaped (quote but not backslash), the rest not at all, so a
+  crafted page name or content string could alter the query. A new build
+  layer (`logseq_cli/datalog.py`) provides `edn_string` (backslash-then-quote,
+  closes the trailing-backslash bypass), `edn_keyword` (whitelist, rejects
+  injection shapes) and `page_name_literal` (lowercases, since `:block/name`
+  is stored lowercased). All interpolating call sites go through it.
+  `smart-query --advanced` stays the documented raw pass-through.
+
+### Fixed
+
+- Rejected queries looked like empty results. Logseq answers a broken query
+  with HTTP 200 and `{"error": ...}` in the body, so a query that never ran
+  reported zero hits with exit 0, and the error payload was even cached for
+  60 seconds. `datascript_query` now raises `DatalogQueryError`, the cache
+  no longer stores error payloads, and the error decorator reports the
+  reason (`datalog_query_failed` / `invalid_property_key`) with a non-zero
+  exit, honoring `--json`.
+
+- `smart-query`'s content-search fallback caught every exception and
+  silently switched to a page-name search with exit 0, turning a connection
+  drop or rejected query into plausible hits for a different question. The
+  fallback now keys off an empty result, not an exception; real errors
+  surface through the decorator.
+
+- `query-pages-by-property` found nothing when the key was typed as Logseq
+  displays it: display uses camelCase (`excludeFromGraphView`), datalog
+  stores kebab-case (`exclude-from-graph-view`); 9 of 35 keys in the
+  reference graph were affected. The query and the value lookup now match
+  both spellings, so either form returns the same pages.
+
+- `replace-text` ran the find/replace pattern over a block's whole content,
+  including its verbatim property lines (`id:: <uuid>`, `key:: value`). A
+  `--find` matching inside an `id::` line rewrote it, breaking every
+  `((block-ref))` to that block, irreversibly. Replacement now runs line by
+  line and leaves property lines untouched; editing a property value remains
+  the job of `set-property`.
+
+- Hierarchical insertion (`--tree`, `add-journal-content`, pasted outlines)
+  turned a property line such as `collapsed:: true` or `id:: ...` into a
+  standalone content block: the outline gained a bogus block and the
+  property never reached its parent. Property lines now merge into the
+  preceding block, matching Logseq's own semantics.
+
+### Removed
+
+- The legacy tree inserters `insert_formatted_content` and
+  `insert_block_tree` accepted a failed write (HTTP 200 + `null`) as
+  success. No command called them anymore; all insert paths use the strict
+  variants that abort on a silent write failure.
+
 ## [0.8.0] - 2026-08-22
 
 ### Fixed
