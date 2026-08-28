@@ -14,3 +14,6 @@ dependencies = [
 
 [project.scripts]
 logseq-cli = "logseq_cli.cli:cli"
+
+[tool.setuptools]
+packages = ["logseq_cli"]
