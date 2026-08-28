@@ -454,33 +454,6 @@ def parse_hierarchical_content(content: str) -> list:
     return root
 
 
-def insert_formatted_content(api, page_name: str, content: str) -> int:
-    """Insert hierarchical content into a page as nested blocks. Returns block count."""
-    # parse_hierarchical_content handles bullet stripping per-line
-    tree = parse_hierarchical_content(content)
-
-    def insert_tree(blocks, parent_uuid=None):
-        for block in blocks:
-            if parent_uuid:
-                result = api.insert_block(
-                    parent_uuid, block["content"], {"sibling": False}
-                )
-            else:
-                result = api.append_block_in_page(page_name, block["content"])
-
-            if result and block["children"]:
-                child_uuid = None
-                if isinstance(result, dict):
-                    child_uuid = result.get("uuid")
-                elif isinstance(result, str):
-                    child_uuid = result
-                if child_uuid:
-                    insert_tree(block["children"], child_uuid)
-
-    insert_tree(tree)
-    return count_blocks(tree)
-
-
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
 
@@ -1033,28 +1006,8 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, _written: 
     return uuids
 
 
-def insert_block_tree(api, tree: list, parent_uuid: str) -> int:
-    """Recursively insert parsed block tree under a parent block.
-
-    Returns the number of blocks inserted.
-    """
-    n = 0
-    for block in tree:
-        result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
-        n += 1
-        if block["children"]:
-            child_uuid = None
-            if isinstance(result, dict):
-                child_uuid = result.get("uuid")
-            elif isinstance(result, str):
-                child_uuid = result
-            if child_uuid:
-                n += insert_block_tree(api, block["children"], child_uuid)
-    return n
-
-
 def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True) -> list:
-    """Like ``insert_formatted_content`` but returns the inserted block UUIDs.
+    """Insert hierarchical content into a page, returning the inserted block UUIDs.
 
     Top-level nodes are appended to the page; children use insert_block.
     Returns UUIDs in DFS pre-order (parent before children).
