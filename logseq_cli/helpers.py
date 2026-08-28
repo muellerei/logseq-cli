@@ -414,6 +414,7 @@ def parse_hierarchical_content(content: str) -> list:
     lines = content.split("\n")
     root = []
     stack = [(root, -1)]  # (children_list, indent_level)
+    last_node = None
 
     for line in lines:
         if not line.strip():
@@ -442,6 +443,15 @@ def parse_hierarchical_content(content: str) -> list:
         if stripped.startswith("- "):
             stripped = stripped[2:]
 
+        # A property line is never its own block: in Logseq it belongs to the
+        # block whose content precedes it. Merge it into the last created node
+        # regardless of indentation, so pasted outlines carrying
+        # collapsed:: true / id:: ... keep their structure instead of gaining
+        # a bogus content block.
+        if PROPERTY_LINE_RE.match(stripped) and last_node is not None:
+            last_node["content"] += "\n" + stripped
+            continue
+
         node = {"content": stripped, "children": []}
 
         # find correct parent
@@ -450,9 +460,15 @@ def parse_hierarchical_content(content: str) -> list:
 
         stack[-1][0].append(node)
         stack.append((node["children"], indent))
+        last_node = node
 
     return root
 
+
+# A block's content carries its property lines verbatim (id:: <uuid>, key:: val).
+# Shared by replace-text in cli.py (must never rewrite them) and
+# parse_hierarchical_content (must never turn them into blocks).
+PROPERTY_LINE_RE = re.compile(r'^[A-Za-z0-9_?!*+<>=-]+:: ')
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
