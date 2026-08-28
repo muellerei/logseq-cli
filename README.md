@@ -18,8 +18,11 @@ pip install -e .
 ```
 
 Requires Python 3.10+ and a running Logseq Desktop app (HTTP API on port 12315).
-Developed and tested against Logseq Desktop 0.10.15 with a file-based graph;
-newer Logseq versions are untested.
+Developed and tested against Logseq Desktop 0.10.15 with a file-based
+(Markdown) graph. Logseq split in 2026: the Markdown line continues as
+Logseq OG (1.x) with an unchanged HTTP API, but this CLI is untested there.
+The DB version (2.x) stores graphs in SQLite with a different data model and
+is not supported.
 
 ## Configuration
 
