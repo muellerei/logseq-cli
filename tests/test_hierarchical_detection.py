@@ -8,7 +8,6 @@ from logseq_cli.helpers import (
     has_flush_newline_bullets,
     parse_hierarchical_content,
     find_or_create_heading,
-    insert_block_tree,
 )
 
 
@@ -120,59 +119,6 @@ class TestFindOrCreateHeading:
         api.append_block_in_page.return_value = None
         result = find_or_create_heading(api, "test-page", "## Log")
         assert result is None
-
-
-class TestInsertBlockTree:
-    """Tests for recursive block tree insertion."""
-
-    def test_single_block_no_children(self):
-        api = MagicMock()
-        api.insert_block.return_value = {"uuid": "block-1"}
-        tree = [{"content": "hello", "children": []}]
-        n = insert_block_tree(api, tree, "parent-uuid")
-        assert n == 1
-        api.insert_block.assert_called_once_with("parent-uuid", "hello", {"sibling": False})
-
-    def test_block_with_children(self):
-        api = MagicMock()
-        api.insert_block.side_effect = [
-            {"uuid": "block-1"},  # parent
-            {"uuid": "block-2"},  # child
-        ]
-        tree = [{"content": "parent", "children": [
-            {"content": "child", "children": []}
-        ]}]
-        n = insert_block_tree(api, tree, "heading-uuid")
-        assert n == 2
-        assert api.insert_block.call_count == 2
-        api.insert_block.assert_any_call("heading-uuid", "parent", {"sibling": False})
-        api.insert_block.assert_any_call("block-1", "child", {"sibling": False})
-
-    def test_multiple_siblings(self):
-        api = MagicMock()
-        api.insert_block.side_effect = [
-            {"uuid": "b1"}, {"uuid": "b2"}, {"uuid": "b3"}
-        ]
-        tree = [
-            {"content": "one", "children": []},
-            {"content": "two", "children": []},
-            {"content": "three", "children": []},
-        ]
-        n = insert_block_tree(api, tree, "parent")
-        assert n == 3
-
-    def test_deep_nesting(self):
-        api = MagicMock()
-        api.insert_block.side_effect = [
-            {"uuid": "l1"}, {"uuid": "l2"}, {"uuid": "l3"}
-        ]
-        tree = [{"content": "level1", "children": [
-            {"content": "level2", "children": [
-                {"content": "level3", "children": []}
-            ]}
-        ]}]
-        n = insert_block_tree(api, tree, "root")
-        assert n == 3
 
 
 class TestParseHierarchicalContentIntegration:
