@@ -5,7 +5,91 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-08-22
+
+### Fixed
+
+- `update-block` silently deleted every property of the block it edited.
+  Properties live inside the block content (`prio:: 1` as a line of the same
+  block), so replacing the text dropped them, even though the command's own
+  help says properties belong to `set-property`/`remove-property`. Following
+  that rule was not enough: changing the text was the loss. `updateBlock`
+  accepts the properties back through its documented third parameter, so they
+  are read before the write and carried along; the round trip is lossless
+  (`owner:: [[Bob]]` stays a link) and `id::` is unaffected, so block
+  references survive. `--dry-run` names what it will keep.
+
+- Transport errors ignored `--json`. A wrong token or a Logseq that is not
+  running was reported as prose, so an agent parsing stderr got unparseable
+  text at exactly the point where it needed a reason. Both now go through
+  `fail()` and carry `reason` (`connection_refused` / `http_error`), plus
+  `status_code` and a token hint on 401/403. Without `--json` the wording is
+  unchanged.
+- `get-block` with an unknown UUID printed `null` on stdout and exited 0,
+  which reads as a successful empty block rather than a miss. It now fails
+  like `get-page` does: exit 1, error on stderr, `"exists": false`.
+
+- `set-todo-status --content` silently rewrote the first of several matching
+  blocks. With two TODOs sharing a text it updated one and reported success,
+  and the caller could not tell which or that there had been a choice. It now
+  aborts and lists the candidates, like `--where-content` does.
+- `copy-block --remove` deleted the source even when the copy never landed.
+  The copy path ignored its write results, and Logseq answers a failed write
+  with HTTP 200 + null, so a copy that wrote nothing was reported as
+  "Moved 1 block(s)" with exit 0 and the original was removed anyway. Every
+  insert now goes through `require_insert`, so the source is only removed
+  against a copy that is known to exist.
+
+### Added
+
+- `remove-property --id UUID --key K` removes a property from any block. The
+  command was wired to the page's first block, so a property on a log entry or
+  a TODO could not be removed at all, although the API had supported it all
+  along. `--name` (page) and `--id` (block) are mutually exclusive.
+- `update-block --where-content TEXT [--page NAME] [--regex]` selects the block
+  by text instead of UUID, removing the `UUID=$(find-block ... | python3 -c ...)`
+  detour that recorded use is full of. Because the command overwrites content,
+  an ambiguous selector aborts and lists the candidates rather than picking one:
+  guessing rewrites one of several equally valid blocks with no way to tell which.
+- `insert-block --quiet` prints the confirmation line without one uuid line per
+  block, for tree writes where only the result matters.
+- `find-block --with-children` and the `--where-content` selectors share one
+  content lookup (`find_blocks_by_content`), so a query fix cannot land in one
+  and miss the other.
+- `move-block --id UUID (--under UUID | --before UUID)`: structural move that
+  keeps the block's UUID, so `((block-refs))` to it survive - unlike
+  `copy-block --remove`, which writes a new block and leaves every ref dead.
+  Position follows what `moveBlock` actually does rather than what its option
+  names suggest (probed against a live graph): `before: true` makes it the
+  sibling in front of the target, everything else nests it as the first child;
+  the documented `sibling` option has no effect. `moveBlock` answers null for
+  success, for a missing target and for a refusal alike (a block cannot move
+  into its own subtree, and Logseq says so only by doing nothing), so each move
+  is verified by re-reading and a move that did not take is reported as an error.
+- `find-block --with-children` prints each match with its sub-blocks indented.
+  Recorded use shows 51 of 65 context-greps were `get-page --heading "## Log" |
+  grep -A<n> "14:57"`: a subtree read expressed as a text read with a guessed line
+  count, which drags in the following entries when the guess is too high and cuts
+  the subtree short when it is too low. The datalog pull carries no children, so
+  each subtree costs one extra read; the fan-out is capped at 25 matches and the
+  remainder named on stderr rather than silently dropped. Without the flag nothing
+  changes: no extra read, preview stays truncated.
+- Tree writes now go out as a single `insertBatchBlock` call instead of one
+  `insertBlock` per node. Across recorded use that is 2645 round-trips for 217
+  multi-block writes, i.e. one call each. `insertBatchBlock` answers `null`
+  whether it wrote everything, part of it, or nothing, and a malformed node is
+  skipped while its siblings land (verified against a live graph), so the write
+  is proven by re-reading the parent's children and counting: a short count
+  aborts with the partial state named, as the per-block path did. Set
+  `batch=False` on `insert_block_tree_with_uuids` to force the old path.
+- `insert-block --child-of UUID --first` inserts at the HEAD of the child list
+  instead of appending last. Previously the first-child position was not
+  reachable: `--child-of` always appended, and combining it with `--before` was
+  rejected as a conflicting target. Works with `--content` and `--tree`; with a
+  tree the first root takes the head position and the remaining roots chain as
+  siblings behind it, so declaration order is preserved (`insertBlock` has no
+  "nth child" option, and looping with `before=true` would reverse the order).
+  `--first` without `--child-of` is rejected rather than silently ignored.
 
 ### Changed
 

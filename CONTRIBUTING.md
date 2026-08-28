@@ -26,6 +26,7 @@ logseq-cli/
 │   ├── api.py       # HTTP API client (thin wrapper around Logseq's API)
 │   ├── helpers.py   # Date parsing, block processing, content formatting
 │   └── cli.py       # Click CLI with all commands
+├── tests/           # pytest suite (no fixtures beyond tests/conftest.py)
 ├── examples/        # Shell scripts for common workflows
 ├── AGENTS.md        # AI agent reference
 ├── CLAUDE.md        # Claude Code instructions
@@ -34,7 +35,7 @@ logseq-cli/
 
 ## Making Changes
 
-1. **Read the code first.** `cli.py` is the main file (~2000 lines). Each command is a self-contained function decorated with `@cli.command()`.
+1. **Read the code first.** `cli.py` is the main file (~3800 lines). Each command is a self-contained function decorated with `@cli.command()`.
 
 2. **Follow existing patterns.** New commands should:
    - Use `@click.option("--page", "--name", ...)` for page parameters (dual alias)
@@ -42,12 +43,20 @@ logseq-cli/
    - Use `@handle_connection_error` decorator
    - Support `--dry-run` for write operations
 
-3. **Test manually.** There is no automated test suite yet. Test against a running Logseq instance:
+3. **Run the test suite, and add to it.**
    ```bash
-   # Set your token
-   export LOGSEQ_TOKEN="your-token"
+   python3 -m pytest -q
+   ```
+   Tests mock the API (`unittest.mock` + `CliRunner`); `tests/conftest.py` has a
+   `FakeGraph` for the write paths, needed wherever a command verifies its write
+   by reading back. A new command or flag ships with tests: the failure modes
+   that matter here are silent ones, since Logseq answers a failed write with
+   HTTP 200 + `null` rather than an error.
 
-   # Test your changes
+   Then check it against a running Logseq instance as well, because the mocks
+   encode what we believe the API does:
+   ```bash
+   export LOGSEQ_TOKEN="your-token"
    logseq-cli your-new-command --help
    logseq-cli your-new-command --dry-run ...
    logseq-cli your-new-command ...
@@ -57,6 +66,7 @@ logseq-cli/
    - Update `README.md` (command tables and usage examples)
    - Update `AGENTS.md` (if it affects common workflows)
    - Update `CLAUDE.md` (if it changes critical rules or decision trees)
+   - Add an entry under `## [Unreleased]` in `CHANGELOG.md`
 
 ## Design Principles
 

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
-from tests.conftest import split_runner
+from tests.conftest import split_runner, fake_api
 from logseq_cli.cli import cli
 from logseq_cli.helpers import read_content_file
 
@@ -65,24 +65,28 @@ class TestReadContentFile:
 
 @pytest.fixture
 def api(monkeypatch):
-    mock = MagicMock()
+    """Journal page with a '## Log' heading that already has one child.
+
+    Backed by :class:`tests.conftest.FakeGraph`: the batch write path answers
+    ``null`` on success and proves the write by reading the parent's children
+    back, so a static ``get_block`` return value would read as "nothing landed"
+    and fail every success test for the wrong reason.
+    """
+    mock = fake_api([f"u{i}" for i in range(1, 40)])
+    mock.graph.children["head"] = [
+        {"uuid": "fl", "content": "### [[Carol]]", "children": []}]
     monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
     mock.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     mock.get_page.return_value = {"name": "journal"}
     mock.get_page_blocks_tree.return_value = [
         {"uuid": "head", "content": "## Log", "children": []}]
-    # Existing child under the heading, so --upsert-heading finds a target
-    mock.get_block.return_value = {
-        "uuid": "head", "content": "## Log",
-        "children": [{"uuid": "fl", "content": "### [[Carol]]"}]}
     counter = {"n": 0}
 
-    def _uuid(*args, **kwargs):
+    def _append(*args, **kwargs):
         counter["n"] += 1
-        return {"uuid": f"u{counter['n']}"}
+        return {"uuid": f"a{counter['n']}"}
 
-    mock.insert_block.side_effect = _uuid
-    mock.append_block_in_page.side_effect = _uuid
+    mock.append_block_in_page.side_effect = _append
     return mock
 
 
@@ -108,12 +112,16 @@ class TestAddJournalBlockContentFile:
             "--content-file", str(f)])
         assert result.exit_code == 0, result.output
         assert "Added 9 block(s)" in result.output
-        # 3 roots under the heading, each with 2 children
-        roots = [c for c in api.insert_block.call_args_list
-                 if c.args[0] == "head"]
-        assert len(roots) == 3
-        assert roots[0].args[1] == "### Daily Summary"
-        assert roots[2].args[1] == "### Offene TODOs"
+        # 3 roots under the heading, each with 2 children. Asserted on the graph
+        # rather than on the call log: the tree goes out as one batch call, and
+        # what matters is the resulting shape, not the number of round-trips.
+        # skip the pre-existing "### [[Carol]]" the fixture puts under the
+        # heading; only the three roots written by this call are of interest
+        roots = [c for c in api.graph.children["head"] if c["uuid"] != "fl"]
+        assert [r["content"] for r in roots] == [
+            "### Daily Summary", "### Response Tracking", "### Offene TODOs"]
+        for root in roots:
+            assert len(api.graph.children[root["uuid"]]) == 2
 
     def test_guard_does_not_fire_for_file_input(self, api, tmp_path):
         """Flush bullets from a file must not raise the --content UsageError."""
@@ -294,33 +302,34 @@ class TestUpsertHeadingKeepsAllRoots:
 
 
 class TestPartialWriteIsNamed:
-    """A mid-tree write failure leaves earlier blocks in place. Claiming
-    "Nothing was written" invites a retry and thus duplicates."""
+    """A partial write leaves earlier blocks in place. Claiming "Nothing was
+    written" invites a retry and thus duplicates.
+
+    Tree writes go through ``insertBatchBlock``, which answers ``null`` whether
+    it wrote or not AND can still write only part of a batch (verified against a
+    live graph: a malformed node is skipped silently while its siblings land).
+    So the failure is detected by re-reading the parent's children and comparing
+    the count, and the message has to name that partial state just as the
+    per-block path did.
+    """
 
     def test_message_names_the_partial_state(self, api, tmp_path):
-        calls = {"n": 0}
-
-        def fail_on_fourth(*args, **kwargs):
-            calls["n"] += 1
-            return None if calls["n"] == 4 else {"uuid": f"u{calls['n']}"}
-
-        api.insert_block.side_effect = fail_on_fourth
+        api.graph.set_fail_after(3)  # 3 of 5 land, then the batch stops silently
         f = tmp_path / "u.md"
         f.write_text("- ### A\n\t- a1\n\t- a2\n- ### B\n\t- b1", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 1
-        assert "3 block(s) were already written and remain" in result.output
-        assert "Nothing was written" not in result.output
+        assert "wrote 3 of 5 block(s)" in result.output
+        assert "Added" not in result.output
         assert "duplicate" in result.output
 
     def test_upsert_aborts_instead_of_reporting_phantom_blocks(self, api, tmp_path):
         """The upsert path used insert_block_tree (non-strict, int-returning)
         and then reported count_blocks(tree). A failed write was invisible:
         exit 0, "Added 4 block(s)", 2 actually written."""
-        api.insert_block.side_effect = None
-        api.insert_block.return_value = None
+        api.graph.set_fail_after(0)  # nothing lands, and the API still says nothing
         f = tmp_path / "u.md"
         f.write_text("- ### [[Carol]]\n\t- Punkt A\n\t\t- Detail A1\n\t\t- Detail A2",
                      encoding="utf-8")
@@ -329,7 +338,7 @@ class TestPartialWriteIsNamed:
             "--upsert-heading", "### [[Carol]]", "--content-file", str(f)])
         assert result.exit_code == 1
         assert "Added" not in result.output
-        assert "1 block(s) were already written" in result.output
+        assert "wrote 0 of 3 block(s)" in result.output
 
     def test_upsert_success_count_matches_real_writes(self, api, tmp_path):
         f = tmp_path / "u.md"
@@ -339,7 +348,9 @@ class TestPartialWriteIsNamed:
             "add-journal-block", "--under-heading", "## Log",
             "--upsert-heading", "### [[Carol]]", "--content-file", str(f)])
         assert result.exit_code == 0, result.output
-        real = len(api.update_block.call_args_list) + len(api.insert_block.call_args_list)
+        # The reported count must equal what actually reached the graph, not the
+        # size of the tree that was intended.
+        real = len(api.update_block.call_args_list) + api.graph.written
         assert real == 4
         assert "Added 4 block(s)" in result.output
 
@@ -392,15 +403,15 @@ class TestPartialWriteIsNamed:
 
     def test_first_block_failure_still_says_nothing_written(self, api, tmp_path):
         """With zero blocks written, the original wording is the correct one."""
-        api.insert_block.side_effect = None
-        api.insert_block.return_value = None
+        api.graph.set_fail_after(0)
         f = tmp_path / "u.md"
         f.write_text("- ### A\n\t- a1", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 1
-        assert "Nothing was written" in result.output
+        assert "wrote 0 of 2 block(s)" in result.output
+        assert "Added" not in result.output
 
 
 # ---------- insert-block --tree-file ----------------------------------------
@@ -421,8 +432,12 @@ class TestInsertBlockTreeFile:
         result = CliRunner().invoke(cli, [
             "insert-block", "--child-of", "parent-uuid", "--tree-file", str(f)])
         assert result.exit_code == 0, result.output
-        contents = [c.args[1] for c in api.insert_block.call_args_list]
-        assert contents == ["a", "b"]
+        # Assert on what reached the graph, not on how it got there: a tree of
+        # this size goes out as one insertBatchBlock call, so counting
+        # insert_block calls would measure the transport, not the parse.
+        root = api.graph.children["parent-uuid"][0]
+        assert root["content"] == "a"
+        assert [c["content"] for c in api.graph.children[root["uuid"]]] == ["b"]
 
     def test_tree_and_tree_file_are_mutually_exclusive(self, api, tmp_path):
         f = tmp_path / "t.md"

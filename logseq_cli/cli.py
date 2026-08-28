@@ -35,10 +35,14 @@ from logseq_cli.helpers import (
     insert_block_tree,
     insert_block_tree_with_uuids,
     insert_block_tree_as_siblings,
+    insert_block_tree_as_first_children,
     insert_block_tree_at_page_top,
     insert_formatted_content_with_uuids,
     block_uuid_from_result,
     require_insert,
+    move_block_verified,
+    find_blocks_by_content,
+    resolve_single_block,
     parse_property_pairs,
     apply_block_properties,
     coerce_property_value,
@@ -53,20 +57,38 @@ from logseq_cli.helpers import (
 
 
 def handle_connection_error(func):
-    """Decorator to catch connection errors and print a helpful message."""
+    """Catch transport-level errors and report them like every other failure.
+
+    These two are what a caller hits first: Logseq not running, or a wrong
+    token. Reporting them as prose while ``--json`` was asked for would hand an
+    agent unparseable text exactly at first contact, so they go through
+    :func:`fail`, which honours ``--json`` and keeps errors on stderr.
+
+    ``as_json`` is read from the wrapped command's kwargs; Click passes every
+    option by name, so it is there whenever the command declares the flag.
+    """
     def wrapper(*args, **kwargs):
+        as_json = bool(kwargs.get("as_json"))
         try:
             return func(*args, **kwargs)
         except requests.ConnectionError:
-            click.echo(
-                "Error: Cannot connect to Logseq API. "
+            fail(
+                "Cannot connect to Logseq API. "
                 "Is Logseq running with the HTTP API enabled?",
-                err=True,
+                as_json=as_json,
+                reason="connection_refused",
             )
-            sys.exit(1)
         except requests.HTTPError as e:
-            click.echo(f"Error: HTTP {e.response.status_code} - {e.response.text}", err=True)
-            sys.exit(1)
+            status = e.response.status_code
+            hint = ("Check --token: Logseq rejected it." if status in (401, 403)
+                    else None)
+            fail(
+                f"HTTP {status} - {e.response.text}",
+                as_json=as_json,
+                reason="http_error",
+                status_code=status,
+                **({"hint": hint} if hint else {}),
+            )
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = func.__doc__
     return wrapper
@@ -103,6 +125,10 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
 
 _BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
+
+# find-block --with-children costs one extra read per match (the datalog pull
+# carries no children), so the fan-out is capped and the remainder reported.
+FIND_BLOCK_CHILDREN_LIMIT = 25
 
 
 def _resolve_single_ref(api, uuid: str) -> str:
@@ -407,36 +433,40 @@ def get_block(ctx, block_id, no_children, as_json):
     include_children = not no_children
     block = api.get_block(block_id, include_children=include_children)
 
+    if not block:
+        # The API answers an unknown UUID with null, so returning that verbatim
+        # on stdout with exit 0 reads as a successful empty block. Report it the
+        # way get-page reports a missing page: non-zero exit, error on stderr.
+        fail(f"Block not found: {block_id}", as_json=as_json,
+             id=block_id, exists=False)
+
     if as_json:
         output(block, True)
     else:
-        if block:
-            # Metadata
-            page_info = block.get("page")
-            if isinstance(page_info, dict):
-                click.echo(f"Page: {page_info.get('name') or page_info.get('id', '?')}")
-            elif page_info is not None:
-                click.echo(f"Page: {page_info}")
-            parent_info = block.get("parent")
-            if isinstance(parent_info, dict):
-                click.echo(f"Parent: {parent_info.get('name') or parent_info.get('id', '?')}")
-            elif parent_info is not None:
-                click.echo(f"Parent: {parent_info}")
-            created = block.get("createdAt") or block.get("created-at")
-            updated = block.get("updatedAt") or block.get("updated-at")
-            if created:
-                click.echo(f"Created: {datetime.datetime.fromtimestamp(created / 1000).strftime('%Y-%m-%d %H:%M')}")
-            if updated:
-                click.echo(f"Updated: {datetime.datetime.fromtimestamp(updated / 1000).strftime('%Y-%m-%d %H:%M')}")
-            click.echo()
+        # Metadata
+        page_info = block.get("page")
+        if isinstance(page_info, dict):
+            click.echo(f"Page: {page_info.get('name') or page_info.get('id', '?')}")
+        elif page_info is not None:
+            click.echo(f"Page: {page_info}")
+        parent_info = block.get("parent")
+        if isinstance(parent_info, dict):
+            click.echo(f"Parent: {parent_info.get('name') or parent_info.get('id', '?')}")
+        elif parent_info is not None:
+            click.echo(f"Parent: {parent_info}")
+        created = block.get("createdAt") or block.get("created-at")
+        updated = block.get("updatedAt") or block.get("updated-at")
+        if created:
+            click.echo(f"Created: {datetime.datetime.fromtimestamp(created / 1000).strftime('%Y-%m-%d %H:%M')}")
+        if updated:
+            click.echo(f"Updated: {datetime.datetime.fromtimestamp(updated / 1000).strftime('%Y-%m-%d %H:%M')}")
+        click.echo()
 
-            content = block.get("content", "")
-            click.echo(content)
-            children = block.get("children", [])
-            if children:
-                click.echo(process_blocks(children, indent=1))
-        else:
-            click.echo("Block not found.")
+        content = block.get("content", "")
+        click.echo(content)
+        children = block.get("children", [])
+        if children:
+            click.echo(process_blocks(children, indent=1))
 
 
 # ---------------------------------------------------------------------------
@@ -446,60 +476,44 @@ def get_block(ctx, block_id, no_children, as_json):
 Examples:
   logseq-cli --token TOKEN find-block --content "Tag-Support" --page "Project Alpha" --first
   logseq-cli --token TOKEN find-block --content "^### " --page "X" --regex
+  logseq-cli --token TOKEN find-block --content "14:57" --page "2026-07-22, tuesday" --with-children
 Note:
   Output gives uuid + page + content preview. Use --first to disambiguate; pipe to
   insert-block --child-of, update-block, remove-block downstream.
+  --with-children prints each match with its sub-blocks indented, instead of
+  guessing a line count with `get-page | grep -A<n>`.
 """)
 @click.option("--content", required=True, help="Content text (substring match or regex with --regex)")
 @click.option("--page", "--name", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
 @click.option("--first", "first_only", is_flag=True, help="Output only the first match")
+@click.option("--with-children", "with_children", is_flag=True, help="Print each match with its sub-blocks (one extra API read per match)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def find_block(ctx, content, page, use_regex, first_only, as_json):
+def find_block(ctx, content, page, use_regex, first_only, with_children, as_json):
     """Find blocks by content substring or regex."""
     api = ctx.obj["api"]
-
-    if use_regex:
-        if page:
-            page_lower = page.lower()
-            query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                f' :where [?p :block/name "{page_lower}"]'
-                ' [?b :block/page ?p]'
-                ' [?b :block/content _]]'
-            )
-        else:
-            query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                ' :where [?b :block/content _]]'
-            )
-        raw = api.datascript_query(query) or []
-        pattern = re.compile(content)
-        matches = [r[0] for r in raw if r and r[0] and pattern.search(r[0].get("content", ""))]
-    else:
-        content_escaped = content.replace('"', '\\"')
-        if page:
-            page_lower = page.lower()
-            query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                f' :where [?p :block/name "{page_lower}"]'
-                ' [?b :block/page ?p]'
-                ' [?b :block/content ?c]'
-                f' [(clojure.string/includes? ?c "{content_escaped}")]]'
-            )
-        else:
-            query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                ' :where [?b :block/content ?c]'
-                f' [(clojure.string/includes? ?c "{content_escaped}")]]'
-            )
-        raw = api.datascript_query(query) or []
-        matches = [r[0] for r in raw if r and r[0]]
+    matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
 
     if first_only:
         matches = matches[:1]
+
+    # The datalog pull returns no children, so each subtree costs one extra
+    # read. Bounded so a broad --content cannot fan out into hundreds of calls;
+    # what was skipped is stated rather than silently dropped.
+    truncated = 0
+    if with_children and matches:
+        if len(matches) > FIND_BLOCK_CHILDREN_LIMIT:
+            truncated = len(matches) - FIND_BLOCK_CHILDREN_LIMIT
+            matches = matches[:FIND_BLOCK_CHILDREN_LIMIT]
+        for block in matches:
+            uuid = block.get("uuid")
+            if not uuid:
+                continue
+            full = api.get_block(uuid, include_children=True)
+            if full:
+                block["children"] = full.get("children") or []
 
     if as_json:
         output(matches, True)
@@ -510,7 +524,6 @@ def find_block(ctx, content, page, use_regex, first_only, as_json):
             click.echo(f"Found {len(matches)} block(s):")
             for block in matches:
                 uuid = block.get("uuid") or "?"
-                preview = (block.get("content") or "")[:80].replace("\n", " ")
                 page_info = block.get("page")
                 page_name = ""
                 if isinstance(page_info, dict):
@@ -518,8 +531,21 @@ def find_block(ctx, content, page, use_regex, first_only, as_json):
                 click.echo(f"  uuid: {uuid}")
                 if page_name:
                     click.echo(f"  page: {page_name}")
-                click.echo(f"  content: {preview}")
+                if with_children:
+                    # full content, not a preview: truncating the head of a
+                    # subtree would defeat the point of asking for its children
+                    click.echo(f"  content: {block.get('content') or ''}")
+                    children = block.get("children") or []
+                    if children:
+                        click.echo(process_blocks(children, indent=2))
+                else:
+                    preview = (block.get("content") or "")[:80].replace("\n", " ")
+                    click.echo(f"  content: {preview}")
                 click.echo()
+            if truncated:
+                click.echo(
+                    f"({truncated} further match(es) not expanded; narrow --content "
+                    "or --page, or use --first)", err=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1733,7 +1759,10 @@ def create_page(ctx, page, content, as_json):
     result = api.create_page(page, properties)
 
     if content:
-        api.append_block_in_page(page, content)
+        # Unchecked, this appended to a page that create_page may have failed to
+        # create, and both failures stayed invisible behind "Created page: ...".
+        require_insert(api.append_block_in_page(page, content),
+                       f"the initial content on '{page}'")
 
     if as_json:
         output({"created": page, "page": result, "has_content": content is not None}, True)
@@ -1786,15 +1815,23 @@ def add_journal_entry(ctx, content, date, as_block, as_json):
 
     content = strip_title_heading(content, page_name)
 
+    # Count what the graph actually took, not how many lines were handed in:
+    # reporting len(lines) turned a partial write into "Added 3 block(s)" with
+    # no hint that two are missing, which invites a retry that duplicates the
+    # one that landed.
     if as_block:
         result = api.append_block_in_page(page_name, content)
+        require_insert(result, f"a block on '{page_name}'")
         blocks_added = 1
     else:
         lines = [l.strip() for l in content.split("\n") if l.strip()]
         result = None
+        written = 0
         for line in lines:
             result = api.append_block_in_page(page_name, line)
-        blocks_added = len(lines)
+            require_insert(result, f"a block on '{page_name}'", written_so_far=written)
+            written += 1
+        blocks_added = written
 
     if as_json:
         output({
@@ -2123,21 +2160,27 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             click.echo(f"  {content}")
         return
 
+    # Every branch checks its write. The hierarchical path already aborted on a
+    # silent failure via require_insert; without the same check here a single
+    # flat entry (the common case for a timestamped log line) was reported as
+    # "Added block to journal" with exit 0 while nothing had been written.
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
             result = api.insert_block(heading_uuid, content, {"sibling": False})
             position = f"under '{under_heading}'"
+            _u = require_insert(result, f"a block under '{under_heading}'")
         else:
             result = api.append_block_in_page(page_name, content)
             position = "top-level (heading not found)"
             click.echo(f"Warning: Could not find or create '{under_heading}', added as top-level block", err=True)
+            _u = require_insert(result, f"a block on '{page_name}'")
     else:
         result = api.append_block_in_page(page_name, content)
         position = "top-level"
+        _u = require_insert(result, f"a block on '{page_name}'")
 
     if as_json:
-        _u = result.get("uuid") if isinstance(result, dict) else (result if isinstance(result, str) else None)
         output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([u for u in [_u] if u])}, True)
     else:
         click.echo(f"Added block to journal: {page_name} ({position})")
@@ -2334,19 +2377,28 @@ def add_note_content(ctx, page, content, create, under_heading, properties, as_j
 @cli.command("update-block", epilog="""\b
 Example:
   logseq-cli --token TOKEN update-block --id 12345678-... --content "Neuer Text"
+  logseq-cli --token TOKEN update-block --where-content "**14:22**" --page "2026-08-21, friday" --content "Neuer Text"
 Note:
-  Use set-property/remove-property for properties — never edit them via update-block.
+  Use set-property/remove-property for properties, never edit them via update-block.
+  Existing block properties survive the update: they are read first and written
+  back, so changing the text no longer drops them.
   Use set-todo-status to change TODO/DOING/DONE markers.
   --content is ONE block: newline bullets stay raw text, indented or not.
   Children go in via insert-block --child-of UUID.
+  --where-content selects the block by text instead of UUID; it aborts unless
+  exactly one block matches, since overwriting the wrong block loses its text.
+  Scope it with --page and check with --dry-run.
 """)
-@click.option("--id", "block_id", required=True, help="UUID of the block to update")
+@click.option("--id", "block_id", default=None, help="UUID of the block to update")
+@click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
+@click.option("--page", "--name", "page", default=None, help="With --where-content: restrict the search to this page")
+@click.option("--regex", "use_regex", is_flag=True, help="With --where-content: interpret it as a regex")
 @click.option("--content", required=True, help="New content for the block")
 @click.option("--dry-run", is_flag=True, help="Show the block that would be overwritten, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def update_block(ctx, block_id, content, dry_run, as_json):
+def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run, as_json):
     """Update the content of an existing block."""
     # Guard: unlike insert-block / add-journal-block this command has no tree
     # path — it replaces ONE block's content, so newline bullets (indented or
@@ -2357,7 +2409,12 @@ def update_block(ctx, block_id, content, dry_run, as_json):
         raise click.UsageError(str(e))
 
     api = ctx.obj["api"]
-    clean_id = block_id.strip().replace("((", "").replace("))", "")
+    if bool(block_id) == bool(where_content):
+        fail("Specify exactly one of: --id, --where-content.", as_json=as_json)
+    if where_content:
+        clean_id = resolve_single_block(api, where_content, page=page, use_regex=use_regex)
+    else:
+        clean_id = block_id.strip().replace("((", "").replace("))", "")
 
     # Verify block exists
     block = api.get_block(clean_id, include_children=False)
@@ -2365,11 +2422,19 @@ def update_block(ctx, block_id, content, dry_run, as_json):
         fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
 
     old_content = block.get("content", "") if isinstance(block, dict) else ""
+    # Properties are stored inside the block content, so replacing the text
+    # would drop them. This command changes text; properties belong to
+    # set-block-property / remove-property, and losing them here was a silent
+    # side effect nobody asked for. Carrying them through keeps that split
+    # honest. ``id::`` is handled by Logseq outside this dict and survives on
+    # its own, so block references are unaffected either way.
+    kept_properties = block.get("properties") if isinstance(block, dict) else None
 
     if dry_run:
         if as_json:
             output({"id": clean_id, "old_content": old_content,
-                    "new_content": content, "dry_run": True}, True)
+                    "new_content": content, "properties": kept_properties or {},
+                    "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would overwrite block {clean_id}")
             if old_content:
@@ -2377,12 +2442,15 @@ def update_block(ctx, block_id, content, dry_run, as_json):
                 click.echo(f"  was: {preview}")
             preview = content[:60] + ("..." if len(content) > 60 else "")
             click.echo(f"  now: {preview}")
+            if kept_properties:
+                click.echo(f"  keeps: {', '.join(f'{k}::' for k in kept_properties)}")
         return
 
-    api.update_block(clean_id, content)
+    api.update_block(clean_id, content, properties=kept_properties)
 
     if as_json:
-        output({"id": clean_id, "old_content": old_content, "new_content": content}, True)
+        output({"id": clean_id, "old_content": old_content, "new_content": content,
+                "properties": kept_properties or {}}, True)
     else:
         click.echo(f"Updated block {clean_id}")
         if old_content:
@@ -2505,26 +2573,49 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
 
     scan_blocks(blocks)
 
+    # updateBlock answers null whether it wrote or not (verified against a live
+    # graph), so the write cannot be checked from its return value. Counting the
+    # matches instead would report "Replaced N block(s)" for writes that never
+    # landed, complete with a before/after diff computed locally. Read the
+    # blocks back and compare. See the note above require_insert() in helpers.py
+    # for when this read can be dropped.
+    failed = []
+    if replacements and not dry_run:
+        for r in replacements:
+            after = api.get_block(r["id"], include_children=False) or {}
+            if after.get("content") != r["new"]:
+                failed.append(r["id"])
+
     if as_json:
-        output({"page": page, "replacements": len(replacements),
-                "dry_run": dry_run, "matches": replacements}, True)
+        payload = {"page": page, "replacements": len(replacements) - len(failed),
+                   "dry_run": dry_run, "matches": replacements}
+        if failed:
+            payload["failed"] = failed
+        output(payload, True)
     else:
         if not replacements:
             click.echo(f"No matches for '{find_text}' in '{page}'.")
         else:
             action = "Would replace" if dry_run else "Replaced"
-            click.echo(f"{action} {len(replacements)} block(s) in '{page}':")
+            click.echo(f"{action} {len(replacements) - len(failed)} block(s) in '{page}':")
             for r in replacements:
                 old_preview = r["old"][:60] + ("..." if len(r["old"]) > 60 else "")
                 new_preview = r["new"][:60] + ("..." if len(r["new"]) > 60 else "")
-                click.echo(f"  {r['id'][:8]}..  {old_preview}")
+                mark = "  !! not written" if r["id"] in failed else ""
+                click.echo(f"  {r['id'][:8]}..  {old_preview}{mark}")
                 click.echo(f"         →  {new_preview}")
+            if failed:
+                fail(f"{len(failed)} of {len(replacements)} replacement(s) did not "
+                     "reach the graph. Logseq reports no error for this, so the "
+                     "blocks were read back to check.", as_json=as_json,
+                     failed=failed)
 
 
 @cli.command("insert-block", epilog="""\b
 Examples:
   logseq-cli --token TOKEN insert-block --child-of UUID --content "Sub-Block"
   logseq-cli --token TOKEN insert-block --after UUID --content "Sibling block"
+  logseq-cli --token TOKEN insert-block --child-of UUID --first --content "New first child"
   logseq-cli --token TOKEN insert-block --child-of UUID \\
     --tree "Parent\\n\\tChild1\\n\\tChild2\\n\\t\\tGrandchild"
   logseq-cli --token TOKEN insert-block --page "X" --top-level \\
@@ -2536,21 +2627,25 @@ Notes:
   --tree-file reads the same tab-indented text (or JSON) from a file, so
   apostrophes/quotes/umlauts need no shell quoting.
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
+  --first puts the block at the HEAD of the child list instead of appending it
+  last; it only applies together with --child-of.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
 @click.option("--before", default=None, help="UUID of block to insert before (as sibling)")
 @click.option("--child-of", default=None, help="UUID of parent block (insert as child)")
+@click.option("--first", "as_first", is_flag=True, help="With --child-of: insert as FIRST child instead of appending last")
 @click.option("--top-level", is_flag=True, help="With --page and --tree: insert at page top-level")
 @click.option("--content", default=None, help="Content for the new block")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
+@click.option("--quiet", is_flag=True, help="With --tree: print only the confirmation line, not one uuid line per block")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tree_input, tree_file, properties, dry_run, as_json):
+def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, content, tree_input, tree_file, properties, dry_run, quiet, as_json):
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
 
@@ -2585,8 +2680,11 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
         # the plan and bail before touching the graph.
         if child_of:
             clean_id = child_of.strip().replace("((", "").replace("))", "")
-            position = f"child of {clean_id[:8]}..."
-            do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+            position = f"{'first child' if as_first else 'child'} of {clean_id[:8]}..."
+            if as_first:
+                do_insert = lambda: insert_block_tree_as_first_children(api, tree, clean_id)
+            else:
+                do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
         elif after:
             clean_id = after.strip().replace("((", "").replace("))", "")
             position = f"after {clean_id[:8]}..."
@@ -2631,8 +2729,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
             }, True)
         else:
             click.echo(f"Inserted {len(uuids)} block(s) {position}")
-            for u in uuids:
-                click.echo(f"  uuid: {u}")
+            if not quiet:
+                # One line per block: useful when a UUID is needed downstream,
+                # noise when only the confirmation matters, which is why this is
+                # suppressible rather than always printed.
+                for u in uuids:
+                    click.echo(f"  uuid: {u}")
             for key, value in applied.items():
                 click.echo(f"  {key}:: {value}")
         return
@@ -2648,6 +2750,9 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
     if targets > 1:
         click.echo("Specify only one of: --page, --after, --before, --child-of", err=True)
         sys.exit(1)
+    if as_first and not child_of:
+        click.echo("--first only applies to --child-of (it selects the first child position).", err=True)
+        sys.exit(1)
 
     result = None
     position = ""
@@ -2658,7 +2763,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
         planned = count_blocks(parse_hierarchical_content(content)) if hierarchical else 1
         target = page or (f"after {after[:8]}..." if after else
                           f"before {before[:8]}..." if before else
-                          f"child of {child_of[:8]}...")
+                          f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
         target_desc = f"end of '{page}'" if page else target
         if as_json:
             output({"position": target_desc, "blocks": planned, "dry_run": True}, True)
@@ -2703,16 +2808,21 @@ def insert_block_cmd(ctx, page, after, before, child_of, top_level, content, tre
             position = f"before {clean_id[:8]}..."
     elif child_of:
         clean_id = child_of.strip().replace("((", "").replace("))", "")
+        where = "first child" if as_first else "child"
         if hierarchical:
             tree = parse_hierarchical_content(content)
-            uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+            if as_first:
+                uuids = insert_block_tree_as_first_children(api, tree, clean_id)
+            else:
+                uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
-            position = f"child of {clean_id[:8]}... ({len(uuids)} block(s))"
+            position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = api.insert_block(clean_id, content, {"sibling": False})
-            new_uuid = require_insert(result, f"a child of {clean_id[:8]}...")
-            position = f"child of {clean_id[:8]}..."
+            opts = {"sibling": False, "before": True} if as_first else {"sibling": False}
+            result = api.insert_block(clean_id, content, opts)
+            new_uuid = require_insert(result, f"a {where} of {clean_id[:8]}...")
+            position = f"{where} of {clean_id[:8]}..."
 
     if new_uuid is None and isinstance(result, dict):
         new_uuid = result.get("uuid")
@@ -2803,15 +2913,17 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
         result = api.append_block_in_page(page, ref_content)
         position = f"top-level on '{page}'"
 
-    new_uuid = result.get("uuid") if isinstance(result, dict) else None
+    # A ref that was never written is worse than a visible error: the TODO looks
+    # linked on the project page and silently is not, which is exactly what
+    # block-refs are relied on for.
+    new_uuid = require_insert(result, f"the block-ref {position}")
 
     if as_json:
         output({"source_id": source_id, "ref": ref_content, "page": page, "position": position, "uuid": new_uuid}, True)
     else:
         click.echo(f"Added block-ref {position}")
         click.echo(f"  {ref_content}")
-        if new_uuid:
-            click.echo(f"  uuid: {new_uuid}")
+        click.echo(f"  uuid: {new_uuid}")
 
 
 # ---------------------------------------------------------------------------
@@ -2980,23 +3092,29 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, as_json):
 
     # Resolve UUID via content search if needed
     if not block_id:
-        content_escaped = content.replace('"', '\\"')
-        page_lower = page.lower()
-        query = (
-            '[:find (pull ?b [:block/content :block/uuid]) '
-            f':where [?p :block/name "{page_lower}"] '
-            '[?b :block/page ?p] '
-            '[?b :block/content ?c] '
-            f'[(clojure.string/includes? ?c "{content_escaped}")]]'
-        )
-        raw = api.datascript_query(query) or []
-        matches = [r[0] for r in raw if r and r[0]]
-        # Prefer blocks that actually have a TODO marker
+        matches = find_blocks_by_content(api, content, page=page)
+        # Prefer blocks that actually carry a TODO marker: a status change is
+        # only meaningful there, and it disambiguates a text that also appears
+        # in prose.
         todo_matches = [m for m in matches if m.get("content", "").split()[0:1] and
                         m.get("content", "").split()[0].upper() in _TODO_MARKERS]
         candidates = todo_matches or matches
         if not candidates:
             click.echo(f"No block found matching '{content}' on page '{page}'.", err=True)
+            sys.exit(1)
+        if len(candidates) > 1:
+            # Taking the first match would silently rewrite one of several
+            # equally valid blocks, and the caller could not tell which. This
+            # command overwrites content, so an ambiguous selector must stop.
+            listing = "\n".join(
+                f"  {m.get('uuid')}  {(m.get('content') or '')[:70]}"
+                for m in candidates[:10]
+            )
+            more = f"\n  ... and {len(candidates) - 10} more" if len(candidates) > 10 else ""
+            click.echo(
+                f"{len(candidates)} blocks match '{content}' on page '{page}'; refusing "
+                f"to guess which one to update. Narrow --content or pass --id:\n"
+                f"{listing}{more}", err=True)
             sys.exit(1)
         block_id = candidates[0].get("uuid")
         old_content = candidates[0].get("content", "")
@@ -3154,34 +3272,49 @@ def set_property(ctx, page, key, value, as_json):
 # 24. remove-property
 # ---------------------------------------------------------------------------
 @cli.command("remove-property", epilog="""\b
-Example:
+Examples:
   logseq-cli --token TOKEN remove-property --name "X" --key "deprecated_key"
+  logseq-cli --token TOKEN remove-property --id UUID --key "prio"
+Note:
+  --name removes a PAGE property (stored on the page's first block).
+  --id removes the property from that one block, wherever it sits.
 """)
-@click.option("--page", "--name", required=True, help="Page name")
+@click.option("--page", "--name", default=None, help="Page name (removes a page property)")
+@click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
 @click.option("--key", required=True, help="Property key to remove")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def remove_property(ctx, page, key, as_json):
-    """Remove a property from a page's first block."""
+def remove_property(ctx, page, block_id, key, as_json):
+    """Remove a property from a page or from a single block."""
     api = ctx.obj["api"]
+    if bool(page) == bool(block_id):
+        fail("Specify exactly one of: --name, --id.", as_json=as_json)
 
-    blocks = api.get_page_blocks_tree(page)
-    if not blocks:
-        fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
-
-    first_block = blocks[0]
-    block_uuid = first_block.get("uuid")
-    if not block_uuid:
-        fail("Could not find block UUID", as_json=as_json, page=page)
+    if block_id:
+        # A page property is just a property on the page's first block, so the
+        # API call is the same; only the way the block is found differs.
+        block_uuid = block_id.strip().replace("((", "").replace("))", "")
+        if not api.get_block(block_uuid, include_children=False):
+            fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)
+        target = f"block '{block_uuid}'"
+        result = {"id": block_uuid, "property": key, "status": "removed"}
+    else:
+        blocks = api.get_page_blocks_tree(page)
+        if not blocks:
+            fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
+        block_uuid = blocks[0].get("uuid")
+        if not block_uuid:
+            fail("Could not find block UUID", as_json=as_json, page=page)
+        target = f"page '{page}'"
+        result = {"page": page, "property": key, "status": "removed"}
 
     api.remove_block_property(str(block_uuid), key)
 
-    result = {"page": page, "property": key, "status": "removed"}
     if as_json:
         output(result, True)
     else:
-        click.echo(f"Removed '{key}' from page '{page}'")
+        click.echo(f"Removed '{key}' from {target}")
 
 
 # ---------------------------------------------------------------------------
@@ -3437,26 +3570,33 @@ def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
                 click.echo(f"  source block {block_id} WOULD BE REMOVED after copying")
         return
 
+    # Every insert is checked: Logseq answers a failed write with HTTP 200 +
+    # null, so an unchecked copy reports "Moved N block(s)" with exit 0 while
+    # nothing arrived. With --remove that unverified success would then delete
+    # the source, which destroys the block for good.
+    written = [0]
+
     def _copy_tree(block, parent_uuid=None):
         content = block.get("content", "")
         if parent_uuid:
             result = api.insert_block(parent_uuid, content, {"sibling": False})
+            new_uuid = require_insert(
+                result, "a copied block", written_so_far=written[0])
         else:
             result = api.append_block_in_page(to_page, content)
-        new_uuid = None
-        if isinstance(result, dict):
-            new_uuid = result.get("uuid")
-        elif isinstance(result, str):
-            new_uuid = result
+            new_uuid = require_insert(
+                result, f"the copied block on '{to_page}'", written_so_far=written[0])
+        written[0] += 1
         copied = 1
         for child in block.get("children", []):
-            if new_uuid:
-                copied += _copy_tree(child, new_uuid)
+            copied += _copy_tree(child, new_uuid)
         return copied
 
     count = _copy_tree(source)
 
     if remove:
+        # Only reached when every insert above returned a UUID, so the source is
+        # removed against a copy that is known to exist, never a claimed one.
         api.remove_block(block_id)
 
     action = "Moved" if remove else "Copied"
@@ -3466,6 +3606,65 @@ def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
         output(result_data, True)
     else:
         click.echo(f"{action} {count} block(s) to '{to_page}'.")
+
+
+# ---------------------------------------------------------------------------
+# 29b. move-block
+# ---------------------------------------------------------------------------
+@cli.command("move-block", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN move-block --id UUID --under UUID
+  logseq-cli --token TOKEN move-block --id UUID --before UUID
+Note:
+  Structural move: the block keeps its UUID, so ((block-refs)) to it survive.
+  Prefer this over `copy-block --remove`, which writes a new block (new UUID,
+  dead refs) and deletes the original.
+  --under nests the block as the target's FIRST child; --before puts it directly
+  in front of the target as a sibling. Children always move along.
+  A block cannot be moved into its own subtree; Logseq refuses that silently, so
+  the move is verified by re-reading and reported as an error if it did not take.
+""")
+@click.option("--id", "block_id", required=True, help="UUID of the block to move")
+@click.option("--under", default=None, help="UUID of the new parent (block becomes its first child)")
+@click.option("--before", default=None, help="UUID of the block to move in front of (as sibling)")
+@click.option("--dry-run", is_flag=True, help="Show what would be moved, without writing")
+@click.option("--json", "as_json", is_flag=True, help="JSON output")
+@click.pass_context
+@handle_connection_error
+def move_block_cmd(ctx, block_id, under, before, dry_run, as_json):
+    """Move a block (with children) under or before another block."""
+    api = ctx.obj["api"]
+    if bool(under) == bool(before):
+        fail("Specify exactly one of: --under, --before.", as_json=as_json)
+
+    target = under or before
+    block_id = block_id.strip("()")
+    source = api.get_block(block_id, include_children=True)
+    if not source:
+        fail("Block not found.", as_json=as_json, id=block_id)
+
+    position = f"under {target[:8]}..." if under else f"before {target[:8]}..."
+    if dry_run:
+        planned = count_blocks([source])
+        content = source.get("content", "") if isinstance(source, dict) else ""
+        if as_json:
+            output({"action": "move", "blocks": planned, "position": position,
+                    "source_id": block_id, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would move {planned} block(s) {position}")
+            preview = content[:80] + ("..." if len(content) > 80 else "")
+            if preview:
+                click.echo(f"  root: {preview}")
+        return
+
+    move_block_verified(api, block_id, target, before=bool(before))
+    count = count_blocks([source])
+
+    if as_json:
+        output({"action": "move", "blocks": count, "position": position,
+                "source_id": block_id}, True)
+    else:
+        click.echo(f"Moved {count} block(s) {position}")
 
 
 # ---------------------------------------------------------------------------

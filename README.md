@@ -2,6 +2,15 @@
 
 CLI for Logseq knowledge graph: pages, journals, blocks, search, properties, and graph analysis.
 
+## Using this from an agent
+
+The CLI is built to be driven by scripts and AI agents: `--json` on every
+command, payload on stdout, errors as JSON on stderr, non-zero exit on
+failure, `--dry-run` on everything destructive. No vendor coupling: it is a
+plain Python package with `click` and `requests`.
+
+See [AGENTS.md](AGENTS.md) for the workflows and gotchas.
+
 ## Installation
 
 ```bash
@@ -19,7 +28,7 @@ Requires Python 3.10+ and a running Logseq Desktop app (HTTP API on port 12315).
 | `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication |
 | `LOGSEQ_API_URL` | auto | Full API URL override |
 | `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` (e.g. `## Log`) |
-| `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled) |
+| `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
 | `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
 
 All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`.
@@ -82,7 +91,7 @@ logseq-cli get-properties --page "Missing" --json 2>err.json
 
 ## What's new in v0.4
 
-Seven changes focused on round-trip reduction and ergonomics. All read methods are now cached in-memory (60s TTL) and `get-journal-range` fetches in parallel.
+Seven changes focused on round-trip reduction and ergonomics. All read methods are cached in-memory for the duration of one process (60s TTL), and `get-journal-range` fetches in parallel.
 
 ```bash
 # 1. Inline ((uuid)) refs while reading — no more N×get-block round-trips
@@ -112,9 +121,12 @@ logseq-cli add-note-content --page "Project" --under-heading "## Notes" \
 # Heading is created if missing.
 
 # 6. In-memory read cache (60s TTL by default)
-LOGSEQ_CLI_CACHE_TTL=120 logseq-cli get-all-pages   # extend TTL
+# Scope: ONE process. Two shell invocations do not share it, so a second
+# `logseq-cli get-page X` hits the API again. It pays off inside a single call
+# that reads repeatedly: --name A --name B, get-journal-range, --resolve-refs.
 logseq-cli --no-cache get-page --page "X"           # bypass for one call
-LOGSEQ_CLI_CACHE_TTL=0 logseq-cli ...               # disable globally
+LOGSEQ_CLI_CACHE_TTL=0 logseq-cli ...               # disable
+LOGSEQ_CLI_CACHE_TTL=120 logseq-cli get-journal-range --from ... --to ...
 # Mutations (insert/update/remove/createPage/...) invalidate the cache.
 
 # 7. Parallel pool for get-journal-range (5 workers default)
@@ -176,6 +188,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `get-all-pages` | List all pages |
 | `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line |
 | `get-block --id UUID` | Block by UUID |
+| `find-block --content TEXT [--page NAME] [--regex] [--first] [--with-children]` | Find blocks by content. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME` | Pages linking to NAME |
@@ -201,12 +214,17 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `update-block --id UUID --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too — use `insert-block --child-of` for children |
+| `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches |
 | `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
+| `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING` |
+| `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
 | `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
+| `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
+| `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
 | `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
+| `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 
 ### Meta (2)
 
@@ -221,7 +239,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `set-property --page NAME --key KEY --value VAL` | Set/update a page property |
-| `remove-property --page NAME --key KEY` | Remove a page property |
+| `remove-property (--page NAME \| --id UUID) --key KEY` | Remove a page property. `--id` targets a single block instead of the page |
 | `set-block-property --id UUID --key KEY --value VAL` | Set/update a block property |
 
 ### Page Management (2)

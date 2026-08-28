@@ -20,21 +20,25 @@ from logseq_cli.helpers import (
 )
 import click
 
+from tests.conftest import fake_api
+
 
 # ---------- helpers --------------------------------------------------------
 
 def _make_api_with_uuid_sequence(uuids):
-    """Each insert_block / append_block_in_page returns next UUID from sequence."""
-    api = MagicMock()
-    seq = iter(uuids)
+    """API stand-in handing out UUIDs from ``uuids`` in order.
 
-    def _insert(parent_uuid, content, opts=None):
-        return {"uuid": next(seq)}
+    Backed by :class:`tests.conftest.FakeGraph` so the batch path works too:
+    ``insertBatchBlock`` returns ``null`` on success, so the helper verifies the
+    write by reading the parent's children back, and a bare MagicMock would
+    answer that read with a MagicMock - indistinguishable from "nothing landed".
+    """
+    api = fake_api(uuids)
+    seq = iter(uuids)
 
     def _append(page, content):
         return {"uuid": next(seq)}
 
-    api.insert_block.side_effect = _insert
     api.append_block_in_page.side_effect = _append
     return api
 
@@ -235,9 +239,7 @@ class TestInsertBlockTreeAsSiblings:
         assert calls[1][0] == "s1" and calls[1][2] == {"sibling": True, "before": False}
 
     def test_siblings_with_children_nest_under_each_top_node(self):
-        seq = iter(["h", "c1", "c2"])
-        api = MagicMock()
-        api.insert_block.side_effect = lambda anchor, content, opts: {"uuid": next(seq)}
+        api = fake_api(["h", "c1", "c2"])
         tree = [{"content": "header", "children": [
             {"content": "child1", "children": []},
             {"content": "child2", "children": []},
@@ -381,3 +383,108 @@ class TestMixedIndentation:
         assert len(tree) == 1
         kids = [c["content"] for c in tree[0]["children"]]
         assert kids == ["a", "b"]
+
+
+# ---------- --first (insert at head of child list) -------------------------
+
+class TestInsertFirstChild:
+    def _api_recording(self, uuids):
+        """Like _make_api_with_uuid_sequence but records (parent, content, opts)."""
+        api = MagicMock()
+        seq = iter(uuids)
+        calls = []
+
+        def _insert(parent_uuid, content, opts=None):
+            calls.append((parent_uuid, content, opts))
+            return {"uuid": next(seq)}
+
+        api.insert_block.side_effect = _insert
+        return api, calls
+
+    def test_single_content_uses_before_true(self):
+        api, calls = self._api_recording(["f1"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent", "--first",
+                "--content", "head block", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        assert calls == [("parent", "head block", {"sibling": False, "before": True})]
+
+    def test_without_first_appends_last(self):
+        api, calls = self._api_recording(["l1"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent",
+                "--content", "tail block", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        assert calls == [("parent", "tail block", {"sibling": False})]
+
+    def test_tree_first_root_leads_rest_chain_as_siblings(self):
+        """Order must be preserved: a, b, c, not reversed by repeated before=True."""
+        api, calls = self._api_recording(["u-a", "u-b", "u-c"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent", "--first",
+                "--tree", "- a\n- b\n- c", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        data = _json.loads(result.output)
+        assert data["uuids"] == ["u-a", "u-b", "u-c"]
+        # first root at head of children; the rest chained after the previous one
+        assert calls[0] == ("parent", "a", {"sibling": False, "before": True})
+        assert calls[1] == ("u-a", "b", {"sibling": True, "before": False})
+        assert calls[2] == ("u-b", "c", {"sibling": True, "before": False})
+
+    def test_tree_first_nests_children_under_head(self):
+        api, calls = self._api_recording(["u-root", "u-kid"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent", "--first",
+                "--tree", "- root\n\t- kid", "--json",
+            ])
+        assert result.exit_code == 0, result.output
+        assert calls[0] == ("parent", "root", {"sibling": False, "before": True})
+        assert calls[1] == ("u-root", "kid", {"sibling": False})
+
+    def test_first_without_child_of_is_rejected(self):
+        api, _ = self._api_recording(["nope"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--page", "SomePage", "--first",
+                "--content", "x",
+            ])
+        assert result.exit_code == 1
+        assert "--first only applies to --child-of" in result.output
+        api.insert_block.assert_not_called()
+
+    def test_silent_write_failure_aborts(self):
+        """API answers 200 + null -> must fail loudly, not report success."""
+        api = MagicMock()
+        api.insert_block.return_value = None
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent", "--first",
+                "--content", "vanishes",
+            ])
+        assert result.exit_code != 0
+        assert "did not create" in result.output
+
+    def test_dry_run_reports_first_child_and_writes_nothing(self):
+        api, calls = self._api_recording(["never"])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, [
+                "insert-block", "--child-of", "parent", "--first",
+                "--content", "planned", "--dry-run",
+            ])
+        assert result.exit_code == 0, result.output
+        assert "first child" in result.output
+        assert calls == []
