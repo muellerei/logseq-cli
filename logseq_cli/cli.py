@@ -11,7 +11,13 @@ from pathlib import Path
 import click
 import requests
 
-from logseq_cli.api import LogseqAPI
+from logseq_cli.api import LogseqAPI, DatalogQueryError
+from logseq_cli.datalog import (
+    InvalidKeywordError,
+    edn_keyword,
+    edn_string,
+    page_name_literal,
+)
 from logseq_cli.helpers import (
     escape_regex,
     journal_day_to_date,
@@ -88,6 +94,25 @@ def handle_connection_error(func):
                 reason="http_error",
                 status_code=status,
                 **({"hint": hint} if hint else {}),
+            )
+        except DatalogQueryError as e:
+            # Not a transport error: the connection is healthy, Logseq rejected
+            # the query itself. A distinct reason keeps agents from running
+            # doctor (which reports OK) and falling back to the filesystem.
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="datalog_query_failed",
+                query=e.query,
+            )
+        except InvalidKeywordError as e:
+            # The connection is healthy and no query was sent; the input was
+            # rejected before building. A distinct reason keeps this out of the
+            # "connection down" path an agent would otherwise take.
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="invalid_property_key",
             )
     wrapper.__name__ = func.__name__
     wrapper.__doc__ = func.__doc__
@@ -1427,16 +1452,16 @@ def smart_query(ctx, request, include_query, advanced, as_json):
     api = ctx.obj["api"]
     req_lower = request.lower()
 
-    # --advanced mode: pass raw Datalog query directly to datascript_query
+    # --advanced mode: pass raw Datalog query directly to datascript_query.
+    # This is the one place that does NOT go through the datalog build layer,
+    # and that is correct: --advanced is the documented raw pass-through for
+    # arbitrary Datalog. Do not "fix" it to route through edn_string.
     if advanced:
         query_str = request
         description = "Advanced (raw Datalog query)"
-        try:
-            results = api.datascript_query(query_str)
-        except Exception as e:
-            results = []
-            if not as_json:
-                click.echo(f"Query error: {e}", err=True)
+        # A rejected query raises DatalogQueryError, caught by the decorator: a
+        # query that never ran must exit non-zero, not report an empty result.
+        results = api.datascript_query(query_str)
 
         result_data = {
             "request": request,
@@ -1504,7 +1529,7 @@ def smart_query(ctx, request, include_query, advanced, as_json):
             "keywords": ["links to", "references", "mentions", "verlinkt", "referenziert"],
             "query": (
                 '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                ' :where [?b :block/refs ?target] [?target :block/name "{page_name}"]]'
+                ' :where [?b :block/refs ?target] [?target :block/name {page_name}]]'
             ),
             "description": "Blocks linking to {page_name}",
             "extract_param": "page_name",
@@ -1521,7 +1546,7 @@ def smart_query(ctx, request, include_query, advanced, as_json):
             "keywords": ["tagged", "tag", "hashtag", "getaggt", "markiert"],
             "query": (
                 '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                ' :where [?b :block/content ?c] [(clojure.string/includes? ?c "#{tag_name}")]]'
+                ' :where [?b :block/content ?c] [(clojure.string/includes? ?c {tag_name})]]'
             ),
             "description": "Blocks tagged with #{tag_name}",
             "extract_param": "tag_name",
@@ -1566,7 +1591,7 @@ def smart_query(ctx, request, include_query, advanced, as_json):
         content_query = (
             '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
             ' :where [?b :block/content ?c]'
-            f' [(clojure.string/includes? ?c "{search_term}")]]'
+            f' [(clojure.string/includes? ?c {edn_string(search_term)})]]'
         )
         try:
             results = api.datascript_query(content_query)
@@ -1600,22 +1625,27 @@ def smart_query(ctx, request, include_query, advanced, as_json):
         extract_param = template.get("extract_param")
         if extract_param and f"{{{extract_param}}}" in query_str:
             param_value = _extract_param_from_request(req_lower, template["keywords"], request)
-            if param_value:
-                query_str = query_str.replace(f"{{{extract_param}}}", param_value)
-                description = template["description"].replace(f"{{{extract_param}}}", param_value)
+            if not param_value:
+                param_value = request.strip()
+            # Each template's placeholder needs the build function that matches
+            # its query position, and the two known ones differ on purpose:
+            # links-to queries :block/name (stored lowercased), tagged queries
+            # :block/content (user spelling). Sending links-to through
+            # edn_string would keep the case bug that lost 1569 backlinks.
+            if best_match == "links-to":
+                literal = page_name_literal(param_value)
+            elif best_match == "tagged":
+                literal = edn_string("#" + param_value)
             else:
-                query_str = query_str.replace(f"{{{extract_param}}}", request.strip())
-                description = template["description"].replace(f"{{{extract_param}}}", request.strip())
+                literal = edn_string(param_value)
+            query_str = query_str.replace(f"{{{extract_param}}}", literal)
+            description = template["description"].replace(f"{{{extract_param}}}", param_value)
         else:
             description = template["description"]
 
-        try:
-            results = api.datascript_query(query_str)
-        except Exception as e:
-            results = []
-            if not as_json:
-                click.echo(f"Query error: {e}", err=True)
-
+        # A rejected query raises DatalogQueryError (caught by the decorator):
+        # a query that never ran must fail loud, not report zero hits.
+        results = api.datascript_query(query_str)
         query_used = query_str
 
     result_data = {
@@ -2957,7 +2987,7 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
     if include_done:
         markers.add("DONE")
 
-    markers_str = " ".join(f'"{m}"' for m in sorted(markers))
+    markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (
         '[:find (pull ?b [:block/content :block/marker :block/uuid]) '
         '(pull ?p [:block/original-name :block/name :block/journal-day]) '
@@ -3462,34 +3492,28 @@ def query_pages_by_property(ctx, key, value, as_json):
     """Find pages by property key/value (e.g. --key type --value Person)."""
     api = ctx.obj["api"]
 
+    key_kw = edn_keyword(key)
     if value:
         # Query pages where property key matches value
         query = f'''[:find (pull ?p [:block/name :block/original-name :block/properties])
                      :where
                      [?p :block/name]
                      [?p :block/properties ?props]
-                     [(get ?props :{key}) ?v]
-                     [(= ?v "{value}")]]'''
+                     [(get ?props :{key_kw}) ?v]
+                     [(= ?v {edn_string(value)})]]'''
     else:
         # Query pages that have this property key (any value)
         query = f'''[:find (pull ?p [:block/name :block/original-name :block/properties])
                      :where
                      [?p :block/name]
                      [?p :block/properties ?props]
-                     [(get ?props :{key}) ?v]]'''
+                     [(get ?props :{key_kw}) ?v]]'''
 
-    try:
-        results = api.datascript_query(query)
-    except Exception as e:
-        # Fallback: brute force via get_all_pages
-        click.echo(f"Datalog query failed ({e}), falling back to page scan...", err=True)
-        pages = api.get_all_pages()
-        results = []
-        for p in pages:
-            props = p.get("properties", {})
-            if key in props:
-                if value is None or str(props[key]) == value:
-                    results.append([p])
+    # The former full-scan fallback is gone: it existed for a malformed key,
+    # which edn_keyword now rejects before any query is built, and a silent
+    # scan over ~1900 pages is no good answer even on success. A rejected key
+    # is a usage error with a clear message, not a reason to fall back.
+    results = api.datascript_query(query)
 
     # Extract page names from results
     pages_found = []

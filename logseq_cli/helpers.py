@@ -6,6 +6,8 @@ from pathlib import Path
 
 import click
 
+from logseq_cli.datalog import edn_string, page_name_literal
+
 # Locale-independent English day/month names (Logseq always uses English)
 _WEEKDAYS_FULL = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 _WEEKDAYS_ABBR = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -824,7 +826,7 @@ def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool 
         if page:
             query = (
                 '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-                f' :where [?p :block/name "{page.lower()}"]'
+                f' :where [?p :block/name {page_name_literal(page)}]'
                 ' [?b :block/page ?p]'
                 ' [?b :block/content _]]'
             )
@@ -837,20 +839,20 @@ def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool 
         pattern = re.compile(content)
         return [r[0] for r in raw if r and r[0] and pattern.search(r[0].get("content", ""))]
 
-    content_escaped = content.replace('"', '\\"')
+    content_literal = edn_string(content)
     if page:
         query = (
             '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
-            f' :where [?p :block/name "{page.lower()}"]'
+            f' :where [?p :block/name {page_name_literal(page)}]'
             ' [?b :block/page ?p]'
             ' [?b :block/content ?c]'
-            f' [(clojure.string/includes? ?c "{content_escaped}")]]'
+            f' [(clojure.string/includes? ?c {content_literal})]]'
         )
     else:
         query = (
             '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
             ' :where [?b :block/content ?c]'
-            f' [(clojure.string/includes? ?c "{content_escaped}")]]'
+            f' [(clojure.string/includes? ?c {content_literal})]]'
         )
     raw = api.datascript_query(query) or []
     return [r[0] for r in raw if r and r[0]]
