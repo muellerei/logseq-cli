@@ -2,8 +2,7 @@
 
 Instructions for any AI agent or automation tool driving logseq-cli from a
 shell. Nothing here is specific to one assistant: the CLI is a plain Python
-package (`click`, `requests`) with no vendor coupling, and `CLAUDE.md` next to
-this file is just one client's house rules, not a requirement.
+package (`click`, `requests`) with no vendor coupling.
 
 What makes it scriptable:
 
