@@ -34,6 +34,21 @@ _MUTATING_METHODS = frozenset({
 })
 
 
+class DatalogQueryError(RuntimeError):
+    """A datalog query was rejected by Logseq instead of being executed.
+
+    Logseq answers a broken query with HTTP 200 and ``{"error": ...}`` in the
+    body, so without this exception a query that never ran is indistinguishable
+    from a query with zero hits. Message and query are attributes, not just
+    text: the JSON error output needs structured fields.
+    """
+
+    def __init__(self, api_message: str, query: str):
+        super().__init__(f"Datalog query failed: {api_message}")
+        self.api_message = api_message
+        self.query = query
+
+
 class LogseqAPI:
     def __init__(self, host=None, port=None, token=None):
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
@@ -99,7 +114,11 @@ class LogseqAPI:
             raise RuntimeError(f"Logseq API returned non-JSON response: {resp.text[:200]}")
 
         if cacheable and key is not None:
-            self._cache_set(key, data)
+            # Error payloads must not outlive their cause: a cached
+            # {"error": ...} would keep answering as a failure for up to TTL
+            # seconds after the caller fixed the input.
+            if not (isinstance(data, dict) and "error" in data):
+                self._cache_set(key, data)
         elif method in _MUTATING_METHODS:
             self.clear_cache()
 
@@ -212,4 +231,11 @@ class LogseqAPI:
         return self.call("logseq.App.getUserConfigs")
 
     def datascript_query(self, query: str):
-        return self.call("logseq.DB.datascriptQuery", [query])
+        result = self.call("logseq.DB.datascriptQuery", [query])
+        # Logseq answers a rejected query with HTTP 200 + {"error": ...} in the
+        # body; success is always a list. The check lives here and not in
+        # call(): only for datalog is a dict unambiguously a failure, other
+        # methods may carry an "error" field legitimately.
+        if isinstance(result, dict) and "error" in result:
+            raise DatalogQueryError(str(result["error"]), query)
+        return result

@@ -92,3 +92,30 @@ class TestCacheBasic:
             api.get_page("Foo")
             api.get_page("Foo")
         assert mock_post.call_count == 2
+
+
+class TestErrorsAreNotCached:
+    """A failed query must not leave a cache entry behind.
+
+    _cache_set used to run before anything looked at the payload, so a broken
+    query stayed answered as an "empty" result for up to TTL seconds, even
+    after the caller fixed the input.
+    """
+
+    def test_failed_query_is_retried_not_served_from_cache(self):
+        from logseq_cli.api import DatalogQueryError
+
+        api = LogseqAPI(token="x")
+        error = _mock_response({"error": "Cannot parse clause"})
+        with patch("logseq_cli.api.requests.post", return_value=error) as mock_post:
+            for _ in range(2):
+                with pytest.raises(DatalogQueryError):
+                    api.datascript_query("[:find ?x :where KAPUTT]")
+        assert mock_post.call_count == 2
+
+    def test_successful_query_is_still_cached(self):
+        api = LogseqAPI(token="x")
+        with patch("logseq_cli.api.requests.post", return_value=_mock_response([[1]])) as mock_post:
+            api.datascript_query("[:find ?b :where [?b :block/marker]]")
+            api.datascript_query("[:find ?b :where [?b :block/marker]]")
+        assert mock_post.call_count == 1

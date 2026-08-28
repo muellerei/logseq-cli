@@ -92,3 +92,25 @@ class TestGetBlockNotFound:
             r = split_runner().invoke(cli, ["get-block", "--id", "nope"])
         assert r.exit_code == 1
         assert "not found" in r.stderr.lower()
+
+
+class TestQueryErrorsMeetTheContract:
+    """HTTP 200 with an error body must satisfy the same contract as a
+    transport error: structured JSON on stderr, empty stdout, non-zero exit.
+
+    Logseq reports a broken datalog query this way, so without this guard the
+    path "API answered, but the query never ran" falls outside the contract
+    and surfaces as an empty result or a traceback.
+    """
+
+    def test_query_error_body_is_structured_like_transport_errors(self):
+        error_resp = MagicMock()
+        error_resp.status_code = 200
+        error_resp.json.return_value = {"error": "Cannot parse clause"}
+        error_resp.raise_for_status = MagicMock()
+        with patch("logseq_cli.api.requests.post", return_value=error_resp):
+            r = split_runner().invoke(cli, ["get-todos", "--json"])
+        assert r.exit_code == 1
+        assert r.stdout == ""
+        payload = json.loads(r.stderr)
+        assert payload["reason"] == "datalog_query_failed"
