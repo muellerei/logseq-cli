@@ -1621,19 +1621,23 @@ def smart_query(ctx, request, include_query, advanced, as_json):
             ' :where [?b :block/content ?c]'
             f' [(clojure.string/includes? ?c {edn_string(search_term)})]]'
         )
-        try:
-            results = api.datascript_query(content_query)
+        # A real error (connection down, rejected query) must surface via the
+        # decorator, not be turned into a page-name search: that would answer a
+        # different question with exit 0. The fallback is for the fachliche
+        # case only, no content hits, so it keys off an empty result.
+        results = api.datascript_query(content_query)
+        if results:
             query_used = content_query
             description = f"Content search for '{search_term}'"
-        except Exception:
-            # Final fallback: page name search
+        else:
+            # No content hits: try page names as a last resort.
             pages = api.get_all_pages()
             results = [
                 p for p in pages
                 if req_lower in (p.get("name") or "").lower()
             ]
             query_used = f"(page name search for '{request}')"
-            description = "Page name search (content search failed)"
+            description = "Page name search (no content match)"
     else:
         template = query_templates[best_match]
         query_str = template["query"]

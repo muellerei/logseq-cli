@@ -382,3 +382,57 @@ class TestPropertyKeyCasing:
         assert r.exit_code == 0, r.output
         data = json.loads(r.stdout)
         assert data["pages"][0]["value"] == "Python"
+
+
+class TestContentSearchFallback:
+    """smart-query's content-search must fall back to a page-name search on
+    zero hits, but let a real error (connection down, rejected query) surface
+    instead of silently answering a different question.
+    """
+
+    def test_query_error_is_not_swallowed_by_the_fallback(self):
+        # A rejected query used to be turned into a page-name search with
+        # exit 0; it must now fail loud via the decorator.
+        with patch("logseq_cli.api.requests.post", side_effect=_post_failing_datalog):
+            r = split_runner().invoke(
+                cli, ["smart-query", "--request", "irgendein freier suchtext", "--json"])
+        assert r.exit_code != 0
+        payload = json.loads(r.stderr)
+        assert payload["reason"] == "datalog_query_failed"
+        assert r.stdout == ""
+
+    def test_zero_hits_falls_back_to_page_name_search(self):
+        # Content search returns [], so the page-name fallback runs.
+        call = {"n": 0}
+
+        def _post(url, json=None, headers=None, timeout=None):
+            method = json.get("method") if json else None
+            if method == "logseq.DB.datascriptQuery":
+                return _response([])  # no content hits
+            if method == "logseq.Editor.getAllPages":
+                return _response([{"name": "Freetext Page", "original-name": "Freetext Page"}])
+            return _response([])
+
+        with patch("logseq_cli.api.requests.post", side_effect=_post):
+            r = split_runner().invoke(
+                cli, ["smart-query", "--request", "freitext", "--json"])
+        assert r.exit_code == 0, r.output
+        data = json.loads(r.stdout)
+        assert "Page name search" in data["description"]
+
+    def test_content_hits_do_not_trigger_the_fallback(self):
+        hit = [{"content": "hat freitext drin", "uuid": "u1",
+                "page": {"original-name": "S", "name": "s"}}]
+
+        def _post(url, json=None, headers=None, timeout=None):
+            method = json.get("method") if json else None
+            if method == "logseq.DB.datascriptQuery":
+                return _response([hit])
+            return _response([])
+
+        with patch("logseq_cli.api.requests.post", side_effect=_post):
+            r = split_runner().invoke(
+                cli, ["smart-query", "--request", "freitext", "--json"])
+        assert r.exit_code == 0, r.output
+        data = json.loads(r.stdout)
+        assert "Content search" in data["description"]
