@@ -29,7 +29,6 @@ logseq-cli/
 ├── tests/           # pytest suite (no fixtures beyond tests/conftest.py)
 ├── examples/        # Shell scripts for common workflows
 ├── AGENTS.md        # AI agent reference
-├── CLAUDE.md        # Claude Code instructions
 └── pyproject.toml   # Package config
 ```
 
@@ -65,7 +64,6 @@ logseq-cli/
 4. **Update documentation.** If you add or change a command:
    - Update `README.md` (command tables and usage examples)
    - Update `AGENTS.md` (if it affects common workflows)
-   - Update `CLAUDE.md` (if it changes critical rules or decision trees)
    - Add an entry under `## [Unreleased]` in `CHANGELOG.md`
 
 ## Design Principles
