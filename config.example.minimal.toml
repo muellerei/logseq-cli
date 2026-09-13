@@ -1,0 +1,16 @@
+# logseq-cli configuration — minimal example.
+#
+# For people who use the CLI only to write journal entries. One setting: the
+# heading those entries go under.
+#
+# Copy to $XDG_CONFIG_HOME/logseq-cli/config.toml or ~/.logseq-cli.toml.
+
+[journal]
+
+# Used by add-journal-block, add-journal-content and add-block-ref when
+# neither --under-heading nor --top-level is given. The heading is created if
+# the journal page does not have it yet.
+#
+# Drop this line (or the whole file) and entries are appended at the top level
+# of the journal page instead.
+default_heading = "## Log"

@@ -12,6 +12,7 @@ import click
 import requests
 
 from logseq_cli.api import LogseqAPI, DatalogQueryError
+from logseq_cli.config import ConfigError, get, load_config, require, resolve_heading
 from logseq_cli.datalog import (
     InvalidKeywordError,
     edn_keyword,
@@ -104,6 +105,16 @@ def handle_connection_error(func):
                 reason="datalog_query_failed",
                 query=e.query,
             )
+        except ConfigError as e:
+            # Nothing was sent and nothing is wrong with Logseq: a setting that
+            # describes the user's graph is missing or their config is broken.
+            # Its own reason keeps an agent from retrying or blaming the
+            # connection; the message names the setting and the file.
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="config_error",
+            )
         except InvalidKeywordError as e:
             # The connection is healthy and no query was sent; the input was
             # rejected before building. A distinct reason keeps this out of the
@@ -145,6 +156,52 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
     else:
         click.echo(f"Error: {message}", err=True)
     sys.exit(exit_code)
+
+
+def _project_pattern(tag_prefix: str, explicit_tags=None) -> "re.Pattern[str]":
+    """Match project mentions, as a tag or as a page link.
+
+    ``#projects/alpha`` and ``[[projects/alpha]]`` name the same project, and a
+    graph that namespaces project pages tends to contain both, so matching only
+    the tag form undercounts. Group 1 is the project name either way.
+
+    ``explicit_tags`` is for graphs that do not namespace at all and tag flatly
+    (``#alpha``, ``#beta``): those names cannot be inferred, so they are listed.
+    """
+    prefix = tag_prefix.lstrip("#")
+    alts = [
+        r"#" + re.escape(prefix) + r"(\S+)",
+        r"\[\[" + re.escape(prefix) + r"([^\]]+)\]\]",
+    ]
+    for raw in explicit_tags or []:
+        name = str(raw).strip().lstrip("#")
+        if name:
+            alts.append(r"#(" + re.escape(name) + r")\b")
+    return re.compile("|".join(alts), re.IGNORECASE)
+
+
+def _word_pattern(words) -> "re.Pattern[str]":
+    """Case-insensitive whole-word alternation over a list of words.
+
+    Words come from config, so they are escaped: a user writing "c++" or a
+    stray "(" must not turn into a broken or surprising pattern. \\b around a
+    word that starts or ends with a non-word character would never match, so
+    the boundary is applied per word only where it can bite.
+    """
+    parts = []
+    for raw in words:
+        w = str(raw).strip()
+        if not w:
+            continue
+        esc = re.escape(w)
+        left = r"\b" if w[0].isalnum() or w[0] == "_" else ""
+        right = r"\b" if w[-1].isalnum() or w[-1] == "_" else ""
+        parts.append(f"{left}{esc}{right}")
+    if not parts:
+        # Matches nothing, rather than an empty alternation that matches
+        # everywhere and would report every block as a mood hit.
+        return re.compile(r"(?!)")
+    return re.compile("|".join(parts), re.IGNORECASE)
 
 
 _BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
@@ -1163,9 +1220,21 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     start, end = parse_date_range(timeframe)
     pages = api.get_all_pages()
 
-    mood_positive = re.compile(r"\b(happy|great|excited|good|wonderful|productive|grateful)\b", re.IGNORECASE)
-    mood_negative = re.compile(r"\b(sad|tired|stressed|frustrated|anxious|overwhelmed|bad)\b", re.IGNORECASE)
-    mood_keyword = re.compile(r"(?:mood|feeling):\s*(\w+)", re.IGNORECASE)
+    # Word lists and the project tag are language- and graph-specific: the
+    # built-ins are English, so a journal written in another language scores
+    # zero moods and no project progress, silently. [analysis] in the config
+    # replaces them; see docs/configuration.md.
+    cfg = load_config()
+    mood_positive = _word_pattern(
+        get(cfg, "analysis", "mood_positive")
+        or ["happy", "great", "excited", "good", "wonderful", "productive", "grateful"])
+    mood_negative = _word_pattern(
+        get(cfg, "analysis", "mood_negative")
+        or ["sad", "tired", "stressed", "frustrated", "anxious", "overwhelmed", "bad"])
+    mood_labels = get(cfg, "analysis", "mood_labels") or ["mood", "feeling"]
+    mood_keyword = re.compile(
+        r"(?:" + "|".join(re.escape(str(w)) for w in mood_labels) + r"):\s*(\w+)",
+        re.IGNORECASE)
     mood_indicator_patterns = [
         "mood:", "feeling:", "\U0001f60a", "\U0001f614", "\U0001f620", "\U0001f60c",
         "happy", "sad", "angry", "excited", "tired", "anxious",
@@ -1173,7 +1242,13 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     incomplete_task = re.compile(r"- \[ \]")
     complete_task = re.compile(r"- \[x\]", re.IGNORECASE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
-    project_pattern = re.compile(r"#project/(\S+)")
+    # Projects get named in more than one way. A namespace prefix covers both
+    # the tag (#projects/alpha) and the link ([[projects/alpha]]), because a
+    # graph that namespaces its project pages usually writes both; graphs that
+    # tag flatly (#alpha) configure the tags themselves instead.
+    project_tag = get(cfg, "analysis", "project_tag_prefix") or "#project/"
+    project_pattern = _project_pattern(
+        str(project_tag), get(cfg, "analysis", "project_tags"))
     habit_checkbox = re.compile(r"- \[[ x]\]")
 
     entries = []
@@ -1604,12 +1679,18 @@ def smart_query(ctx, request, include_query, advanced, as_json):
         },
         "persons": {
             "keywords": ["person", "persons", "people", "personen", "kollegen"],
-            "query": '[:find (pull ?p [*]) :where [?p :block/name] [?p :block/properties ?props] [(get ?props :type) ?t] [(= ?t "Person")]]',
+            # Built from config: which property marks a person page is the
+            # user's own convention, not something the CLI can know.
+            "query": None,
+            "needs_config": ("graph", "person_property"),
             "description": "All person pages",
         },
         "projects": {
             "keywords": ["project", "projects", "projekte"],
-            "query": '[:find (pull ?p [*]) :where [?p :block/name ?n] [(clojure.string/starts-with? ?n "projekte/")]]',
+            # Built from config: the namespace that marks project pages differs
+            # per graph, so there is no default to fall back on.
+            "query": None,
+            "needs_config": ("graph", "projects_namespace"),
             "description": "All project pages",
         },
     }
@@ -1656,6 +1737,32 @@ def smart_query(ctx, request, include_query, advanced, as_json):
     else:
         template = query_templates[best_match]
         query_str = template["query"]
+
+        # Templates that describe the user's own graph carry no query of their
+        # own: it is built here from config. A missing setting raises and exits
+        # non-zero rather than querying for a guessed namespace, which would
+        # return an empty list that looks exactly like "no projects".
+        if query_str is None:
+            section, key = template["needs_config"]
+            cfg = load_config()
+            if key == "projects_namespace":
+                prefix = require(cfg, section, key,
+                                 f"smart-query --request {request!r}")
+                query_str = (
+                    '[:find (pull ?p [*]) :where [?p :block/name ?n] '
+                    f'[(clojure.string/starts-with? ?n {edn_string(str(prefix).lower())})]]'
+                )
+            else:
+                prop = require(cfg, section, key,
+                               f"smart-query --request {request!r}")
+                value = require(cfg, section, "person_value",
+                                f"smart-query --request {request!r}")
+                query_str = (
+                    '[:find (pull ?p [*]) :where [?p :block/name] '
+                    '[?p :block/properties ?props] '
+                    f'[(get ?props :{edn_keyword(str(prop))}) ?t] '
+                    f'[(= ?t {edn_string(str(value))})]]'
+                )
 
         # Handle timestamp placeholder
         if "{timestamp}" in query_str:
@@ -2011,9 +2118,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     if top_level:
         under_heading = None
-    elif under_heading is None:
-        # Fall back to env var if no explicit --under-heading was given
-        under_heading = os.environ.get("LOGSEQ_JOURNAL_HEADING")
+    else:
+        # A name from [journal.headings] resolves to its heading; anything else
+        # is passed through, so a literal "## Log" keeps working. With no value
+        # at all, the env var wins over the config's default_heading.
+        under_heading = resolve_heading(load_config(), under_heading)
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
@@ -2302,8 +2411,8 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
     """
     if top_level:
         under_heading = None
-    elif under_heading is None:
-        under_heading = os.environ.get("LOGSEQ_JOURNAL_HEADING")
+    else:
+        under_heading = resolve_heading(load_config(), under_heading)
 
     api = ctx.obj["api"]
 
@@ -2980,8 +3089,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
     source_id = source_id.strip("()")
     ref_content = f"(({source_id}))"
 
-    if under_heading is None:
-        under_heading = os.environ.get("LOGSEQ_JOURNAL_HEADING")
+    under_heading = resolve_heading(load_config(), under_heading)
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
@@ -3948,6 +4056,35 @@ def doctor(ctx, as_json):
         except Exception as e:  # noqa: BLE001
             add("graph", False, f"{type(e).__name__}: {e}")
             remedy = "API works but the graph could not be read."
+
+    # Config last: it says nothing about whether Logseq is reachable, so it is
+    # reported with ok=None and cannot turn a working setup into a failed one.
+    # Without it most commands are fine; the point is to name the few that are
+    # not, before the user hits one and wonders why it found nothing.
+    try:
+        cfg = load_config()
+        configured = [
+            key for section, key in (
+                ("graph", "projects_namespace"),
+                ("graph", "person_property"),
+            )
+            if cfg.get(section, {}).get(key)
+        ]
+        if not cfg:
+            add("config", None,
+                "no config file; commands that need one will say so "
+                "(see docs/configuration.md)")
+        elif configured:
+            add("config", True, f"{cfg['_path']} ({', '.join(configured)})")
+        else:
+            add("config", None,
+                f"{cfg['_path']} carries no [graph] settings; "
+                "smart-query for projects or people will report them missing")
+    except ConfigError as e:
+        # A broken config is worth failing on: the user meant to configure
+        # something and it is not being applied.
+        add("config", False, str(e).split("\n")[0])
+        remedy = remedy or "Fix the config file, or remove it to run without one."
 
     healthy = all(c["ok"] for c in checks if c["ok"] is not None)
 

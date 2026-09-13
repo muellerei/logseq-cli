@@ -1,5 +1,21 @@
 """Shared test helpers."""
+import os
+
+import pytest
 from click.testing import CliRunner
+
+
+@pytest.fixture(autouse=True)
+def isolate_environment(monkeypatch):
+    """Keep the developer's own environment out of every test.
+
+    A shell with LOGSEQ_CLI_CONFIG or LOGSEQ_JOURNAL_HEADING set would
+    otherwise change what commands do here — silently, and differently on
+    each machine. Tests that want either one set it themselves.
+    """
+    for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING"):
+        monkeypatch.delenv(var, raising=False)
+    yield
 
 
 def split_runner():

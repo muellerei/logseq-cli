@@ -1,0 +1,67 @@
+# logseq-cli configuration — example for a German-language graph.
+#
+# Same settings as config.example.toml; only the values differ. Comments stay
+# English, like the rest of the repository. Nothing here is required: the CLI
+# runs without a config file, and each value can still be overridden by a flag
+# or an environment variable.
+#
+# Copy to $XDG_CONFIG_HOME/logseq-cli/config.toml or ~/.logseq-cli.toml,
+# or point LOGSEQ_CLI_CONFIG at it.
+
+
+[journal]
+
+# Heading that journal writes go under by default. Without it, entries land at
+# the top level of the journal page. LOGSEQ_JOURNAL_HEADING wins when set.
+# The heading is created if the journal page does not have it yet.
+default_heading = "## Protokoll"
+
+
+[journal.headings]
+
+# The key on the left is yours to choose: it is the shortcut you type, not
+# something the CLI knows. The value on the right is the heading as it is
+# actually spelled in the graph, and that one has to match exactly — including
+# capitalisation, since "## Log" and "## log" are two different headings.
+# An unlisted name is used verbatim, so a typo never resolves to another
+# section.
+protokoll = "## Protokoll"
+aufgaben = "## Aufgaben"
+termine = "## Termine"
+
+# Keys need not share the language of the headings. Typing an English shortcut
+# for a German section is often the point of this table.
+tasks = "## Aufgaben"
+log = "## Protokoll"
+
+
+[graph]
+
+# Namespace prefix of your project pages, e.g. "projekte/Projekt Alpha".
+# Used by `smart-query --request "projekte"`. Without it, that query reports
+# the missing setting and exits 1 instead of returning an empty list.
+projects_namespace = "projekte/"
+
+# Property and value that mark a person page, e.g. a page carrying
+# `type:: Person`. Used by `smart-query --request "personen"`.
+# Both are required; the property name alone is not enough.
+# Property names usually stay English even in a German graph, because that is
+# what Logseq's own conventions and most plugins use — put here whatever your
+# pages really carry.
+person_property = "type"
+person_value = "Person"
+
+
+[analysis]
+
+# Word lists for `analyze-journal-patterns`. The built-in lists are English,
+# so a German journal scores nothing until these are set — silently, because
+# "no matches" and "cannot match" look the same in the output.
+mood_positive = ["gut", "produktiv", "erfolgreich", "zufrieden"]
+mood_negative = ["müde", "gestresst", "frustriert", "schwierig"]
+
+# Labels of an explicit mood line, as in `stimmung: gut`.
+mood_labels = ["mood", "feeling", "stimmung", "laune"]
+
+# Projects as a namespace; matches the tag and the link form.
+project_tag_prefix = "#projekte/"
