@@ -4455,17 +4455,9 @@ def doctor(ctx, as_json):
     versions = []
     for mod, label in (("click", "click"), ("requests", "requests")):
         try:
-            import_module(mod)
+            versions.append(f"{label} {import_module(mod).__version__}")
         except Exception:  # noqa: BLE001 - any import failure means "not usable"
             missing.append(label)
-            continue
-        # Ask the installed metadata rather than the module: click deprecated
-        # its __version__ attribute and drops it in 9.1, and a doctor that
-        # warns about the library it is checking is not much of a doctor.
-        try:
-            versions.append(f"{label} {_pkg_version(mod)}")
-        except PackageNotFoundError:  # pragma: no cover - importable but no dist
-            versions.append(label)
     # The TOML parser is stdlib from 3.11 and the tomli backport before that;
     # either is fine, only having neither is a problem, and only for configs.
     try:
