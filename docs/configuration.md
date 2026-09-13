@@ -193,6 +193,14 @@ Words are matched whole and case-insensitively, and are escaped before they
 reach the pattern — a word may contain regex characters without surprising
 you. An empty list matches nothing rather than everything.
 
+**The mood words judge stated moods, not the whole journal.** A line has to
+say one — `mood: good`, `stimmung: mies`, with the label coming from
+`mood_labels` — and the word lists then decide whether that value is positive
+or negative. Counting every occurrence instead measured how often such words
+appear in technical prose: "nicht zufrieden" and "läuft nicht gut" both
+counted as positive, because a word list cannot see a negation. If you never
+write a mood line, the counts stay at zero, which is the honest answer.
+
 **Without it:** the English defaults apply and `#project/` is assumed. Measured
 against a German journal of 120 days: 3 mood hits with the defaults, 148 with a
 German list.
