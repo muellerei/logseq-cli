@@ -18,6 +18,15 @@ dist/
 build/
 .pytest_cache/
 
+# Coverage and tool caches: not produced by the suite as it runs today, but
+# a contributor measuring coverage or running a linter should not have to
+# notice them before committing.
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
 # Editors
 .idea/
 .vscode/
