@@ -160,3 +160,53 @@ class TestDeletePageGate:
         result = CliRunner().invoke(cli, ["delete-page", "--name", "Nope", "--force"])
         assert result.exit_code == 1
         _assert_no_mutation(api)
+
+
+class TestDeletePageBlockCountIsNotGuessed:
+    """The block count is what the user decides on, so it must not be invented.
+
+    An unreadable block tree was swallowed into `blocks = []`, and the page
+    then offered itself for deletion as "0 block(s)" — the one number that
+    makes a full page look safe to drop. The same count feeds the interactive
+    prompt, so the reassuring number appeared exactly where the decision is
+    made.
+
+    --force is different: there the count is output, not a gate, and a script
+    that means to delete must not start failing over a failed read.
+    """
+
+    def test_dry_run_refuses_rather_than_reporting_zero(self, api):
+        api.get_page.return_value = {"name": "X"}
+        api.get_page_blocks_tree.side_effect = RuntimeError("API hiccup")
+        result = split_runner().invoke(
+            cli, ["delete-page", "--name", "X", "--dry-run", "--json"])
+        assert result.exit_code == 1
+        assert "0 block" not in result.stdout
+        payload = json.loads(result.stderr)
+        assert "X" in payload["error"]
+        _assert_no_mutation(api)
+
+    def test_non_interactive_without_force_still_refuses(self, api):
+        """The force gate must keep priority over the new read error."""
+        api.get_page.return_value = {"name": "X"}
+        api.get_page_blocks_tree.side_effect = RuntimeError("API hiccup")
+        result = split_runner().invoke(cli, ["delete-page", "--name", "X", "--json"])
+        assert result.exit_code == 1
+        _assert_no_mutation(api)
+
+    def test_force_still_deletes_but_does_not_claim_zero(self, api):
+        api.get_page.return_value = {"name": "X"}
+        api.get_page_blocks_tree.side_effect = RuntimeError("API hiccup")
+        result = CliRunner().invoke(cli, ["delete-page", "--name", "X", "--force"])
+        assert result.exit_code == 0
+        api.delete_page.assert_called_once_with("X")
+        assert "0 block" not in result.output
+
+    def test_a_genuinely_empty_page_still_reports_zero(self, api):
+        """An empty page is a fact, not a failed read: it keeps its 0."""
+        api.get_page.return_value = {"name": "X"}
+        api.get_page_blocks_tree.return_value = []
+        result = CliRunner().invoke(cli, ["delete-page", "--name", "X", "--dry-run"])
+        assert result.exit_code == 0
+        assert "0 block(s)" in result.output
+        _assert_no_mutation(api)

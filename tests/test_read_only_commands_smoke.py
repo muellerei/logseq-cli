@@ -177,6 +177,23 @@ class TestAnalyzeGraphCountsOpenTasks:
                      tmp_path, "analyze-graph")
         assert d["total_todos"] == 0
 
+    def test_an_empty_bracket_pair_in_prose_does_not_count(self, tmp_path):
+        """A checkbox is `- [ ]` at the start of a block, not `[ ]` anywhere.
+
+        The marker half of this pattern was anchored to the line but the
+        checkbox half was not, so an empty pair inside running text counted:
+        a code snippet (`tags = [ ]`), an empty markdown link, a table cell.
+        A graph with no tasks at all reported three of them.
+
+        analyze-journal-patterns requires the bullet and was already right;
+        the two counters measure the same thing and must agree.
+        """
+        text = ("- tags = [ ] means an empty list\n"
+                "- see [ ](https://example.com)\n"
+                "- a sentence about [ ] brackets")
+        d = run_json(self._api(text), tmp_path, "analyze-graph")
+        assert d["total_todos"] == 0
+
 
 class TestFindKnowledgeGapsIgnoresArtefacts:
     """596 "orphans" in a real graph were almost all side effects.
