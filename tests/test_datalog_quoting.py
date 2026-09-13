@@ -84,11 +84,11 @@ class TestCommandsWithoutOwnHandler:
         "get-todos": ["get-todos", "--json"],
         "find-block": ["find-block", "--content", "irgendwas", "--json"],
         "update-block --where-content": [
-            "update-block", "--where-content", "Alt", "--page", "Seite",
-            "--content", "Neu", "--json",
+            "update-block", "--where-content", "Old", "--page", "Page One",
+            "--content", "New", "--json",
         ],
         "set-todo-status --content": [
-            "set-todo-status", "--content", "Task", "--page", "Seite",
+            "set-todo-status", "--content", "Task", "--page", "Page One",
             "--status", "DONE", "--json",
         ],
     }
@@ -125,7 +125,7 @@ class TestEdnString:
     """The build layer, tested directly: no API involved."""
 
     def test_quote_is_escaped(self):
-        assert edn_string('mit "Zitat"') == '"mit \\"Zitat\\""'
+        assert edn_string('with "Quote"') == '"with \\"Quote\\""'
 
     def test_trailing_backslash_cannot_close_the_literal(self):
         """The bypass from the finding: input ending in a backslash."""
@@ -415,13 +415,13 @@ class TestContentSearchFallback:
 
         with patch("logseq_cli.api.requests.post", side_effect=_post):
             r = split_runner().invoke(
-                cli, ["smart-query", "--request", "freitext", "--json"])
+                cli, ["smart-query", "--request", "freetext", "--json"])
         assert r.exit_code == 0, r.output
         data = json.loads(r.stdout)
         assert "Page name search" in data["description"]
 
     def test_content_hits_do_not_trigger_the_fallback(self):
-        hit = [{"content": "hat freitext drin", "uuid": "u1",
+        hit = [{"content": "has freetext in it", "uuid": "u1",
                 "page": {"original-name": "S", "name": "s"}}]
 
         def _post(url, json=None, headers=None, timeout=None):
@@ -432,7 +432,7 @@ class TestContentSearchFallback:
 
         with patch("logseq_cli.api.requests.post", side_effect=_post):
             r = split_runner().invoke(
-                cli, ["smart-query", "--request", "freitext", "--json"])
+                cli, ["smart-query", "--request", "freetext", "--json"])
         assert r.exit_code == 0, r.output
         data = json.loads(r.stdout)
         assert "Content search" in data["description"]

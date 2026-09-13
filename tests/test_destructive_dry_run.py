@@ -70,8 +70,8 @@ class TestRemoveBlockDryRun:
         api.get_block.return_value = {
             "uuid": "root", "content": "Parent",
             "children": [
-                {"uuid": "c1", "content": "Kind A"},
-                {"uuid": "c2", "content": "Kind B",
+                {"uuid": "c1", "content": "Child A"},
+                {"uuid": "c2", "content": "Child B",
                  "children": [{"uuid": "g1", "content": "Enkel"}]},
             ],
         }
@@ -104,7 +104,7 @@ class TestCopyBlockDryRun:
     def test_dry_run_does_not_write(self, api):
         api.get_block.return_value = {
             "uuid": "root", "content": "Parent",
-            "children": [{"uuid": "c1", "content": "Kind"}],
+            "children": [{"uuid": "c1", "content": "Child"}],
         }
         result = CliRunner().invoke(cli, ["copy-block", "--id", "root",
                                           "--to-page", "Target", "--dry-run", "--json"])

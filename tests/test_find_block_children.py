@@ -33,7 +33,7 @@ HIT = {
     "page": {"original-name": "2026-08-21, friday"},
 }
 KIDS = [
-    {"content": "**Implementation:** Fix gepusht", "children": [
+    {"content": "**Implementation:** fix pushed", "children": [
         {"content": "=> state matches", "children": []},
     ]},
     {"content": "**Roadmap:** nachgezogen", "children": []},
@@ -47,7 +47,7 @@ class TestWithChildren:
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "14:22", "--with-children"])
         assert r.exit_code == 0, r.output
-        assert "**Implementation:** Fix gepusht" in r.output
+        assert "**Implementation:** fix pushed" in r.output
         assert "=> state matches" in r.output
         # the grandchild must sit deeper than the child, so the tree shape is
         # readable rather than a flat dump
@@ -88,7 +88,7 @@ class TestWithChildren:
                 "find-block", "--content", "14:22", "--with-children", "--json"])
         assert r.exit_code == 0, r.output
         data = json.loads(r.output)
-        assert data[0]["children"][0]["content"] == "**Implementation:** Fix gepusht"
+        assert data[0]["children"][0]["content"] == "**Implementation:** fix pushed"
 
     def test_fanout_is_capped_and_the_remainder_named(self):
         n = FIND_BLOCK_CHILDREN_LIMIT + 7

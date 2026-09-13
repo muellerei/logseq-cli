@@ -338,24 +338,24 @@ def reject_unsupported_multiline(content: str, *, command: str, accepts_tree: bo
         if not flush:
             return
         raise MultilineContentError(
-            "--content enthält mehrzeilige '- '-Bullets ohne Einrückung "
-            "(Zeile 2+). Das wird NICHT als Hierarchie erkannt und landet "
-            "als EIN Block mit rohen Newline-Bullets.\n"
-            "  - Kinder gewollt?     -> Sub-Bullets mit Tab einrücken\n"
-            "  - Geschwister gewollt? -> mehrere --content nutzen\n"
-            "  - Voller Tree?        -> insert-block --tree\n"
-            "  - Aus Datei?          -> --content-file DATEI"
+            "--content has multiline '- ' bullets with no indentation "
+            "(line 2+). That is NOT recognised as a hierarchy and lands as "
+            "ONE block with raw newline bullets.\n"
+            "  - want children?  -> indent sub-bullets with a tab\n"
+            "  - want siblings?  -> pass --content several times\n"
+            "  - want a tree?    -> insert-block --tree\n"
+            "  - from a file?    -> --content-file FILE"
         )
 
     if not (flush or indented):
         return
     raise MultilineContentError(
-        f"--content enthält mehrzeilige '- '-Bullets. {command} ersetzt den "
-        "Inhalt EINES Blocks und legt keine Kind-Blöcke an: die Zeilen landen "
-        "als roher Text im Block.\n"
-        "  - Nur die Zeile ändern? -> --content auf eine Zeile kürzen\n"
-        "  - Kinder gewollt?       -> insert-block --child-of UUID\n"
-        "  - Voller Tree?          -> insert-block --tree"
+        f"--content has multiline '- ' bullets. {command} replaces the content "
+        "of ONE block and creates no child blocks: the lines land as raw text "
+        "inside the block.\n"
+        "  - only change the line? -> shorten --content to a single line\n"
+        "  - want children?        -> insert-block --child-of UUID\n"
+        "  - want a tree?          -> insert-block --tree"
     )
 
 

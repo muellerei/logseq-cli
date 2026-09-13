@@ -73,7 +73,7 @@ def page_name_literal(value: str) -> str:
 
     Logseq stores ``:block/name`` lowercased, so the lowercasing here is a
     domain rule, not an escaping detail: querying with the user's spelling
-    finds nothing (``"Alice"`` 0 hits, ``"alice"`` 1569 hits on the reference
+    finds nothing (``"Alice"`` 0 hits, ``"alice"`` every hit on the reference
     graph).
     """
     return edn_string(value.lower())

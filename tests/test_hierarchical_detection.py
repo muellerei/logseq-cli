@@ -162,10 +162,10 @@ class TestParseHierarchicalPropertyLines:
 
     def test_property_merges_into_last_created_block(self):
         tree = parse_hierarchical_content(
-            "- Kopf\n\t- Kind\n\tid:: fedcba98-0000-0000-0000-000000000000")
-        assert tree[0]["content"] == "Kopf"
+            "- Head\n\t- Child\n\tid:: fedcba98-0000-0000-0000-000000000000")
+        assert tree[0]["content"] == "Head"
         assert tree[0]["children"][0]["content"] == (
-            "Kind\nid:: fedcba98-0000-0000-0000-000000000000")
+            "Child\nid:: fedcba98-0000-0000-0000-000000000000")
 
     def test_multiple_property_lines_merge_in_order(self):
         tree = parse_hierarchical_content(
@@ -186,6 +186,6 @@ class TestParseHierarchicalPropertyLines:
         assert len(tree) == 2
 
     def test_timestamp_entry_unaffected(self):
-        tree = parse_hierarchical_content("**09:30** Log-Zeile\n\t- Detail")
-        assert tree[0]["content"] == "**09:30** Log-Zeile"
+        tree = parse_hierarchical_content("**09:30** Log line\n\t- Detail")
+        assert tree[0]["content"] == "**09:30** Log line"
         assert tree[0]["children"][0]["content"] == "Detail"

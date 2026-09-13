@@ -6,11 +6,11 @@ Thanks for your interest in contributing to logseq-cli!
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/logseq-cli.git
+git clone https://github.com/muellerei/logseq-cli.git
 cd logseq-cli
 
-# Install in editable mode
-pip install -e .
+# Install in editable mode, with the test dependencies
+pip install -e ".[dev]"
 
 # Verify installation
 logseq-cli --version
@@ -24,6 +24,7 @@ Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled
 logseq-cli/
 ├── logseq_cli/
 │   ├── api.py       # HTTP API client (thin wrapper around Logseq's API)
+│   ├── datalog.py   # EDN/datalog query building (value quoting, keywords)
 │   ├── helpers.py   # Date parsing, block processing, content formatting
 │   └── cli.py       # Click CLI with all commands
 ├── tests/           # pytest suite (no fixtures beyond tests/conftest.py)
@@ -34,7 +35,7 @@ logseq-cli/
 
 ## Making Changes
 
-1. **Read the code first.** `cli.py` is the main file (~3800 lines). Each command is a self-contained function decorated with `@cli.command()`.
+1. **Read the code first.** `cli.py` is the main file (~4000 lines). Each command is a self-contained function decorated with `@cli.command()`.
 
 2. **Follow existing patterns.** New commands should:
    - Use `@click.option("--page", "--name", ...)` for page parameters (dual alias)

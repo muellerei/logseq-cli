@@ -193,8 +193,8 @@ class LogseqAPI:
         them. Passing them through the documented third parameter
         (``opts.properties``) makes Logseq re-emit them below the new text.
 
-        The round trip is lossless: a value read back as ``["Bob"]`` is
-        written out as ``link:: [[Bob]]`` again (verified against a live
+        The round trip is lossless: a value read back as ``["Alice"]`` is
+        written out as ``link:: [[Alice]]`` again (verified against a live
         graph). ``id::`` is not part of this dict and survives regardless, so
         block references stay intact.
         """

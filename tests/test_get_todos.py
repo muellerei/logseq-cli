@@ -23,9 +23,9 @@ class TestGetTodosPageInline:
 
     def test_plain_text_shows_page_per_todo(self):
         rows = [
-            ({"content": "TODO erste aufgabe", "marker": "TODO", "uuid": "u1"},
+            ({"content": "TODO first task", "marker": "TODO", "uuid": "u1"},
              {"original-name": "Project Beta", "name": "project beta"}),
-            ({"content": "DOING zweite aufgabe", "marker": "DOING", "uuid": "u2"},
+            ({"content": "DOING second task", "marker": "DOING", "uuid": "u2"},
              {"original-name": "Project Alpha", "name": "project alpha"}),
         ]
         api = _mock_api_for_todos(rows)
@@ -36,8 +36,8 @@ class TestGetTodosPageInline:
         # Each TODO line should mention its page directly
         # Find the lines containing the first todo
         lines = result.output.splitlines()
-        line_with_first = next((l for l in lines if "erste aufgabe" in l), "")
-        line_with_second = next((l for l in lines if "zweite aufgabe" in l), "")
+        line_with_first = next((l for l in lines if "first task" in l), "")
+        line_with_second = next((l for l in lines if "second task" in l), "")
         assert "Project Beta" in line_with_first, f"page missing inline: {line_with_first!r}"
         assert "Project Alpha" in line_with_second, f"page missing inline: {line_with_second!r}"
 

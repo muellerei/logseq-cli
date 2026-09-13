@@ -4,13 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logseq-cli"
-version = "0.8.0"
+version = "0.9.0"
 description = "CLI for Logseq knowledge graph — pages, journals, blocks, search, properties, and graph analysis"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0",
     "requests>=2.28",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/muellerei/logseq-cli"
+Changelog = "https://github.com/muellerei/logseq-cli/blob/main/CHANGELOG.md"
+Issues = "https://github.com/muellerei/logseq-cli/issues"
 
 [project.scripts]
 logseq-cli = "logseq_cli.cli:cli"

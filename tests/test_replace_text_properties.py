@@ -53,7 +53,7 @@ class TestReplaceTextSparesProperties:
     def test_property_line_survives_even_with_text_after_it(self):
         content = ("DONE neuer Service anlegen\n"
                    "id:: abcdef12-3456-7890-abcd-ef1234567890\n"
-                   "=> Server via alt-Weg")
+                   "=> Service via alt route")
         api = _api(content)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
@@ -63,10 +63,10 @@ class TestReplaceTextSparesProperties:
         assert "id:: abcdef12-3456-7890-abcd-ef1234567890" in written
         # Both text lines are replaced, the property line is not.
         assert "DONE neuer Host anlegen" in written
-        assert "=> Host via alt-Weg" in written
+        assert "=> Host via alt route" in written
 
     def test_soft_property_line_is_not_replaced(self):
-        content = "TODO Aufgabe\nprio:: A\ncollapsed:: true"
+        content = "TODO Task A\nprio:: A\ncollapsed:: true"
         api = _api(content)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
@@ -74,13 +74,14 @@ class TestReplaceTextSparesProperties:
         assert r.exit_code == 0, r.output
         written = api._written["content"]
         assert "prio:: A" in written  # not "prio:: Z"
+        assert "TODO Task Z" in written  # the text line IS replaced
 
     def test_plain_text_block_still_replaced(self):
-        content = "alt hier"
+        content = "old here"
         api = _api(content)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "alt", "--replace", "neu"])
+                "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 0, r.output
-        assert api._written["content"] == "neu hier"
+        assert api._written["content"] == "new here"
 

@@ -49,7 +49,7 @@ class TestAddJournalBlockFlat:
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "add-journal-block", "--under-heading", "## Log",
-                "--content", "**14:30** Eintrag"])
+                "--content", "**14:30** Entry"])
         assert r.exit_code == 1
         assert "Added" not in r.output
 
@@ -57,7 +57,7 @@ class TestAddJournalBlockFlat:
         api = _dead_api()
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "add-journal-block", "--content", "**14:30** Eintrag", "--top-level"])
+                "add-journal-block", "--content", "**14:30** Entry", "--top-level"])
         assert r.exit_code == 1
         assert "Added" not in r.output
 
@@ -74,7 +74,7 @@ class TestAddJournalBlockFlat:
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "add-journal-block", "--under-heading", "## Log",
-                "--content", "**14:30** Eintrag"])
+                "--content", "**14:30** Entry"])
         assert r.exit_code == 0, r.output
         assert "Added block to journal" in r.output
 
@@ -134,13 +134,13 @@ class TestCreatePageWithContent:
         api = _dead_api()
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "create-page", "--name", "Neu", "--content", "Text"])
+                "create-page", "--name", "New", "--content", "Text"])
         assert r.exit_code == 1
 
     def test_page_without_content_is_unaffected(self):
         api = _dead_api()
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, ["create-page", "--name", "Neu"])
+            r = CliRunner().invoke(cli, ["create-page", "--name", "New"])
         assert r.exit_code == 0, r.output
         api.append_block_in_page.assert_not_called()
 
@@ -151,31 +151,31 @@ class TestReplaceTextVerifiesByReading:
     def _api(self, after_content):
         api = _dead_api()
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "content": "alt hier", "children": []}]
+            {"uuid": "b1", "content": "old here", "children": []}]
         api.get_block.return_value = {"uuid": "b1", "content": after_content}
         return api
 
     def test_write_that_did_not_land_is_reported(self):
-        api = self._api("alt hier")  # unchanged: the update never took
+        api = self._api("old here")  # unchanged: the update never took
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "alt", "--replace", "neu"])
+                "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 1
         assert "did not reach the graph" in r.output
 
     def test_write_that_landed_is_counted(self):
-        api = self._api("neu hier")
+        api = self._api("new here")
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "alt", "--replace", "neu"])
+                "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 0, r.output
         assert "Replaced 1 block(s)" in r.output
 
     def test_dry_run_does_not_read_back_or_write(self):
-        api = self._api("alt hier")
+        api = self._api("old here")
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "alt", "--replace", "neu",
+                "replace-text", "--page", "P", "--find", "old", "--replace", "new",
                 "--dry-run"])
         assert r.exit_code == 0, r.output
         assert "Would replace 1 block(s)" in r.output

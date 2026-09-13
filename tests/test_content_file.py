@@ -98,12 +98,12 @@ class TestAddJournalBlockContentFile:
         f = tmp_path / "eod.md"
         f.write_text(
             "- ### Daily Summary\n"
-            "\t- Punkt A\n"
-            "\t- Punkt B\n"
+            "\t- Item A\n"
+            "\t- Item B\n"
             "- ### Response Tracking\n"
             "\t- Bob +0.3\n"
             "\t- Alice 0.0\n"
-            "- ### Offene TODOs\n"
+            "- ### Open TODOs\n"
             "\t- Deployment analysis\n"
             "\t- Book time off\n",
             encoding="utf-8")
@@ -119,31 +119,31 @@ class TestAddJournalBlockContentFile:
         # heading; only the three roots written by this call are of interest
         roots = [c for c in api.graph.children["head"] if c["uuid"] != "fl"]
         assert [r["content"] for r in roots] == [
-            "### Daily Summary", "### Response Tracking", "### Offene TODOs"]
+            "### Daily Summary", "### Response Tracking", "### Open TODOs"]
         for root in roots:
             assert len(api.graph.children[root["uuid"]]) == 2
 
     def test_guard_does_not_fire_for_file_input(self, api, tmp_path):
         """Flush bullets from a file must not raise the --content UsageError."""
         f = tmp_path / "flat.md"
-        f.write_text("- eins\n- zwei\n- drei", encoding="utf-8")
+        f.write_text("- one\n- two\n- three", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--content-file", str(f)])
         assert result.exit_code == 0, result.output
-        assert "ohne Einrückung" not in result.output
+        assert "with no indentation" not in result.output
         assert "Added 3 block(s)" in result.output
 
     def test_guard_still_fires_for_inline_content(self, api):
         """The inline path keeps its protection, and now points at the file flag."""
         result = CliRunner().invoke(cli, [
-            "add-journal-block", "--content", "Kopf\n- eins\n- zwei"])
+            "add-journal-block", "--content", "Head\n- one\n- two"])
         assert result.exit_code != 0
-        assert "ohne Einrückung" in result.output
+        assert "with no indentation" in result.output
         assert "--content-file" in result.output
 
     def test_single_root_with_children(self, api, tmp_path):
         f = tmp_path / "one.md"
-        f.write_text("**09:16** Kopf\n\t- Detail A\n\t\t- Tiefer", encoding="utf-8")
+        f.write_text("**09:16** Head\n\t- Detail A\n\t\t- Deeper", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
@@ -163,13 +163,13 @@ class TestAddJournalBlockContentFile:
 
     def test_top_level_without_heading(self, api, tmp_path):
         f = tmp_path / "top.md"
-        f.write_text("- eins\n\t- kind\n- zwei", encoding="utf-8")
+        f.write_text("- one\n\t- child\n- two", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--top-level", "--content-file", str(f)])
         assert result.exit_code == 0, result.output
         assert "Added 3 block(s)" in result.output
         appended = [c.args[1] for c in api.append_block_in_page.call_args_list]
-        assert appended == ["eins", "zwei"]
+        assert appended == ["one", "two"]
 
     def test_dry_run_counts_all_blocks_without_writing(self, api, tmp_path):
         f = tmp_path / "dry.md"
@@ -240,12 +240,12 @@ class TestAddJournalBlockFlagValidation:
         """--no-preserve would collapse the tree into one block with raw '- '
         markers, and the inline guard that catches that is skipped for files."""
         f = tmp_path / "eod.md"
-        f.write_text("- ### Kopf\n\t- Punkt A\n\t- Punkt B", encoding="utf-8")
+        f.write_text("- ### Head\n\t- Item A\n\t- Item B", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f), "--no-preserve"])
         assert result.exit_code != 0
-        assert "unvereinbar" in result.output
+        assert "incompatible" in result.output
         api.insert_block.assert_not_called()
         api.append_block_in_page.assert_not_called()
 
@@ -266,7 +266,7 @@ class TestUpsertHeadingKeepsAllRoots:
 
     def test_further_roots_become_siblings(self, api, tmp_path):
         f = tmp_path / "u.md"
-        f.write_text("- ### [[Carol]]\n\t- Punkt A\n- ### Zweiter\n\t- Punkt B",
+        f.write_text("- ### [[Carol]]\n\t- Item A\n- ### Second\n\t- Item B",
                      encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
@@ -274,20 +274,20 @@ class TestUpsertHeadingKeepsAllRoots:
         assert result.exit_code == 0, result.output
         assert "Added 4 block(s)" in result.output
         written = [c.args[1] for c in api.insert_block.call_args_list]
-        assert written == ["Punkt A", "### Zweiter", "Punkt B"]
+        assert written == ["Item A", "### Second", "Item B"]
         assert api.update_block.call_args_list[0].args[1] == "### [[Carol]]"
 
     def test_flat_file_keeps_every_line(self, api, tmp_path):
         """A file with no indentation at all still has N roots, not one."""
         f = tmp_path / "flat.md"
-        f.write_text("- eins\n- zwei\n- drei", encoding="utf-8")
+        f.write_text("- one\n- two\n- three", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--upsert-heading", "### [[Carol]]", "--content-file", str(f)])
         assert result.exit_code == 0, result.output
         assert "Added 3 block(s)" in result.output
-        assert api.update_block.call_args_list[0].args[1] == "eins"
-        assert [c.args[1] for c in api.insert_block.call_args_list] == ["zwei", "drei"]
+        assert api.update_block.call_args_list[0].args[1] == "one"
+        assert [c.args[1] for c in api.insert_block.call_args_list] == ["two", "three"]
 
     def test_reported_count_matches_actual_writes(self, api, tmp_path):
         f = tmp_path / "u.md"
@@ -331,7 +331,7 @@ class TestPartialWriteIsNamed:
         exit 0, "Added 4 block(s)", 2 actually written."""
         api.graph.set_fail_after(0)  # nothing lands, and the API still says nothing
         f = tmp_path / "u.md"
-        f.write_text("- ### [[Carol]]\n\t- Punkt A\n\t\t- Detail A1\n\t\t- Detail A2",
+        f.write_text("- ### [[Carol]]\n\t- Item A\n\t\t- Detail A1\n\t\t- Detail A2",
                      encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
@@ -342,7 +342,7 @@ class TestPartialWriteIsNamed:
 
     def test_upsert_success_count_matches_real_writes(self, api, tmp_path):
         f = tmp_path / "u.md"
-        f.write_text("- ### [[Carol]]\n\t- Punkt A\n\t\t- Detail A1\n\t\t- Detail A2",
+        f.write_text("- ### [[Carol]]\n\t- Item A\n\t\t- Detail A1\n\t\t- Detail A2",
                      encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
@@ -381,7 +381,7 @@ class TestPartialWriteIsNamed:
         api.append_block_in_page.side_effect = None
         api.append_block_in_page.return_value = None
         f = tmp_path / "top.md"
-        f.write_text("- ### Kopf\n\t- Punkt A", encoding="utf-8")
+        f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--top-level", "--content-file", str(f)])
         assert result.exit_code == 1
@@ -394,7 +394,7 @@ class TestPartialWriteIsNamed:
         api.append_block_in_page.side_effect = None
         api.append_block_in_page.return_value = None
         f = tmp_path / "top.md"
-        f.write_text("- ### Kopf\n\t- Punkt A", encoding="utf-8")
+        f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])

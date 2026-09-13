@@ -500,7 +500,7 @@ def get_block(ctx, block_id, no_children, as_json):
 # ---------------------------------------------------------------------------
 @cli.command("find-block", epilog="""\b
 Examples:
-  logseq-cli --token TOKEN find-block --content "Tag-Support" --page "Project Alpha" --first
+  logseq-cli --token TOKEN find-block --content "tag support" --page "Project Alpha" --first
   logseq-cli --token TOKEN find-block --content "^### " --page "X" --regex
   logseq-cli --token TOKEN find-block --content "14:57" --page "2026-07-22, tuesday" --with-children
 Note:
@@ -1926,7 +1926,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json):
 # ---------------------------------------------------------------------------
 @cli.command("add-journal-block", epilog="""\b
 Examples:
-  logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting mit [[Bob]]"
+  logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting with [[Bob]]"
   logseq-cli --token TOKEN add-journal-block --date 2026-05-07 --content "**14:30** Nachtrag"
   logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" --content "..."
   logseq-cli --token TOKEN add-journal-block --content "TODO A" --content "TODO B"   # batch
@@ -1981,11 +1981,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # combination must be rejected rather than silently written.
         if not preserve_formatting:
             raise click.UsageError(
-                "--content-file und --no-preserve sind unvereinbar: "
-                "--no-preserve wuerde die Hierarchie zu EINEM Block "
-                "zusammenfalten.\n"
-                "  - Struktur gewollt?  -> --no-preserve weglassen\n"
-                "  - Fliesstext gewollt? -> --content nutzen"
+                "--content-file and --no-preserve are incompatible: "
+                "--no-preserve would collapse the hierarchy into ONE "
+                "block.\n"
+                "  - want the structure? -> drop --no-preserve\n"
+                "  - want flowing text?  -> use --content"
             )
         contents = (read_content_file(content_file),)
 
@@ -2361,7 +2361,7 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
 # ---------------------------------------------------------------------------
 @cli.command("add-note-content", epilog="""\b
 Examples:
-  logseq-cli --token TOKEN add-note-content --page "Alice Example" --content "Body text"
+  logseq-cli --token TOKEN add-note-content --page "Alice" --content "Body text"
   logseq-cli --token TOKEN add-note-content --page "Project Alpha" \\
     --under-heading "## Roadmap" --content "Phase 2 - Kickoff"
 Note:
@@ -2453,8 +2453,8 @@ def add_note_content(ctx, page, content, create, under_heading, properties, as_j
 
 @cli.command("update-block", epilog="""\b
 Example:
-  logseq-cli --token TOKEN update-block --id 12345678-... --content "Neuer Text"
-  logseq-cli --token TOKEN update-block --where-content "**14:22**" --page "2026-08-21, friday" --content "Neuer Text"
+  logseq-cli --token TOKEN update-block --id 12345678-... --content "New text"
+  logseq-cli --token TOKEN update-block --where-content "**14:22**" --page "2026-08-21, friday" --content "New text"
 Note:
   Use set-property/remove-property for properties, never edit them via update-block.
   Existing block properties survive the update: they are read first and written
@@ -2593,15 +2593,14 @@ def remove_block_cmd(ctx, block_id, dry_run, as_json):
 
 # `remove-block` is the canonical name (Logseq's API verb is removeBlock), but
 # `delete-page` sits right next to it, so `delete-block` is the single most common
-# wrong guess. Register it as an alias
-# so the guess works instead of erroring out.
+# wrong guess. Register it as an alias so the guess works instead of erroring out.
 cli.add_command(remove_block_cmd, "delete-block")
 
 
 @cli.command("replace-text", epilog="""\b
 Example:
-  logseq-cli --token TOKEN replace-text --page "X" --find "alt" --replace "neu" --dry-run
-  logseq-cli --token TOKEN replace-text --page "X" --find "alt" --replace "neu"
+  logseq-cli --token TOKEN replace-text --page "X" --find "old" --replace "new" --dry-run
+  logseq-cli --token TOKEN replace-text --page "X" --find "old" --replace "new"
 Note:
   ALWAYS run with --dry-run first to preview matches. Prefer set-todo-status
   for TODO->DONE transitions and update-block for block content edits.
@@ -2938,7 +2937,7 @@ Examples:
   logseq-cli --token TOKEN add-block-ref --source-id UUID --journal-date 2026-04-23 \\
                                           --under-heading "## Tasks"
   logseq-cli --token TOKEN add-block-ref --source-id UUID --page "Project Alpha" \\
-                                          --under-heading "## Offene TODOs"
+                                          --under-heading "## Open TODOs"
 Note:
   Default target: today's journal. Auto-creates the journal page if missing.
 """)
@@ -3244,7 +3243,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, as_json):
 # ---------------------------------------------------------------------------
 @cli.command("get-properties", epilog="""\b
 Examples:
-  logseq-cli --token TOKEN get-properties --name "Alice Example"
+  logseq-cli --token TOKEN get-properties --name "Alice"
   logseq-cli --token TOKEN get-properties --name "Alice" --property "team"
 """)
 @click.option("--page", "--name", required=True, help="Page name")

@@ -14,7 +14,13 @@ See [AGENTS.md](AGENTS.md) for the workflows and gotchas.
 ## Installation
 
 ```bash
-pip install -e .
+# Use it
+pip install git+https://github.com/muellerei/logseq-cli.git
+
+# Or work on it
+git clone https://github.com/muellerei/logseq-cli.git
+cd logseq-cli
+pip install -e ".[dev]"
 ```
 
 Requires Python 3.10+ and a running Logseq Desktop app (HTTP API on port 12315).
@@ -55,90 +61,6 @@ logseq-cli add-journal-block --under-heading "## Notes" --content "..."
 
 # Force top-level (ignore env var)
 logseq-cli add-journal-block --top-level --content "..."
-```
-
-## What's new in v0.6
-
-Safety and output-size work from an audit against common CLI conventions
-(clig.dev, POSIX/grep, agent tool-design guidance). **Defaults are
-unchanged** — without the new flags every command behaves exactly as before.
-
-```bash
-# 1. --dry-run for the destructive commands (they cascade: children, source blocks)
-logseq-cli remove-block --id "$UUID" --dry-run
-#   [DRY RUN] Would remove block 6a76533e-...
-#     descendants that would be removed too: 2
-#     total blocks affected: 3
-logseq-cli update-block --id "$UUID" --content "neu" --dry-run
-logseq-cli copy-block --id "$UUID" --to-page "Target" --remove --dry-run
-logseq-cli delete-page --page "Alt" --dry-run
-
-# 2. delete-page: --json is no longer an implicit --force
-logseq-cli delete-page --page "Alt" --json < /dev/null
-#   {"error": "Refusing to delete page 'Alt' non-interactively without --force. ..."}
-#   exit 1 — the output format no longer doubles as a confirmation.
-
-# 3. get-page separates "missing" from "empty"
-logseq-cli get-page --page "Tippfehler"   # (page does not exist) -> exit 1
-logseq-cli get-page --page "Leere Seite"  # (empty page)          -> exit 0
-
-# 4. Bounded journal reads (see "Bounded output" below)
-logseq-cli get-journal-range --from 2026-07-08 --to 2026-08-07 \
-  --tail 7 --heading "## Log"
-logseq-cli get-journal-summary --range "this week" --no-content
-
-# 5. delete-block works as an alias for remove-block
-logseq-cli delete-block --id "$UUID" --dry-run
-
-# 6. Errors are JSON when --json is set — always on stderr, never on stdout
-logseq-cli get-properties --page "Missing" --json 2>err.json
-```
-
-## What's new in v0.4
-
-Seven changes focused on round-trip reduction and ergonomics. All read methods are cached in-memory for the duration of one process (60s TTL), and `get-journal-range` fetches in parallel.
-
-```bash
-# 1. Inline ((uuid)) refs while reading — no more N×get-block round-trips
-logseq-cli get-page --page "2026-04-22, wednesday" --resolve-refs
-
-# 2. UUID prefix per block line — replaces --json | jq pipelines
-logseq-cli get-page --page "Project Alpha" --with-ids
-# <uuid>\t<indent>\t<content>
-
-# 3. get-todos shows page inline (plain-text); JSON unchanged
-logseq-cli get-todos --status TODO
-#   TODO [Project Alpha] Tag-Support GUI fertigstellen
-#   DOING [2026-04-22, wednesday] 1:1 Bob vorbereiten
-
-# 4. insert-block --tree: batch-insert a hierarchy in one call
-logseq-cli insert-block --child-of "$UUID" --tree "### Meeting
-	- Agenda
-	- Outcome
-		- Detail"
-# Or as JSON:
-logseq-cli insert-block --page "Project" --top-level --tree \
-  '[{"content":"### Section","children":[{"content":"Item"}]}]'
-
-# 5. add-note-content --under-heading: heading-aware insertion for non-journal pages
-logseq-cli add-note-content --page "Project" --under-heading "## Notes" \
-  --content "- New observation\n\t- Detail"
-# Heading is created if missing.
-
-# 6. In-memory read cache (60s TTL by default)
-# Scope: ONE process. Two shell invocations do not share it, so a second
-# `logseq-cli get-page X` hits the API again. It pays off inside a single call
-# that reads repeatedly: --name A --name B, get-journal-range, --resolve-refs.
-logseq-cli --no-cache get-page --page "X"           # bypass for one call
-LOGSEQ_CLI_CACHE_TTL=0 logseq-cli ...               # disable
-LOGSEQ_CLI_CACHE_TTL=120 logseq-cli get-journal-range --from ... --to ...
-# Mutations (insert/update/remove/createPage/...) invalidate the cache.
-
-# 7. Parallel pool for get-journal-range (5 workers default)
-LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli get-journal-range \
-  --from 2026-01-01 --to 2026-04-30 --resolve-refs
-# Order is stable (sorted by date). Per-day errors embed an `error` field
-# and the range continues.
 ```
 
 ## Usage
@@ -186,7 +108,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 ## Commands
 
-### Read (13)
+### Read (14)
 
 | Command | Description |
 |---------|-------------|
@@ -215,7 +137,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
 | `add-note-content --page NAME --content TEXT [--under-heading "## X"]` | Add content to any page; optionally under a heading (created if missing) |
 
-### Edit (5)
+### Edit (11)
 
 | Command | Description |
 |---------|-------------|
@@ -231,7 +153,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
 | `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 
-### Meta (2)
+### Meta (3)
 
 | Command | Description |
 |---------|-------------|
@@ -259,6 +181,90 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `query-pages-by-property --key KEY [--value VAL]` | Find pages by property value |
+
+## Safety and output size
+
+Safety and output-size work from an audit against common CLI conventions
+(clig.dev, POSIX/grep, agent tool-design guidance). **Defaults are
+unchanged** — without the new flags every command behaves exactly as before.
+
+```bash
+# 1. --dry-run for the destructive commands (they cascade: children, source blocks)
+logseq-cli remove-block --id "$UUID" --dry-run
+#   [DRY RUN] Would remove block 6a76533e-...
+#     descendants that would be removed too: 2
+#     total blocks affected: 3
+logseq-cli update-block --id "$UUID" --content "new text" --dry-run
+logseq-cli copy-block --id "$UUID" --to-page "Target Page" --remove --dry-run
+logseq-cli delete-page --page "Old Page" --dry-run
+
+# 2. delete-page: --json is no longer an implicit --force
+logseq-cli delete-page --page "Old Page" --json < /dev/null
+#   {"error": "Refusing to delete page 'Old Page' non-interactively without --force. ..."}
+#   exit 1 — the output format no longer doubles as a confirmation.
+
+# 3. get-page separates "missing" from "empty"
+logseq-cli get-page --page "Typo Page"     # (page does not exist) -> exit 1
+logseq-cli get-page --page "Empty Page"    # (empty page)          -> exit 0
+
+# 4. Bounded journal reads (see "Bounded output" below)
+logseq-cli get-journal-range --from 2026-07-08 --to 2026-08-07 \
+  --tail 7 --heading "## Log"
+logseq-cli get-journal-summary --range "this week" --no-content
+
+# 5. delete-block works as an alias for remove-block
+logseq-cli delete-block --id "$UUID" --dry-run
+
+# 6. Errors are JSON when --json is set — always on stderr, never on stdout
+logseq-cli get-properties --page "Missing Page" --json 2>err.json
+```
+
+## Round-trip reduction
+
+Seven changes focused on round-trip reduction and ergonomics. All read methods are cached in-memory for the duration of one process (60s TTL), and `get-journal-range` fetches in parallel.
+
+```bash
+# 1. Inline ((uuid)) refs while reading — no more N×get-block round-trips
+logseq-cli get-page --page "2026-04-22, wednesday" --resolve-refs
+
+# 2. UUID prefix per block line — replaces --json | jq pipelines
+logseq-cli get-page --page "Project Alpha" --with-ids
+# <uuid>\t<indent>\t<content>
+
+# 3. get-todos shows page inline (plain-text); JSON unchanged
+logseq-cli get-todos --status TODO
+#   TODO [Project Alpha] Finish the tag support UI
+#   DOING [2026-04-22, wednesday] Prepare the 1:1
+
+# 4. insert-block --tree: batch-insert a hierarchy in one call
+logseq-cli insert-block --child-of "$UUID" --tree "### Meeting
+	- Agenda
+	- Outcome
+		- Details"
+# Or as JSON:
+logseq-cli insert-block --page "Project" --top-level --tree \
+  '[{"content":"### Section","children":[{"content":"Item"}]}]'
+
+# 5. add-note-content --under-heading: heading-aware insertion for non-journal pages
+logseq-cli add-note-content --page "Project" --under-heading "## Notes" \
+  --content "- New observation\n\t- Details"
+# Heading is created if missing.
+
+# 6. In-memory read cache (60s TTL by default)
+# Scope: ONE process. Two shell invocations do not share it, so a second
+# `logseq-cli get-page X` hits the API again. It pays off inside a single call
+# that reads repeatedly: --name A --name B, get-journal-range, --resolve-refs.
+logseq-cli --no-cache get-page --page "X"           # bypass for one call
+LOGSEQ_CLI_CACHE_TTL=0 logseq-cli ...               # disable
+LOGSEQ_CLI_CACHE_TTL=120 logseq-cli get-journal-range --from ... --to ...
+# Mutations (insert/update/remove/createPage/...) invalidate the cache.
+
+# 7. Parallel pool for get-journal-range (5 workers default)
+LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli get-journal-range \
+  --from 2026-01-01 --to 2026-04-30 --resolve-refs
+# Order is stable (sorted by date). Per-day errors embed an `error` field
+# and the range continues.
+```
 
 ## Bounded output
 
@@ -301,9 +307,13 @@ Date formatting is locale-independent — weekday and month names are always Eng
 
 See `examples/` directory:
 
-- `export-all-pages.sh` - Batch export all pages as JSON
+- `backup-graph.sh` - Export all pages as a JSON backup
 - `daily-todos.sh` - Daily TODO overview (suitable for cronjob)
+- `export-all-pages.sh` - Export all pages as individual JSON files
+- `export-page.sh` - Export a page as Logseq-compatible markdown
+- `morning-log.sh` - Add a timestamped log entry to today's journal
 - `top-pages-pipeline.sh` - Pipeline with jq for graph statistics
+- `weekly-todos.sh` - List all open TODOs, grouped by page
 
 ## Architecture
 
@@ -311,6 +321,7 @@ See `examples/` directory:
 logseq-cli/
 ├── logseq_cli/
 │   ├── api.py       # HTTP API client (requests.post against Logseq)
+│   ├── datalog.py   # EDN/datalog query building (value quoting, keywords)
 │   ├── helpers.py   # Date parsing, block processing, backlink search
 │   └── cli.py       # Click CLI with all commands
 ├── examples/        # Shell scripts for scripting/cronjobs
