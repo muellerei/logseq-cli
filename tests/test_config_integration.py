@@ -481,6 +481,23 @@ class TestAnalysisPatternsComeFromConfig:
         assert next(g for g in pat.search("shipped #Alpha today").groups() if g) == "Alpha"
         assert pat.search("#Gamma") is None
 
+    def test_flat_tags_match_the_link_form_too(self):
+        """A listed project name is the same project written either way.
+
+        Measured against a real journal: the flat link outnumbered the flat
+        tag by two orders of magnitude, so matching tags alone found nothing
+        at all in a graph that writes [[Alpha]] rather than #Alpha.
+        """
+        pat = _project_pattern("#projects/", ["Alpha", "Beta"])
+        for text in ("worked on [[Alpha]] today", "#Alpha ticket",
+                     "[[Beta]] release"):
+            assert pat.search(text), text
+
+    def test_a_longer_name_is_not_matched_as_the_shorter_one(self):
+        """[[Alpha-Legacy]] is a different project from [[Alpha]]."""
+        pat = _project_pattern("#projects/", ["Alpha"])
+        assert pat.search("see [[Alpha-Legacy]]") is None
+
     def test_project_prefix_is_escaped(self):
         pat = _project_pattern("#a.b/")
         assert pat.search("#a.b/one")
@@ -497,10 +514,10 @@ class TestTaskCountingSeesLogseqMarkers:
     """
 
     INCOMPLETE = re.compile(
-        r"(?i:- \[ \])|^\s*-?\s*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        r"(?i:- \[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
         re.MULTILINE)
     COMPLETE = re.compile(
-        r"(?i:- \[x\])|^\s*-?\s*(?:DONE|CANCELED|CANCELLED)\b",
+        r"(?i:- \[x\])|^(?:\s*-\s*)*(?:DONE|CANCELED|CANCELLED)\b",
         re.MULTILINE)
 
     def test_markers_count_as_tasks(self):

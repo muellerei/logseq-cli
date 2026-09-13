@@ -174,8 +174,13 @@ def _project_pattern(tag_prefix: str, explicit_tags=None) -> "re.Pattern[str]":
     graph that namespaces project pages tends to contain both, so matching only
     the tag form undercounts. Group 1 is the project name either way.
 
-    ``explicit_tags`` is for graphs that do not namespace at all and tag flatly
-    (``#alpha``, ``#beta``): those names cannot be inferred, so they are listed.
+    ``explicit_tags`` is for graphs that do not namespace at all: those names
+    cannot be inferred from a prefix, so they are listed. They match as a tag
+    and as a link for the same reason the namespaced form does — a graph that
+    writes ``[[Alpha]]`` in its journals and ``#Alpha`` in passing means the
+    same project both times, and counting only one of them undercounts. In the
+    journal this was measured against, the flat link outnumbered the flat tag
+    by two orders of magnitude, so tags alone would have found nothing.
     """
     prefix = tag_prefix.lstrip("#")
     alts = [
@@ -185,7 +190,9 @@ def _project_pattern(tag_prefix: str, explicit_tags=None) -> "re.Pattern[str]":
     for raw in explicit_tags or []:
         name = str(raw).strip().lstrip("#")
         if name:
-            alts.append(r"#(" + re.escape(name) + r")\b")
+            escaped = re.escape(name)
+            alts.append(r"#(" + escaped + r")\b")
+            alts.append(r"\[\[(" + escaped + r")\]\]")
     return re.compile("|".join(alts), re.IGNORECASE)
 
 
@@ -1002,7 +1009,15 @@ def analyze_graph(ctx, days, as_json):
     api = ctx.obj["api"]
     pages = api.get_all_pages()
 
-    todo_pattern = re.compile(r"\b(todo|later)\b|\[ \]", re.IGNORECASE)
+    # Open tasks only, and only where Logseq puts a marker: at the start of a
+    # block. Matching "todo" anywhere, case-insensitively, counted "Todo-Liste"
+    # in prose and the "TODO" inside a DONE block's logbook line, so the number
+    # was neither the open tasks nor all of them.
+    todo_pattern = re.compile(
+        # The bullet may repeat: get_page_content prefixes each block with
+        # "- ", so a block that already starts with one arrives as "- - TODO".
+        r"(?i:\[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
 
     # Days filter: cutoff timestamp in milliseconds
@@ -1110,6 +1125,63 @@ def analyze_graph(ctx, days, as_json):
 # ---------------------------------------------------------------------------
 # 8. find-knowledge-gaps
 # ---------------------------------------------------------------------------
+def _is_incidental_page(name: str) -> bool:
+    """True for pages that exist as a side effect, not as knowledge.
+
+    Logseq turns `#272` in a sentence into a page called "272", and a stray
+    bracket or dash into a page of its own. Those are real pages with no
+    incoming links, so they answer "orphaned" truthfully and drown the answer:
+    in the graph this was measured against, 596 orphans were almost entirely
+    of this kind. Dates written in file-name form are the same story from the
+    other side — they look like missing pages but are journals under another
+    spelling.
+    """
+    stripped = name.strip()
+    if len(stripped) < 3:
+        return True
+    if not any(c.isalpha() for c in stripped):
+        return True
+    if re.fullmatch(r"[\W_]+", stripped):
+        return True
+    # A name opening with punctuation is a tag that swallowed one: "#-AI"
+    if not (stripped[0].isalnum() or stripped[0] in "_@"):
+        return True
+    # 2025_10_10, 2025-10-10, 2025/10/10 — a journal, not a gap
+    if re.fullmatch(r"\d{4}[-_/]\d{1,2}[-_/]\d{1,2}", stripped):
+        return True
+    # An unclosed bracket dragged in from prose: "#Active)", "3b82f6)".
+    if stripped.endswith(")") and "(" not in stripped:
+        return True
+    # A ticket number that took the next word with it: "#272-Designentscheidung"
+    # comes from "#272-Designentscheidung" in a sentence. Three digits or more,
+    # so that "2-Faktor-Auth" and "4-Level-Struktur" — real terms — survive.
+    if re.match(r"\d{3,}-", stripped):
+        return True
+    return False
+
+
+def _has_richer_namesake(name_lower: str, page_names: dict, content_of) -> bool:
+    """True if some namespaced page shares this name and actually has content.
+
+    An empty `Alpha` with 185 references sits next to
+    `projects/Alpha` with 8806 words: the bare page is an anchor for
+    the name, not a gap in the notes. Reporting it as underdeveloped sends the
+    reader to write something that is already written next door.
+    """
+    for other_lower, other_original in page_names.items():
+        if other_lower == name_lower:
+            continue
+        tail = other_lower.rsplit("/", 1)[-1]
+        if tail != name_lower:
+            continue
+        try:
+            if len((content_of(other_original) or "").strip()) > 200:
+                return True
+        except Exception:  # noqa: BLE001 - unreadable page proves nothing
+            continue
+    return False
+
+
 @cli.command("find-knowledge-gaps", epilog="""\b
 Example:
   logseq-cli --token TOKEN find-knowledge-gaps --min-refs 3 --include-orphans
@@ -1148,8 +1220,11 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
     # Missing pages: referenced but don't exist
     missing = []
     for ref_lower, count in incoming_refs.items():
-        if ref_lower not in page_names:
-            missing.append({"page": ref_lower, "references": count})
+        if ref_lower in page_names:
+            continue
+        if _is_incidental_page(ref_lower):
+            continue
+        missing.append({"page": ref_lower, "references": count})
     missing.sort(key=lambda x: x["references"], reverse=True)
 
     # Underdeveloped: exists, has refs, but very short content
@@ -1158,6 +1233,13 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
         refs = incoming_refs.get(name_lower, 0)
         length = page_content_lengths.get(name_lower, 0)
         if refs >= min_refs and length < 100:
+            if _is_incidental_page(original):
+                continue
+            # An empty page whose namespaced twin is written is an anchor for
+            # the name, not a gap. Only checked here, where the list is short.
+            if _has_richer_namesake(name_lower, page_names,
+                                    lambda n: get_page_content(api, n)):
+                continue
             underdeveloped.append({
                 "page": original,
                 "references": refs,
@@ -1176,6 +1258,8 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
 
         for name_lower, original in page_names.items():
             if name_lower in journal_pages:
+                continue
+            if _is_incidental_page(original):
                 continue
             if incoming_refs.get(name_lower, 0) == 0:
                 orphans.append(original)
@@ -1244,9 +1328,13 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     mood_keyword = re.compile(
         r"(?:" + "|".join(re.escape(str(w)) for w in mood_labels) + r"):\s*(\w+)",
         re.IGNORECASE)
-    mood_indicator_patterns = [
-        "mood:", "feeling:", "\U0001f60a", "\U0001f614", "\U0001f620", "\U0001f60c",
-        "happy", "sad", "angry", "excited", "tired", "anxious",
+    # Lines worth showing as evidence under the mood counts. Kept to explicit
+    # statements and emoji for the same reason the counting is: a bare "happy"
+    # in a sentence is as likely to be "not happy", and listing it under a
+    # count of zero reads as a contradiction. The labels come from config, so
+    # a graph writing "stimmung:" is covered.
+    mood_indicator_patterns = [f"{label}:" for label in mood_labels] + [
+        "\U0001f60a", "\U0001f614", "\U0001f620", "\U0001f60c",
     ]
     # Two ways of writing a task. Logseq's own are the markers (TODO, DOING,
     # DONE...); the markdown checkbox is what people paste in from elsewhere.
@@ -1257,11 +1345,13 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     # case-sensitively: "Now that we finished" and "Later kam die Rückmeldung"
     # open a sentence, not a task. The checkbox alternative keeps (?i), where
     # "[X]" and "[x]" are both in the wild.
+    # The bullet may repeat: get_page_content prefixes each block with "- ",
+    # so a block already starting with one arrives as "- - TODO ...".
     incomplete_task = re.compile(
-        r"(?i:- \[ \])|^\s*-?\s*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        r"(?i:- \[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
         re.MULTILINE)
     complete_task = re.compile(
-        r"(?i:- \[x\])|^\s*-?\s*(?:DONE|CANCELED|CANCELLED)\b",
+        r"(?i:- \[x\])|^(?:\s*-\s*)*(?:DONE|CANCELED|CANCELLED)\b",
         re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
     # Projects get named in more than one way. A namespace prefix covers both
@@ -1317,13 +1407,28 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
             topic_by_date[date_str] = links
             topics_by_month[month_key].update(links)
 
-        # Mood (original simple counters)
+        # Mood, from explicit statements only.
+        #
+        # Counting every occurrence of a positive word measured how often such
+        # words appear in technical prose, not how the day went: "nicht
+        # zufrieden" and "läuft nicht gut" both scored as positive, and in the
+        # journal this was checked against 16% of positive hits were negations
+        # — concentrated in exactly the sentences that carry a judgement. A
+        # number that says the opposite of its own evidence is worse than no
+        # number, and negation is not something a word list can settle.
+        #
+        # So only a line that states a mood counts: "mood: good",
+        # "stimmung: mies" — the labels are configurable, and the word lists
+        # now classify that stated value rather than the whole journal.
         if mood:
             mood_data = {"positive": 0, "negative": 0, "keywords": []}
-            mood_data["positive"] = len(mood_positive.findall(content))
-            mood_data["negative"] = len(mood_negative.findall(content))
             kw_matches = mood_keyword.findall(content)
             mood_data["keywords"] = kw_matches
+            for stated in kw_matches:
+                if mood_positive.search(stated):
+                    mood_data["positive"] += 1
+                elif mood_negative.search(stated):
+                    mood_data["negative"] += 1
             entry["mood"] = mood_data
             if mood_data["positive"] or mood_data["negative"] or kw_matches:
                 mood_entries.append(entry)
@@ -1367,7 +1472,12 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
             line_stripped = line.strip().lstrip("- ")
             proj_match = project_pattern.search(line_stripped)
             if proj_match:
-                project_progress[proj_match.group(1)].append({
+                # The pattern has one group per spelling (tag, link, and one
+                # per configured flat tag), so only one of them is filled.
+                name = next((g for g in proj_match.groups() if g), None)
+                if name is None:
+                    continue
+                project_progress[name].append({
                     "date": date_str,
                     "status": line_stripped[:150],
                 })
@@ -1854,12 +1964,14 @@ Example:
   logseq-cli --token TOKEN suggest-connections --min-confidence 0.7 --max-suggestions 10
 """)
 @click.option("--min-confidence", default=0.3, type=float, help="Minimum confidence score (0-1)")
+@click.option("--min-shared", default=3, type=int, show_default=True,
+              help="Minimum shared topics for a pair to count as connected")
 @click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return")
 @click.option("--focus", default=None, help="Focus on specific page/topic")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def suggest_connections(ctx, min_confidence, max_suggestions, focus, as_json):
+def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus, as_json):
     """Suggest connections between pages based on shared topics."""
     api = ctx.obj["api"]
     pages = api.get_all_pages()
@@ -1912,6 +2024,13 @@ def suggest_connections(ctx, min_confidence, max_suggestions, focus, as_json):
             if not union:
                 continue
 
+            # Jaccard alone rewards the thinnest evidence there is: two pages
+            # that link one page each, the same one, score 1/1 = 1.0 and sort
+            # above a pair sharing 35 topics out of 38. A single shared topic
+            # is a coincidence, not a connection, so it does not qualify.
+            if len(intersection) < min_shared:
+                continue
+
             score = len(intersection) / len(union)
             if score >= min_confidence:
                 suggestions.append({
@@ -1921,13 +2040,17 @@ def suggest_connections(ctx, min_confidence, max_suggestions, focus, as_json):
                     "shared_topics": sorted(intersection),
                 })
 
-    suggestions.sort(key=lambda s: s["confidence"], reverse=True)
+    # Ties on confidence are common and meaningless on their own; the pair with
+    # more shared topics is the better suggestion of the two.
+    suggestions.sort(key=lambda s: (s["confidence"], len(s["shared_topics"])),
+                     reverse=True)
     suggestions = suggestions[:max_suggestions]
 
     result = {
         "suggestions": suggestions,
         "total_found": len(suggestions),
         "min_confidence": min_confidence,
+        "min_shared_topics": min_shared,
     }
 
     if as_json:
@@ -4455,9 +4578,17 @@ def doctor(ctx, as_json):
     versions = []
     for mod, label in (("click", "click"), ("requests", "requests")):
         try:
-            versions.append(f"{label} {import_module(mod).__version__}")
+            import_module(mod)
         except Exception:  # noqa: BLE001 - any import failure means "not usable"
             missing.append(label)
+            continue
+        # Ask the installed metadata rather than the module: click deprecated
+        # its __version__ attribute and drops it in 9.1, and a doctor that
+        # warns about the library it is checking is not much of a doctor.
+        try:
+            versions.append(f"{label} {_pkg_version(mod)}")
+        except PackageNotFoundError:  # pragma: no cover - importable but no dist
+            versions.append(label)
     # The TOML parser is stdlib from 3.11 and the tomli backport before that;
     # either is fine, only having neither is a problem, and only for configs.
     try:
