@@ -280,6 +280,29 @@ If entries turn up in an odd place, check the spelling first — the short name
 and the heading it maps to. `--dry-run` on `add-journal-block` shows where a
 write would land before it happens.
 
+## Letting the CLI find them for you
+
+```bash
+logseq-cli --token "TOKEN" init --dry-run   # show what it would write
+logseq-cli --token "TOKEN" init             # write it
+```
+
+`init` reads the graph — never writes to it — and proposes a config from what
+it finds: the headings your recent journals use, the namespace most of your
+pages sit under, the `type::` value that appears most. Every suggestion comes
+with the count it rests on (`## Log  147/150`), because these are counts, not
+certainties.
+
+It looks at the most recent journals only (120 by default, `--days` to change
+that). A section you stopped using years ago still sits in hundreds of old
+files and would otherwise outrank the one you use now.
+
+Two things it will not do: overwrite an existing config without `--force`, and
+guess `[analysis]` — which words carry mood in your journal is not something a
+count can tell.
+
+If the answer looks wrong, the section below shows how to check it by hand.
+
 ## Finding your own values
 
 Run these against your own graph folder — the directory holding `journals/`

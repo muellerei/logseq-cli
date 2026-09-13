@@ -65,6 +65,11 @@ pages, which property marks a person page, what your journal sections are
 called. Those live in an optional file:
 
 ```bash
+# Suggest one from your own graph (counts included, writes nothing with --dry-run)
+logseq-cli --token "TOKEN" init --dry-run
+logseq-cli --token "TOKEN" init
+
+# Or start from the commented example
 cp config.example.toml ~/.config/logseq-cli/config.toml
 ```
 
@@ -164,7 +169,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `add-journal-entry --content TEXT` | Add journal entry (deprecated, use add-journal-block) |
 | `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots |
 | `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
-| `add-note-content --page NAME --content TEXT [--under-heading "## X"]` | Add content to any page; optionally under a heading (created if missing) |
+| `add-note-content --page NAME --content TEXT [--under-heading "## X"] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). `--dry-run` reports the target, the block count and whether page or heading would be created |
 
 ### Edit (11)
 
@@ -172,8 +177,8 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches |
 | `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
-| `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING` |
-| `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates |
+| `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"] [--dry-run]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING`. `--dry-run` also verifies the source block exists — a ref to a missing UUID renders as nothing |
+| `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs] [--dry-run]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates. `--dry-run` shows the old and new marker |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
 | `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
 | `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
@@ -182,27 +187,28 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
 | `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 
-### Meta (3)
+### Meta (4)
 
 | Command | Description |
 |---------|-------------|
 | `get-todos [--page NAME] [--status S] [--tag TAG]` | List tasks (page name shown inline in plain-text output) |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
-| `doctor` | Health-check: connectivity, token, API, graph. Exit 0 = ready |
+| `doctor` | Health-check: Python, packages, connectivity, token, API, graph, config. Exit 0 = ready |
+| `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
 
 ### Properties (3)
 
 | Command | Description |
 |---------|-------------|
-| `set-property --page NAME --key KEY --value VAL` | Set/update a page property |
-| `remove-property (--page NAME \| --id UUID) --key KEY` | Remove a page property. `--id` targets a single block instead of the page |
-| `set-block-property --id UUID --key KEY --value VAL` | Set/update a block property |
+| `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property. `--dry-run` shows the value being overwritten, or that the key is new |
+| `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set |
+| `set-block-property --id UUID --key KEY --value VAL [--dry-run]` | Set/update a block property. `--dry-run` shows the old value and fails on an unknown UUID, which the write path cannot detect |
 
 ### Page Management (2)
 
 | Command | Description |
 |---------|-------------|
-| `rename-page --page NAME --new-name NAME` | Rename page (updates all references) |
+| `rename-page --page NAME --new-name NAME [--dry-run]` | Rename page (updates all references). `--dry-run` lists the pages whose `[[links]]` would be rewritten — the blast radius reaches the whole graph |
 | `delete-page --page NAME [--force] [--dry-run]` | Delete page. Prompts on a TTY; `--force` required non-interactively |
 
 ### Query (1)
@@ -226,6 +232,26 @@ logseq-cli remove-block --id "$UUID" --dry-run
 logseq-cli update-block --id "$UUID" --content "new text" --dry-run
 logseq-cli copy-block --id "$UUID" --to-page "Target Page" --remove --dry-run
 logseq-cli delete-page --page "Old Page" --dry-run
+
+# 1b. --dry-run for the in-place writes too — they overwrite rather than cascade,
+#     so the preview's job is to show the state that would be replaced.
+logseq-cli set-todo-status --id "$UUID" --status DONE --dry-run
+#   [DRY RUN] Would set status on block 6a76533e-...
+#     marker: TODO -> DONE
+logseq-cli set-property --page "Alice" --key team --value "Platform" --dry-run
+#   [DRY RUN] Would set 'team::' on page 'Alice'
+#     was: Core
+#     now: Platform
+logseq-cli remove-property --page "Alice" --key typo --dry-run
+#   [DRY RUN] 'typo' is not set on page 'Alice'; nothing would be removed
+logseq-cli set-block-property --id "$UUID" --key prio --value 3 --dry-run
+logseq-cli add-block-ref --source-id "$UUID" --under-heading "## Tasks" --dry-run
+logseq-cli add-note-content --page "Project Alpha" --content "Body" --dry-run
+logseq-cli rename-page --page "Project Alpha" --new-name "Project Beta" --dry-run
+#   [DRY RUN] Would rename page
+#     from: Project Alpha
+#     to:   Project Beta
+#     pages with references that would be rewritten: 3
 
 # 2. delete-page: --json is no longer an implicit --force
 logseq-cli delete-page --page "Old Page" --json < /dev/null

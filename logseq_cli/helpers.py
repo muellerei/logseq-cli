@@ -491,6 +491,22 @@ def normalize_heading(text: str) -> str:
     return ' '.join(stripped.split())
 
 
+def find_heading(api, page_name: str, heading: str) -> str | None:
+    """Find an existing heading block's UUID on a page; never create one.
+
+    Split out of :func:`find_or_create_heading` for the --dry-run paths: a
+    preview that creates the heading it only meant to report has already written
+    to the graph, which is the one thing --dry-run promises not to do.
+
+    Returns the UUID, or None if no block on the page matches the heading.
+    """
+    target = normalize_heading(heading)
+    for block in api.get_page_blocks_tree(page_name) or []:
+        if normalize_heading(block.get("content", "")) == target:
+            return block.get("uuid")
+    return None
+
+
 def find_or_create_heading(api, page_name: str, heading: str) -> str | None:
     """Find heading block UUID on page, create if missing.
 
@@ -500,10 +516,9 @@ def find_or_create_heading(api, page_name: str, heading: str) -> str | None:
     Returns the UUID of the heading block, or None if creation failed.
     """
     target = normalize_heading(heading)
-    blocks = api.get_page_blocks_tree(page_name) or []
-    for block in blocks:
-        if normalize_heading(block.get("content", "")) == target:
-            return block.get("uuid")
+    found = find_heading(api, page_name, heading)
+    if found:
+        return found
 
     # Heading doesn't exist — create it
     heading_result = api.append_block_in_page(page_name, heading)

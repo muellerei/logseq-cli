@@ -10,7 +10,7 @@ What makes it scriptable:
 - errors go to **stderr**, as a JSON object when `--json` is set, so stdout can
   be parsed unconditionally
 - non-zero exit on failure, including "not found"
-- `--dry-run` on every command that can destroy content
+- `--dry-run` on every command that writes, showing the state it would replace
 
 ## Setup Check
 
@@ -175,9 +175,20 @@ logseq-cli --token "TOKEN" add-journal-content \
 
 ### 4. Destructive Operations
 
-`--dry-run` is available on every write that can destroy content:
+`--dry-run` is available on every write, not only the ones that cascade:
 `replace-text`, `update-block`, `remove-block`, `copy-block`, `delete-page`,
-`insert-block`, `add-journal-block`, `move-block`. Use it first.
+`insert-block`, `add-journal-block`, `add-journal-content`, `move-block`,
+`set-todo-status`, `set-property`, `remove-property`, `set-block-property`,
+`add-block-ref`, `add-note-content`, `rename-page`. Use it first.
+
+On the in-place writes the preview shows the state that would be replaced —
+the old marker, the property value about to be overwritten, or (for
+`rename-page`) the pages whose `[[links]]` would be rewritten. Two of them
+catch mistakes the live path cannot see at all: `set-block-property --dry-run`
+fails on an unknown UUID, and `add-block-ref --dry-run` warns when the source
+block does not exist, which would otherwise write a ref that renders as
+nothing. Every validation still applies under `--dry-run`, so a preview that
+exits 0 means the real call would too.
 
 ```bash
 # Preview first
@@ -232,5 +243,7 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `get-journal-range` | Read many journal days in one call |
 | `doctor` | Check connectivity, token, API and graph access |
 | `replace-text` | Search and replace with dry-run |
+| `add-block-ref` | Point a `((block-ref))` at an existing block (journal or page) |
+| `rename-page` | Rename a page; Logseq rewrites `[[links]]` graph-wide — preview with `--dry-run` |
 | `get-properties` / `set-property` | Read/write page properties |
 | `set-block-property` / `remove-property --id` | Read/write properties on a single block |
