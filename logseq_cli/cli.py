@@ -1,10 +1,11 @@
+import datetime
 import json
 import os
 import re
 import sys
-import datetime
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib import import_module
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 from pathlib import Path
 
@@ -12,7 +13,14 @@ import click
 import requests
 
 from logseq_cli.api import LogseqAPI, DatalogQueryError
-from logseq_cli.config import ConfigError, get, load_config, require, resolve_heading
+from logseq_cli.config import (
+    ConfigError,
+    config_search_paths,
+    get,
+    load_config,
+    require,
+    resolve_heading,
+)
 from logseq_cli.datalog import (
     InvalidKeywordError,
     edn_keyword,
@@ -37,6 +45,7 @@ from logseq_cli.helpers import (
     has_flush_newline_bullets,
     has_mixed_indentation,
     normalize_indentation,
+    find_heading,
     find_or_create_heading,
     PROPERTY_LINE_RE,
     insert_block_tree_with_uuids,
@@ -1239,8 +1248,21 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
         "mood:", "feeling:", "\U0001f60a", "\U0001f614", "\U0001f620", "\U0001f60c",
         "happy", "sad", "angry", "excited", "tired", "anxious",
     ]
-    incomplete_task = re.compile(r"- \[ \]")
-    complete_task = re.compile(r"- \[x\]", re.IGNORECASE)
+    # Two ways of writing a task. Logseq's own are the markers (TODO, DOING,
+    # DONE...); the markdown checkbox is what people paste in from elsewhere.
+    # Counting only the checkbox reported "0 complete, 0 incomplete" for a
+    # graph with over a thousand tasks — a number that reads like a
+    # measurement rather than a pattern that cannot match.
+    # The markers are upper-case in Logseq and only there, so they are matched
+    # case-sensitively: "Now that we finished" and "Later kam die Rückmeldung"
+    # open a sentence, not a task. The checkbox alternative keeps (?i), where
+    # "[X]" and "[x]" are both in the wild.
+    incomplete_task = re.compile(
+        r"(?i:- \[ \])|^\s*-?\s*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        re.MULTILINE)
+    complete_task = re.compile(
+        r"(?i:- \[x\])|^\s*-?\s*(?:DONE|CANCELED|CANCELLED)\b",
+        re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
     # Projects get named in more than one way. A namespace prefix covers both
     # the tag (#projects/alpha) and the link ([[projects/alpha]]), because a
@@ -1249,7 +1271,9 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     project_tag = get(cfg, "analysis", "project_tag_prefix") or "#project/"
     project_pattern = _project_pattern(
         str(project_tag), get(cfg, "analysis", "project_tags"))
-    habit_checkbox = re.compile(r"- \[[ x]\]")
+    # Habits stay checkbox-only on purpose: a habit is a repeated checkbox
+    # list, and treating every TODO as a habit would drown the real ones.
+    habit_checkbox = re.compile(r"- \[[ x]\]", re.IGNORECASE)
 
     entries = []
     topic_by_date = {}
@@ -2138,7 +2162,12 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             existing = api.get_page(page_name)
         except Exception:
             existing = None
-        if not existing:
+        # Creating the journal page is a write, so it waits for the dry-run
+        # check below: a preview that brings a page into existence is not a
+        # preview. The flag is reported instead, because "the page does not
+        # exist yet" is part of what the run would do.
+        would_create_page = not existing
+        if not existing and not dry_run:
             api.create_page(page_name, {"journal?": True})
 
         # Plan each --content value the same way for dry-run and live, so the
@@ -2159,11 +2188,14 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         if dry_run:
             if as_json:
-                output({"page": page_name, "date": str(d), "blocks": planned_total, "contents": list(contents), "dry_run": True}, True)
+                output({"page": page_name, "date": str(d), "blocks": planned_total,
+                        "would_create_page": would_create_page, "contents": list(contents), "dry_run": True}, True)
             else:
                 if any_hierarchical:
                     click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
                 click.echo(f"[DRY RUN] Would add {planned_total} block(s) to journal: {page_name}")
+            if would_create_page:
+                click.echo(f"  the journal page does not exist yet and would be created")
                 for c in contents:
                     click.echo(f"  {c[:80]}")
             return
@@ -2207,12 +2239,14 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     date_fmt = configs.get("preferredDateFormat") if configs else None
     page_name = format_journal_date(d, date_fmt)
 
-    # Ensure journal page exists with journal property
+    # Ensure journal page exists with journal property. Deferred when only
+    # previewing: a dry run must not bring the page into existence.
     try:
         existing = api.get_page(page_name)
     except Exception:
         existing = None
-    if not existing:
+    would_create_page = not existing
+    if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
 
     if not preserve_formatting:
@@ -2316,6 +2350,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 output({"page": page_name, "date": str(d), "position": position, "blocks": n, "content": content, "dry_run": True}, True)
             else:
                 click.echo(f"[DRY RUN] Would add {n} block(s) to journal: {page_name} ({position})")
+            if would_create_page:
+                click.echo(f"  the journal page does not exist yet and would be created")
                 click.echo(f"  {content[:120]}{'...' if len(content) > 120 else ''}")
             return
 
@@ -2340,9 +2376,13 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     if dry_run:
         position_desc = f"under '{under_heading}'" if under_heading else "top-level"
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position_desc, "content": content, "dry_run": True}, True)
+            output({"page": page_name, "date": str(d), "position": position_desc,
+                    "content": content, "would_create_page": would_create_page,
+                    "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would add to journal: {page_name} ({position_desc})")
+            if would_create_page:
+                click.echo("  the journal page does not exist yet and would be created")
             click.echo(f"  {content}")
         return
 
@@ -2482,10 +2522,11 @@ Note:
 @click.option("--create/--no-create", default=True, help="Create page if it doesn't exist")
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show target page, heading and block count, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_note_content(ctx, page, content, create, under_heading, properties, as_json):
+def add_note_content(ctx, page, content, create, under_heading, properties, dry_run, as_json):
     """Add content to any page."""
     api = ctx.obj["api"]
 
@@ -2510,10 +2551,37 @@ def add_note_content(ctx, page, content, create, under_heading, properties, as_j
         fail(f"Page '{page}' not found. Use --create to create it.",
              as_json=as_json, page=page, created=False)
 
+    content = strip_title_heading(content, page)
+
+    if dry_run:
+        # Everything below this point writes — the page, possibly the heading,
+        # then the blocks. The block count comes from the same parse the live
+        # path uses, so the preview reports what would actually land, not the
+        # raw line count.
+        planned = count_blocks(parse_hierarchical_content(content))
+        heading_exists = (find_heading(api, page, under_heading) is not None
+                          if under_heading and existing else False)
+        position = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
+        parsed_properties = dict(parse_property_pairs(properties))
+
+        if as_json:
+            output({"page": page, "would_create_page": existing is None,
+                    "blocks_added": planned, "under_heading": under_heading,
+                    "would_create_heading": bool(under_heading) and not heading_exists,
+                    "properties": parsed_properties, "position": position,
+                    "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would add {planned} block(s) to {position}")
+            if existing is None:
+                click.echo(f"  page: {page} (would be created)")
+            if under_heading and not heading_exists:
+                click.echo(f"  heading: {under_heading} (would be created)")
+            for key, value in parsed_properties.items():
+                click.echo(f"  {key}:: {value}")
+        return
+
     if not existing and create:
         api.create_page(page)
-
-    content = strip_title_heading(content, page)
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
@@ -3054,10 +3122,11 @@ Note:
 @click.option("--journal-date", default=None, help="Target journal date (YYYY-MM-DD), defaults to today")
 @click.option("--page", "--name", default=None, help="Target page name (alternative to --journal-date)")
 @click.option("--under-heading", default=None, help="Insert under this heading. Defaults to LOGSEQ_JOURNAL_HEADING env var, or top-level.")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show source, target page and heading, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
+def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as_json):
     """Insert a ((block-reference)) to a target journal or page.
 
     Useful for carrying over TODOs from project pages into a journal's ## Tasks section.
@@ -3073,6 +3142,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
         import datetime as _dt
         journal_date = _dt.date.today().strftime("%Y-%m-%d")
 
+    would_create_page = False
     if journal_date and not page:
         d = parse_date_keyword(journal_date)
         configs = api.get_user_configs()
@@ -3084,12 +3154,56 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, as_json):
         except Exception:
             existing = None
         if not existing:
-            api.create_page(page, {"journal?": True})
+            would_create_page = True
+            # Creating the journal page is itself a write, so under --dry-run it
+            # is only reported, never done.
+            if not dry_run:
+                api.create_page(page, {"journal?": True})
 
     source_id = source_id.strip("()")
     ref_content = f"(({source_id}))"
 
     under_heading = resolve_heading(load_config(), under_heading)
+
+    if dry_run:
+        # A block-ref is only worth anything if its source exists; a typo'd UUID
+        # writes a ((...)) that renders as nothing. The live path cannot check
+        # this without an extra call, but the preview can afford one.
+        source_block = api.get_block(source_id, include_children=False)
+        source_content = (source_block.get("content", "")
+                          if isinstance(source_block, dict) else "")
+        # Look the heading up WITHOUT creating it — find_or_create_heading would
+        # append it to the page and make the preview a write.
+        heading_exists = (find_heading(api, page, under_heading) is not None
+                          if under_heading and not would_create_page else False)
+        if under_heading:
+            position = f"under '{under_heading}' on '{page}'"
+        else:
+            position = f"top-level on '{page}'"
+
+        if as_json:
+            output({"source_id": source_id, "ref": ref_content, "page": page,
+                    "position": position, "under_heading": under_heading,
+                    "source_exists": bool(source_block),
+                    "source_content": source_content,
+                    "would_create_page": would_create_page,
+                    "would_create_heading": bool(under_heading) and not heading_exists,
+                    "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would add block-ref {position}")
+            click.echo(f"  ref: {ref_content}")
+            if source_block:
+                preview = source_content[:60] + ("..." if len(source_content) > 60 else "")
+                click.echo(f"  source: {preview}")
+            else:
+                click.echo(f"  source: WARNING - block {source_id} not found; "
+                           f"the ref would render as nothing")
+            click.echo(f"  target page: {page}"
+                       f"{' (would be created)' if would_create_page else ''}")
+            if under_heading:
+                click.echo(f"  heading: {under_heading}"
+                           f"{'' if heading_exists else ' (would be created)'}")
+        return
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
@@ -3259,10 +3373,11 @@ Notes:
               help="New task status")
 @click.option("--follow-refs", is_flag=True,
               help="If the block content is a ((uuid)) reference, follow it and update the original block instead.")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show the marker change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def set_todo_status(ctx, block_id, content, page, status, follow_refs, as_json):
+def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, as_json):
     """Update the status of a TODO block (e.g. TODO → DONE).
 
     Identify the block either by UUID (--id) or by content substring + page (--content + --page).
@@ -3335,6 +3450,27 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, as_json):
             output({"uuid": block_id, "status": "unchanged", "content": old_content}, True)
         else:
             click.echo(f"No change (block already has status or no marker found).")
+        return
+
+    # The marker swap is the whole change, so the preview shows both markers and
+    # the line they sit on — enough to tell the right block from a near-identical
+    # one before committing. Resolution and the ambiguity guard above already ran.
+    old_marker = old_content.split()[0] if old_content.split() else ""
+    if old_marker.upper() not in _TODO_MARKERS:
+        old_marker = ""
+
+    if dry_run:
+        if as_json:
+            output({"uuid": block_id, "old_marker": old_marker, "new_marker": status,
+                    "old": old_content, "new": new_content, "status": status,
+                    "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would set status on block {block_id}")
+            click.echo(f"  marker: {old_marker or '(none)'} -> {status}")
+            preview = old_content[:60] + ("..." if len(old_content) > 60 else "")
+            click.echo(f"  was: {preview}")
+            preview = new_content[:60] + ("..." if len(new_content) > 60 else "")
+            click.echo(f"  now: {preview}")
         return
 
     api.update_block(block_id, new_content)
@@ -3429,10 +3565,11 @@ Note:
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
 @click.option("--value", required=True, help="Property value")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show the property change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def set_property(ctx, page, key, value, as_json):
+def set_property(ctx, page, key, value, dry_run, as_json):
     """Set or update a property on a page's first block."""
     api = ctx.obj["api"]
 
@@ -3448,6 +3585,25 @@ def set_property(ctx, page, key, value, as_json):
 
     # Auto-detect value type (shared with set-block-property / --property)
     value = coerce_property_value(value)
+
+    if dry_run:
+        # Whether this creates or overwrites is the fact worth previewing: the
+        # command is called "set" either way, and an unnoticed overwrite loses
+        # the old value with no trace. It is read off the block already fetched.
+        existing = first_block.get("properties") or {}
+        had = key in existing
+        old_value = existing.get(key)
+        if as_json:
+            output({"page": page, "property": key, "old_value": old_value,
+                    "value": value, "existed": had, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would set '{key}::' on page '{page}'")
+            if had:
+                click.echo(f"  was: {old_value}")
+            else:
+                click.echo(f"  was: (not set)")
+            click.echo(f"  now: {value}")
+        return
 
     api.upsert_block_property(str(block_uuid), key, value)
 
@@ -3472,10 +3628,11 @@ Note:
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
 @click.option("--key", required=True, help="Property key to remove")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show which property would be removed, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def remove_property(ctx, page, block_id, key, as_json):
+def remove_property(ctx, page, block_id, key, dry_run, as_json):
     """Remove a property from a page or from a single block."""
     api = ctx.obj["api"]
     if bool(page) == bool(block_id):
@@ -3485,8 +3642,10 @@ def remove_property(ctx, page, block_id, key, as_json):
         # A page property is just a property on the page's first block, so the
         # API call is the same; only the way the block is found differs.
         block_uuid = block_id.strip().replace("((", "").replace("))", "")
-        if not api.get_block(block_uuid, include_children=False):
+        block = api.get_block(block_uuid, include_children=False)
+        if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)
+        existing = (block.get("properties") if isinstance(block, dict) else None) or {}
         target = f"block '{block_uuid}'"
         result = {"id": block_uuid, "property": key, "status": "removed"}
     else:
@@ -3496,8 +3655,25 @@ def remove_property(ctx, page, block_id, key, as_json):
         block_uuid = blocks[0].get("uuid")
         if not block_uuid:
             fail("Could not find block UUID", as_json=as_json, page=page)
+        existing = blocks[0].get("properties") or {}
         target = f"page '{page}'"
         result = {"page": page, "property": key, "status": "removed"}
+
+    if dry_run:
+        # "Property not there" is the outcome worth knowing before the write:
+        # the real call succeeds silently either way, so a caller who misspelled
+        # the key would otherwise see "Removed" and believe it.
+        present = key in existing
+        if as_json:
+            output({**result, "status": "would_remove" if present else "not_present",
+                    "value": existing.get(key), "present": present,
+                    "dry_run": True}, True)
+        elif present:
+            click.echo(f"[DRY RUN] Would remove '{key}' from {target}")
+            click.echo(f"  value: {existing[key]}")
+        else:
+            click.echo(f"[DRY RUN] '{key}' is not set on {target}; nothing would be removed")
+        return
 
     api.remove_block_property(str(block_uuid), key)
 
@@ -3517,15 +3693,36 @@ Example:
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
 @click.option("--value", required=True, help="Property value")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show the property change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def set_block_property(ctx, block_id, key, value, as_json):
+def set_block_property(ctx, block_id, key, value, dry_run, as_json):
     """Set or update a property on a specific block."""
     api = ctx.obj["api"]
 
     # Auto-detect value type (shared coercion with the inline --property option)
     value = coerce_property_value(value)
+
+    if dry_run:
+        # The write path sets the property blind — upsert needs no prior read.
+        # The preview does need one: without it there is no old value to show,
+        # and it also turns a mistyped UUID into an error instead of a silent
+        # no-op. One extra read, only on this path.
+        block = api.get_block(block_id, include_children=False)
+        if not block:
+            fail(f"Block not found: {block_id}", as_json=as_json, id=block_id)
+        existing = (block.get("properties") if isinstance(block, dict) else None) or {}
+        had = key in existing
+        old_value = existing.get(key)
+        if as_json:
+            output({"block": block_id, "property": key, "old_value": old_value,
+                    "value": value, "existed": had, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would set '{key}::' on block '{block_id}'")
+            click.echo(f"  was: {old_value if had else '(not set)'}")
+            click.echo(f"  now: {value}")
+        return
 
     api.upsert_block_property(block_id, key, value)
 
@@ -3547,10 +3744,11 @@ Note:
 """)
 @click.option("--page", "--name", required=True, help="Current page name")
 @click.option("--new-name", required=True, help="New page name")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show the rename and the referencing pages, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def rename_page(ctx, page, new_name, as_json):
+def rename_page(ctx, page, new_name, dry_run, as_json):
     """Rename a page (updates all references across the graph)."""
     api = ctx.obj["api"]
 
@@ -3558,6 +3756,44 @@ def rename_page(ctx, page, new_name, as_json):
     page_data = api.get_page(page)
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
+
+    if dry_run:
+        # A rename reaches past the page itself: Logseq rewrites every [[Old]]
+        # in the graph. The blast radius is the point of the preview, so it is
+        # worth the extra read here — the write path never needs it. Backlinks
+        # are best-effort: if the call fails the rename is still previewed, with
+        # the reference count reported as unknown rather than as zero.
+        referencing = None
+        try:
+            refs = api.get_page_linked_references(page)
+            referencing = _extract_backlink_names(refs) if refs else []
+        except Exception as e:
+            click.echo(f"Warning: could not read backlinks ({e}); "
+                       f"reference count unknown", err=True)
+
+        payload = {"old_name": page, "new_name": new_name, "dry_run": True}
+        if referencing is None:
+            payload["referencing_pages"] = None
+            payload["referencing_page_count"] = None
+        else:
+            payload["referencing_pages"] = referencing
+            payload["referencing_page_count"] = len(referencing)
+
+        if as_json:
+            output(payload, True)
+        else:
+            click.echo(f"[DRY RUN] Would rename page")
+            click.echo(f"  from: {page}")
+            click.echo(f"  to:   {new_name}")
+            if referencing is None:
+                click.echo(f"  pages with references that would be rewritten: unknown")
+            else:
+                click.echo(f"  pages with references that would be rewritten: {len(referencing)}")
+                for name in referencing[:10]:
+                    click.echo(f"    <- {name}")
+                if len(referencing) > 10:
+                    click.echo(f"    ... and {len(referencing) - 10} more")
+        return
 
     api.rename_page(page, new_name)
 
@@ -3967,6 +4203,226 @@ def _logseq_process_running() -> "bool | None":
         return None
 
 
+@cli.command("init", epilog="""\b
+Examples:
+  logseq-cli --token TOKEN init --dry-run
+  logseq-cli --token TOKEN init
+  logseq-cli --token TOKEN init --output ./config.toml --force
+Note:
+  Reads the graph, never writes to it. Suggestions are counted, not guessed:
+  each one comes with how many of the recent journals actually use it, so a
+  section you abandoned years ago does not end up in your config.
+""")
+@click.option("--output", "out_path", default=None,
+              help="Where to write (default: the first config search path)")
+@click.option("--days", default=120, show_default=True,
+              help="How many of the most recent journals to look at")
+@click.option("--force", is_flag=True, help="Overwrite an existing config file")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Print what would be written")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.pass_context
+@handle_connection_error
+def init_config(ctx, out_path, days, force, dry_run, as_json):
+    """Suggest a config file from what your graph actually contains."""
+    api = ctx.obj["api"]
+
+    target = Path(out_path).expanduser() if out_path else config_search_paths()[0]
+    if target.exists() and not (force or dry_run):
+        fail(f"{target} already exists. Pass --force to overwrite it, "
+             "or --dry-run to see what would be written.",
+             as_json=as_json, reason="config_exists")
+
+    pages = api.get_all_pages() or []
+    journals = [p for p in pages
+                if p.get("journalDay") or p.get("journal-day") or p.get("journal?")]
+    # Most recent first: a section abandoned years ago must not outvote the one
+    # in use now, which counting the whole history would let it do.
+    journals.sort(key=lambda p: p.get("journalDay") or p.get("journal-day") or 0,
+                  reverse=True)
+    journals = journals[:days]
+
+    heading_counts = Counter()
+    for page in journals:
+        name = page.get("originalName") or page.get("original-name") or page.get("name")
+        if not name:
+            continue
+        seen = set()
+        for block in _walk_blocks(api.get_page_blocks_tree(name) or []):
+            text = (block.get("content") or "").strip()
+            if text.startswith("#"):
+                seen.add(normalize_heading(text))
+        heading_counts.update(seen)
+
+    namespaces = Counter()
+    prop_values = Counter()
+    for page in pages:
+        name = (page.get("originalName") or page.get("original-name")
+                or page.get("name") or "")
+        if "/" in name:
+            namespaces[name.split("/", 1)[0] + "/"] += 1
+        props = page.get("properties") or {}
+        if isinstance(props, dict):
+            for value in _as_list(props.get("type")):
+                prop_values[str(value)] += 1
+
+    total = len(journals)
+    suggestions = {
+        "journals_examined": total,
+        "headings": heading_counts.most_common(8),
+        "namespaces": namespaces.most_common(5),
+        "person_values": prop_values.most_common(5),
+    }
+    toml_text = _render_config(heading_counts, namespaces, prop_values, total)
+
+    if as_json:
+        output({"target": str(target), "written": False if dry_run else None,
+                "suggestions": suggestions, "config": toml_text}, True)
+        if dry_run:
+            return
+    else:
+        click.echo(f"Looked at {total} journal page(s).")
+        if not total:
+            click.echo("  No journals found — is the right graph open?")
+        for heading, count in heading_counts.most_common(8):
+            click.echo(f"  {count:4}/{total}  {heading}")
+        for ns, count in namespaces.most_common(5):
+            click.echo(f"  {count:4} pages under  {ns}")
+        for value, count in prop_values.most_common(5):
+            click.echo(f"  {count:4} pages with   type:: {value}")
+        click.echo()
+
+    if dry_run:
+        if not as_json:
+            click.echo(f"[DRY RUN] Would write {target}:\n")
+            click.echo(toml_text)
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(toml_text, encoding="utf-8")
+    if not as_json:
+        click.echo(f"Wrote {target}")
+        click.echo("Review it: these are counts from your graph, not certainties.")
+
+
+def _walk_blocks(blocks):
+    """Yield every block in a tree, depth first."""
+    for block in blocks:
+        yield block
+        yield from _walk_blocks(block.get("children") or [])
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _slug(heading: str) -> str:
+    """A short name for a heading, usable as a TOML key."""
+    text = re.sub(r"^#+\s*", "", heading)
+    text = re.sub(r"\[\[([^\]]*)\]\]", r"\1", text)
+    text = re.sub(r"[^0-9A-Za-z]+", "_", text).strip("_").lower()
+    return text or "section"
+
+
+def _tie_note(counts, what: str) -> list:
+    """Name the runners-up when the count cannot separate them.
+
+    `Counter.most_common` breaks a tie by insertion order, so whichever page
+    the API happened to return first would decide — and the comment written
+    next to the winner ("10 pages live under this prefix") reads as evidence
+    while hiding that something else scored exactly the same. In the graph
+    this was found in, two namespaces had ten pages each and the wrong one
+    was picked, after which `smart-query` returned ten confident non-results.
+
+    Returns comment lines, or nothing when there is a clear winner.
+    """
+    ranked = counts.most_common()
+    if not ranked:
+        return []
+    top_count = ranked[0][1]
+    rivals = [name for name, count in ranked[1:] if count == top_count]
+    if not rivals:
+        return []
+    return [f"# just as common, and possibly the {what} you want: "
+            + ", ".join(str(r) for r in rivals),
+            "# counting cannot tell them apart — pick the right one yourself"]
+
+
+def _render_config(headings, namespaces, prop_values, total) -> str:
+    """Build the config text, commenting out anything that is a guess."""
+    lines = [
+        "# Written by `logseq-cli init` from the graph it found.",
+        "# The counts say how many of the recent journals use each heading;",
+        "# check them, they are evidence rather than certainty.",
+        "",
+        "[journal]",
+    ]
+    ranked = headings.most_common(8)
+    # Several sections can appear in every journal, and then the count alone
+    # does not say which one prose goes under. Prefer a plain top-level
+    # heading: one that is not a link to a page ("## [[Meeting]]" collects
+    # meetings) and not a sub-heading, which is where notes usually live.
+    def _is_plain_top_level(h: str) -> bool:
+        return h.startswith("## ") and not h.startswith("### ") and "[[" not in h
+
+    default_pick = next(
+        ((h, c) for h, c in ranked if _is_plain_top_level(h)),
+        ranked[0] if ranked else None,
+    )
+    if default_pick:
+        top, count = default_pick
+        lines.append(f'# in {count} of {total} journals')
+        lines += _tie_note(
+            Counter({h: c for h, c in ranked if _is_plain_top_level(h)}),
+            "section")
+        lines.append(f'default_heading = "{top}"')
+    else:
+        lines.append('# No headings found; journal writes go in at top level.')
+        lines.append('# default_heading = "## Log"')
+
+    lines += ["", "[journal.headings]",
+              "# The key is yours to choose; the value must match the graph exactly."]
+    used = set()
+    for heading, count in ranked:
+        key = _slug(heading)
+        while key in used:
+            key += "_"
+        used.add(key)
+        lines.append(f'{key} = "{heading}"  # {count}/{total}')
+
+    lines += ["", "[graph]"]
+    if namespaces:
+        ns, count = namespaces.most_common(1)[0]
+        lines.append(f"# {count} pages live under this prefix")
+        lines += _tie_note(namespaces, "namespace")
+        lines.append(f'projects_namespace = "{ns}"')
+    else:
+        lines.append("# No namespaced pages found. Without this setting,")
+        lines.append('# `smart-query --request "projects"` reports it as missing.')
+        lines.append('# projects_namespace = "projects/"')
+
+    if prop_values:
+        value, count = prop_values.most_common(1)[0]
+        lines.append(f"# {count} pages carry type:: {value}")
+        lines += _tie_note(prop_values, "type:: value")
+        lines.append('person_property = "type"')
+        lines.append(f'person_value = "{value}"')
+    else:
+        lines.append("# No type:: properties found.")
+        lines.append('# person_property = "type"')
+        lines.append('# person_value = "Person"')
+
+    lines += [
+        "",
+        "# [analysis] is not guessed: which words carry mood in your journal is",
+        "# not something a count can tell. The defaults are English; see",
+        "# docs/configuration.md and config.example.toml.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 @cli.command("doctor", epilog="""\b
 Examples:
   logseq-cli --token TOKEN doctor
@@ -3986,6 +4442,44 @@ def doctor(ctx, as_json):
 
     def add(name, ok, detail):
         checks.append({"check": name, "ok": ok, "detail": detail})
+
+    # 0. The runtime itself. Everything below assumes the CLI is installed
+    #    correctly; when it is not, the failure surfaces later as something
+    #    unrelated (an ImportError mid-command, a config that never loads).
+    py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_ok = sys.version_info >= (3, 10)
+    add("python", py_ok,
+        py + ("" if py_ok else "  (3.10 or newer required)"))
+
+    missing = []
+    versions = []
+    for mod, label in (("click", "click"), ("requests", "requests")):
+        try:
+            import_module(mod)
+        except Exception:  # noqa: BLE001 - any import failure means "not usable"
+            missing.append(label)
+            continue
+        # Ask the installed metadata rather than the module: click deprecated
+        # its __version__ attribute and drops it in 9.1, and a doctor that
+        # warns about the library it is checking is not much of a doctor.
+        try:
+            versions.append(f"{label} {_pkg_version(mod)}")
+        except PackageNotFoundError:  # pragma: no cover - importable but no dist
+            versions.append(label)
+    # The TOML parser is stdlib from 3.11 and the tomli backport before that;
+    # either is fine, only having neither is a problem, and only for configs.
+    try:
+        import_module("tomllib")
+        versions.append("tomllib (stdlib)")
+    except ModuleNotFoundError:
+        try:
+            versions.append(f"tomli {import_module('tomli').__version__}")
+        except Exception:  # noqa: BLE001
+            missing.append("tomli (needed on Python 3.10 to read a config file)")
+    add("packages", not missing,
+        ", ".join(versions) if not missing else "missing: " + ", ".join(missing))
+    if missing:
+        remedy = remedy or 'Reinstall the package: pip install -e ".[dev]"'
 
     # 1. Is anything listening? Separates "app closed" from "API disabled",
     #    the exact ambiguity that turned a real outage into a manual hunt.

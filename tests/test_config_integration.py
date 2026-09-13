@@ -16,6 +16,7 @@ the developer's own config and quietly pass for the wrong reason.
 
 import json
 import os
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -484,3 +485,56 @@ class TestAnalysisPatternsComeFromConfig:
         pat = _project_pattern("#a.b/")
         assert pat.search("#a.b/one")
         assert pat.search("#axb/one") is None
+
+
+class TestTaskCountingSeesLogseqMarkers:
+    """analyze-journal-patterns counted markdown checkboxes only.
+
+    Logseq writes TODO/DOING/DONE markers, so a real graph reported
+    "0 complete, 0 incomplete (0% rate)" — a number that reads like a
+    measurement of a graph with no tasks, not like a counter that cannot
+    match. Measured against 120 real journals: 0/0 before, 284/30 after.
+    """
+
+    INCOMPLETE = re.compile(
+        r"(?i:- \[ \])|^\s*-?\s*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        re.MULTILINE)
+    COMPLETE = re.compile(
+        r"(?i:- \[x\])|^\s*-?\s*(?:DONE|CANCELED|CANCELLED)\b",
+        re.MULTILINE)
+
+    def test_markers_count_as_tasks(self):
+        assert self.INCOMPLETE.search("- TODO write the ticket")
+        assert self.INCOMPLETE.search("- DOING in progress")
+        assert self.COMPLETE.search("- DONE shipped")
+
+    def test_checkboxes_still_count(self):
+        """The old syntax must keep working for graphs that use it."""
+        assert self.INCOMPLETE.search("- [ ] open")
+        assert self.COMPLETE.search("- [x] closed")
+
+    def test_a_marker_word_inside_prose_is_not_a_task(self):
+        """Only at the start of a line, so 'nothing to do' stays prose."""
+        assert not self.INCOMPLETE.search("we talked about the todo list")
+        assert not self.COMPLETE.search("that is done and dusted")
+
+    def test_done_is_not_also_counted_as_incomplete(self):
+        assert not self.INCOMPLETE.search("- DONE shipped")
+
+    def test_a_lowercase_marker_word_is_prose(self):
+        """Logseq markers are upper-case. "Now that..." opens a sentence.
+
+        Reported against an English graph: with (?i) on the markers, every
+        block starting "Now", "Later", "Waiting" or "done" counted as a task.
+        """
+        for line in ("- done", "- Now that we finished it",
+                     "- Later kam die Rückmeldung", "- Waiting for the reply",
+                     "- todo: das muss noch"):
+            assert not self.INCOMPLETE.search(line), line
+            assert not self.COMPLETE.search(line), line
+
+    def test_a_checkbox_still_matches_either_case(self):
+        """[x] and [X] are both in the wild, unlike the markers."""
+        assert self.COMPLETE.search("- [x] done")
+        assert self.COMPLETE.search("- [X] done")
+

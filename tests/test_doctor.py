@@ -141,3 +141,47 @@ class TestRobustness:
         result = CliRunner().invoke(cli, ["doctor", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["healthy"] is False
+
+
+class TestRuntimeChecks:
+    """doctor reports the runtime it is running on.
+
+    An installation problem otherwise surfaces later as something unrelated:
+    an ImportError in the middle of a command, or a config file that never
+    loads because no TOML parser is present.
+    """
+
+    def test_python_and_packages_are_reported(self, api, listener):
+        listener(True)
+        api.call.return_value = {"currentGraph": "g"}
+        api.get_all_pages.return_value = [{"name": "a"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        checks = {c["check"]: c for c in json.loads(result.stdout)["checks"]}
+        assert checks["python"]["ok"] is True
+        assert checks["python"]["detail"].startswith("3.")
+        assert checks["packages"]["ok"] is True
+        for lib in ("click", "requests"):
+            assert lib in checks["packages"]["detail"]
+
+    def test_missing_package_fails_with_a_remedy(self, api, listener, monkeypatch):
+        """A broken install must not look like a healthy one."""
+        import logseq_cli.cli as cli_mod
+
+        real = cli_mod.import_module
+
+        def fake(name, *a, **kw):
+            if name == "requests":
+                raise ImportError("boom")
+            return real(name, *a, **kw)
+
+        monkeypatch.setattr(cli_mod, "import_module", fake)
+        listener(True)
+        api.call.return_value = {"currentGraph": "g"}
+        api.get_all_pages.return_value = [{"name": "a"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        payload = json.loads(result.stdout)
+        packages = next(c for c in payload["checks"] if c["check"] == "packages")
+        assert packages["ok"] is False
+        assert "requests" in packages["detail"]
+        assert payload["healthy"] is False
+        assert "remedy" in payload
