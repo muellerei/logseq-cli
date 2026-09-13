@@ -20,6 +20,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A configuration file, for the handful of things that describe *your* graph
+  rather than Logseq: the namespace holding your project pages, the property
+  marking a person page, the heading journal writes go under, and the words
+  `analyze-journal-patterns` scores. These were literals in the source, taken
+  from the graph this CLI was written against — `smart-query --request
+  "projects"` searched `projekte/` for everyone. They now have no built-in
+  default at all: a command that needs one and does not find it names the
+  setting and exits 1, rather than returning the empty list that is
+  indistinguishable from "you have no projects". Read from
+  `LOGSEQ_CLI_CONFIG`, else `$XDG_CONFIG_HOME/logseq-cli/config.toml`, else
+  `~/.logseq-cli.toml`; flags and environment variables still win over it.
+  `[journal.headings]` adds short names, so `--under-heading tasks` can stand
+  for whatever that section is called in your graph, while an unlisted name is
+  passed through unchanged so literal headings keep working. Three commented
+  example files and `docs/configuration.md`, which covers what to put in when
+  a section does not exist in your graph and how to read the right values out
+  of it.
+- `logseq-cli init` writes that file for you, from the graph itself: the
+  headings your recent journals use, the namespace most pages sit under, the
+  most common `type::` value. Every suggestion carries the count it rests on,
+  and where counting cannot decide — two sections in every journal, two
+  namespaces of equal size — the alternatives are named in a comment instead
+  of one being picked by insertion order and presented as a finding. It reads
+  only the most recent journals, so a section abandoned years ago cannot
+  outrank the one in daily use, and it will not overwrite an existing config
+  without `--force`.
+- `doctor` now checks the runtime before the connection: the Python version,
+  whether `click`, `requests` and a TOML parser import, and which config file
+  is in effect. A broken install otherwise surfaces later as something
+  unrelated.
+
 - `--dry-run` on the seven write commands that lacked it: `set-todo-status`,
   `set-property`, `remove-property`, `set-block-property`, `add-block-ref`,
   `add-note-content` and `rename-page`. It was previously only on the writes
@@ -37,6 +68,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   heading it reports.
 
 ### Fixed
+
+- The analysis commands reported numbers that looked like measurements but
+  were not, which is worse than an obvious failure because a plausible number
+  gets believed. Found by judging their output against a real graph rather
+  than asserting that output exists:
+  - `analyze-graph` counted "todo" anywhere and case-insensitively, so
+    "Todo-Liste" in prose and the `TODO` inside a DONE block's logbook line
+    counted as open tasks. It reported 438 for a graph with 256.
+  - The mood counters read negations backwards: "nicht zufrieden" and "not
+    happy" both scored positive, 16% of positive hits in one 90-day sample.
+    Free word counting is gone; a line now has to state a mood (`mood: good`,
+    `stimmung: mies`, labels from config) and the word lists classify that
+    value. The evidence lines follow the same rule, so they can no longer
+    contradict the count above them.
+  - `suggest-connections` ranked coincidence above substance: two pages
+    linking the same single page scored 1.0 under Jaccard and outranked a pair
+    sharing 35 topics out of 38, while `--min-confidence` then removed the good
+    pair and kept the coincidences. A single shared topic no longer counts
+    (`--min-shared`, default 3) and ties break on the number of shared topics.
+  - `find-knowledge-gaps` reported Logseq's own by-products as findings —
+    `#272` in a sentence becomes a page named "272" — 596 orphans in one graph,
+    almost all of that kind, burying the real ones. Names that are too short,
+    carry no letter, start or end with stray punctuation, or spell a date in
+    file-name form are no longer counted. "Underdeveloped" also skips a page
+    whose namespaced namesake has real content: an empty `Alpha` next to a
+    written `projects/Alpha` is an anchor for the name, not a gap.
+- `project_tags` only ever matched the tag form, so a graph writing
+  `[[Alpha]]` rather than `#Alpha` — the common case — configured the setting
+  and saw no change. Both spellings count now.
+- A project written as `[[projects/alpha]]` was counted under the name `null`,
+  because the pattern has one group per spelling and the caller read group 1.
 
 - Rejected queries looked like empty results. Logseq answers a broken query
   with HTTP 200 and `{"error": ...}` in the body, so a query that never ran
