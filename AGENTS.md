@@ -19,7 +19,7 @@ What makes it scriptable:
 logseq-cli --version
 
 # 2. Connectivity, token, API and graph access in one call
-logseq-cli --token "YOUR_TOKEN" doctor --json
+logseq-cli --token "TOKEN" doctor --json
 ```
 
 `doctor` checks each step separately, so a failure names which one broke rather
