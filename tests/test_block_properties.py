@@ -139,23 +139,23 @@ class TestUpdateBlockKeepsProperties:
     def _api(self, properties):
         api = MagicMock()
         api.get_block.return_value = {
-            "uuid": "u-1", "content": "alt", "properties": properties}
+            "uuid": "u-1", "content": "old", "properties": properties}
         return api
 
     def test_properties_are_passed_back(self):
         api = self._api({"ticket": "ISSUE-42", "owner": ["Bob"]})
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "neu"])
+                "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
         api.update_block.assert_called_once_with(
-            "u-1", "neu", properties={"ticket": "ISSUE-42", "owner": ["Bob"]})
+            "u-1", "new", properties={"ticket": "ISSUE-42", "owner": ["Bob"]})
 
     def test_block_without_properties_passes_none(self):
         api = self._api({})
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "neu"])
+                "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
         assert api.update_block.call_args.kwargs["properties"] == {}
 
@@ -163,7 +163,7 @@ class TestUpdateBlockKeepsProperties:
         api = self._api({"ticket": "ISSUE-42"})
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "neu", "--dry-run"])
+                "update-block", "--id", "u-1", "--content", "new", "--dry-run"])
         assert r.exit_code == 0, r.output
         assert "ticket::" in r.output
         api.update_block.assert_not_called()

@@ -10,7 +10,7 @@ from logseq_cli.helpers import (
 FLUSH = "**09:16** Header\n- point a\n- point b"
 INDENTED = "**17:00** Main\n\t- sub 1\n\t- sub 2"
 PLAIN = "**14:30** just a log line"
-QUOTE = "> Zitat Zeile eins\n> Zitat Zeile zwei"
+QUOTE = "> Quote line one\n> Quote line two"
 
 
 class TestTreeCapableCommands:

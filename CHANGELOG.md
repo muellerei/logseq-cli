@@ -5,7 +5,7 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-09-13
 
 ### Security
 
@@ -71,7 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   success. No command called them anymore; all insert paths use the strict
   variants that abort on a silent write failure.
 
-## [0.8.0] - 2026-08-22
+### Changed
+
+- Every user-facing string is English now. The guard messages for multiline
+  `--content` and the `--content-file`/`--no-preserve` conflict were German
+  in an otherwise English CLI, and they fire on a common mistake, so they
+  were among the messages users saw most often.
+- Example page names in `--help` output no longer come from the graph the
+  CLI was developed against. They are Alice/Bob/Carol now.
+- The test suite runs in CI on Python 3.10 through 3.13. `pytest` is
+  installable from the repo as the `dev` extra: `pip install -e ".[dev]"`.
+
+## [0.8.0] - 2026-08-28
 
 ### Fixed
 
@@ -173,134 +184,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `add-journal-block --content-file DATEI` und `insert-block --tree-file DATEI`:
-  Blockinhalt aus einer Datei statt aus `--content`/`--tree`. Zwei Probleme
-  loest das:
-  - **Shell-Quoting entfaellt.** `--content "$(cat datei)"` bricht an einem
-    Apostroph im Text; der Reflex, dann alle Sonderzeichen zu entschaerfen,
-    verstuemmelt Umlaute gleich mit. Der Datei-Pfad hat keine Shell dazwischen.
-  - **Mehrere buendige `- `-Wurzeln sind erlaubt.** Inline lehnt der Guard sie
-    ab, weil sie dort still zu EINEM Block mit rohen Newline-Bullets wuerden.
-    Aus der Datei wird der gesamte Text als Baum geparst, buendige Bullets sind
-    dort legitime Geschwister-Wurzeln mit eigenen Kindern.
+- `add-journal-block --content-file FILE` and `insert-block --tree-file FILE`:
+  block content from a file instead of `--content`/`--tree`. This solves two
+  problems:
+  - **No shell quoting.** `--content "$(cat file)"` breaks on an apostrophe in
+    the text, and the reflex of escaping every special character mangles
+    umlauts along with it. A file path has no shell in between.
+  - **Multiple flush `- ` roots are allowed.** Inline, the guard rejects them,
+    because there they would silently collapse into ONE block with raw newline
+    bullets. From a file, the whole text is parsed as a tree, where flush
+    bullets are legitimate sibling roots with children of their own.
 
-  `--content-file` schliesst `--content` aus, `--tree-file` schliesst `--tree`
-  und `--content` aus. Eine fehlende, leere, nicht lesbare oder nicht
-  UTF-8-kodierte Datei bricht ab, bevor irgendetwas geschrieben wird.
+  `--content-file` excludes `--content`; `--tree-file` excludes `--tree` and
+  `--content`. A missing, empty, unreadable or non-UTF-8 file aborts before
+  anything is written.
 
 ### Fixed
 
-Vier Wege, auf denen die gemeldete Blockzahl von den tatsaechlich
-geschriebenen Bloecken abweichen konnte. Drei davon endeten mit Exit 0 und
-einer Erfolgsmeldung fuer Text, der nie im Graph ankam. Gefunden beim
-adversarischen Pruefen des neuen Datei-Pfads, drei sind aelter als er.
+Four ways the reported block count could diverge from the blocks actually
+written. Three of them ended in exit 0 and a success message for text that
+never reached the graph. Found while adversarially testing the new file path;
+three are older than it.
 
-- **`--upsert-heading` verwarf alle Wurzeln ausser der ersten** und meldete
-  trotzdem `count_blocks(tree)`. Eine Datei mit drei Wurzeln schrieb eine und
-  meldete neun. Weitere Wurzeln werden jetzt als Geschwister eingefuegt, und
-  die gemeldete Zahl stammt aus den tatsaechlich zurueckgegebenen UUIDs.
-- **Der Upsert-Pfad schrieb nicht-strict** (`insert_block_tree`): ein stiller
-  Schreibfehler wurde uebersprungen und die Soll-Zahl gemeldet. Laeuft jetzt
-  ueber `insert_block_tree_with_uuids(strict=True)`.
-- **`insert_formatted_content_with_uuids` hatte als einzige Insert-Helferin
-  keinen strict-Vertrag.** Bei einer Page, die Logseq nicht geladen hat,
-  antwortet jeder Append mit HTTP 200 + `null`; die `None`-UUIDs wurden
-  mitgezaehlt und als `Added N block(s)` gemeldet. Betrifft
-  `add-journal-block --top-level`, den Heading-Fallback,
-  `add-journal-content` und `add-note-content`.
-- **`insert_block_tree_at_page_top` zaehlte im Batch-Pfad pro `--content`-Wert
-  neu ab 0**, sodass ein Fehler im zweiten Wert `Nothing was written` meldete,
-  obwohl der erste bereits stand.
+- **`--upsert-heading` discarded every root but the first** and still reported
+  `count_blocks(tree)`. A file with three roots wrote one and reported nine.
+  Further roots are now inserted as siblings, and the reported count comes
+  from the UUIDs actually returned.
+- **The upsert path wrote non-strict** (`insert_block_tree`): a silent write
+  failure was skipped and the intended count reported. It now runs through
+  `insert_block_tree_with_uuids(strict=True)`.
+- **`insert_formatted_content_with_uuids` was the only insert helper without a
+  strict contract.** On a page Logseq has not loaded, every append answers
+  HTTP 200 + `null`; the `None` UUIDs were counted and reported as
+  `Added N block(s)`. Affects `add-journal-block --top-level`, the heading
+  fallback, `add-journal-content` and `add-note-content`.
+- **`insert_block_tree_at_page_top` restarted its count from 0 per `--content`
+  value in the batch path**, so a failure in the second value reported
+  `Nothing was written` even though the first was already in place.
 
-Zusaetzlich: Bricht ein Baum-Insert mitten drin ab, nennt die Meldung jetzt
-die Zahl der bereits geschriebenen Bloecke statt `Nothing was written`. Es
-gibt kein Rollback (die API bietet keins), und die alte Formulierung lud zu
-einem Retry ein, der die Bloecke dupliziert haette.
+Additionally: when a tree insert aborts midway, the message now names the
+number of blocks already written instead of `Nothing was written`. There is no
+rollback (the API offers none), and the old wording invited a retry that would
+have duplicated those blocks.
 
 ### Changed
 
-- Der Guard von `add-journal-block --content` nennt jetzt `--content-file` als
-  vierten Ausweg. Fuer den Inline-Pfad bleibt er unveraendert scharf.
-- `--content-file` zusammen mit `--no-preserve` bricht ab, statt die Hierarchie
-  still zu einem Block zusammenzufalten. `--no-preserve` bleibt fuer
-  `--content` unveraendert nutzbar.
+- The guard on `add-journal-block --content` now names `--content-file` as a
+  fourth way out. For the inline path it stays exactly as strict as before.
+- `--content-file` together with `--no-preserve` aborts instead of silently
+  flattening the hierarchy into a single block. `--no-preserve` remains usable
+  with `--content` as before.
 
 ## [0.6.0] - 2026-08-07
 
-Ergebnis eines Audits gegen gaengige CLI-Konventionen (clig.dev, POSIX/grep,
-Tool-Design-Empfehlungen). Alle Defaults bleiben unveraendert:
-ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
+Result of an audit against common CLI conventions (clig.dev, POSIX/grep,
+tool design recommendations). All defaults stay unchanged: without the new
+flags, every command behaves as before.
 
 ### Added
 
-- `--dry-run` fuer `update-block`, `remove-block`, `copy-block` und
-  `delete-page`. Diese vier Operationen kaskadieren oder ueberschreiben
-  (`remove-block` nimmt alle Kinder mit, `copy-block --remove` loescht die
-  Quelle), hatten aber bisher keine Vorschau. `remove-block --dry-run` meldet
-  zusaetzlich die Zahl der Nachfahren, die mitgeloescht wuerden.
-- Output-Begrenzung fuer die Journal-Lesepfade:
-  `get-journal-range --tail N` (neueste N Tage), `--limit N` (aelteste N Tage)
-  und `--heading X` (pro Tag nur eine Sektion); `get-journal-summary
-  --no-content` (Volltexte weglassen, Datum/Zeichenzahl/Topics behalten).
-  `--tail`/`--limit` filtern vor dem Abruf, ausgelassene Tage kosten keinen
-  API-Call. Gemessen an einem realen Graph: Range ueber 30 Tage 431.996 ->
-  136.289 Zeichen, Summary "this week" 143.733 -> 793 Zeichen.
-- **`doctor`**: read-only Health-Check in einem Aufruf. Prueft Listener auf dem
-  API-Port, Token, eine echte API-Antwort und ob ein Graph geladen ist. Trennt
-  dabei die Faelle, die sonst manuell auseinanderzuhalten sind: Logseq laeuft
-  nicht / laeuft, aber die HTTP-API ist aus / API antwortet, aber der Token wird
-  abgelehnt / API und Token ok, aber kein Graph offen. Jeder Fall bekommt eine
-  eigene Handlungsempfehlung (`remedy`, auch im JSON). Exit 0 = les- und
-  schreibbereit, 1 = nicht. Anlass: am 2026-08-05 lief der Logseq-Prozess,
-  aber nichts lauschte auf Port 12315 - die Klaerung kostete sieben manuelle
-  Diagnoseschritte.
-- `delete-block` als Alias auf `remove-block`. Der Name ist die haeufigste
-  Fehlannahme, weil `delete-page` danebensteht.
-- `fail()`-Helper: bei gesetztem `--json` werden Fehler als JSON-Objekt
-  ausgegeben, sonst als Klartext. In beiden Faellen ausschliesslich auf
-  stderr, damit stdout den Nutzdaten vorbehalten bleibt.
+- `--dry-run` for `update-block`, `remove-block`, `copy-block` and
+  `delete-page`. These four operations cascade or overwrite (`remove-block`
+  takes all children with it, `copy-block --remove` deletes the source), yet
+  had no preview until now. `remove-block --dry-run` additionally reports the
+  number of descendants that would be deleted along with it.
+- Output limiting for the journal read paths:
+  `get-journal-range --tail N` (newest N days), `--limit N` (oldest N days)
+  and `--heading X` (one section per day only); `get-journal-summary
+  --no-content` (drop full texts, keep date/character count/topics).
+  `--tail`/`--limit` filter before fetching, so omitted days cost no API call.
+  Measured against a real graph: a 30-day range went from 431,996 to 136,289
+  characters, a "this week" summary from 143,733 to 793.
+- **`doctor`**: read-only health check in a single call. Checks for a listener
+  on the API port, the token, a real API response, and whether a graph is
+  loaded. It separates the cases that are otherwise tedious to tell apart:
+  Logseq is not running / is running but the HTTP API is off / the API answers
+  but the token is rejected / API and token are fine but no graph is open. Each
+  case gets its own recommended action (`remedy`, in the JSON output too).
+  Exit 0 = ready to read and write, 1 = not. Prompted by an incident: the
+  Logseq process was running but nothing was listening on port 12315, and
+  pinning that down took seven manual diagnostic steps.
+- `delete-block` as an alias for `remove-block`. The name is the most common
+  wrong guess, because `delete-page` sits right next to it.
+- `fail()` helper: with `--json` set, errors are emitted as a JSON object,
+  otherwise as plain text. In both cases exclusively on stderr, so stdout stays
+  reserved for payload data.
 
 ### Fixed
 
-- **Stille Schreibfehler werden nicht mehr als Erfolg gemeldet.**
-  `insert_block_tree_with_uuids()` hatte `strict=False` als Default: Logseq
-  beantwortet einen fehlgeschlagenen Insert mit HTTP 200 + `null`, die Funktion
-  legte daraufhin eine `None`-UUID ab, uebersprang die Kinder des Blocks - und
-  das Kommando meldete "Added N block(s)" mit Exit 0, obwohl nichts geschrieben
-  wurde. Bei einem Journal-Eintrag heisst das: der Text ist weg und nichts sagt
-  es. Betroffen waren fuenf von acht Aufrufern, darunter `add-journal-block`
-  und `add-note-content` (die Schwesterfunktion
-  `insert_block_tree_as_siblings` hatte bereits `strict=True`; die
-  Inkonsistenz war unbeabsichtigt).
-  `strict` ist jetzt Default; `insert_block_tree_at_page_top()` prueft den
-  Top-Level-Append ebenfalls ueber `require_insert()`. `strict=False` bleibt
-  fuer Aufrufer verfuegbar, die Teilschreibungen bewusst tolerieren.
+- **Silent write failures are no longer reported as success.**
+  `insert_block_tree_with_uuids()` defaulted to `strict=False`: Logseq answers
+  a failed insert with HTTP 200 + `null`, so the function stored a `None` UUID,
+  skipped that block's children — and the command reported "Added N block(s)"
+  with exit 0 although nothing had been written. For a journal entry that means
+  the text is gone and nothing says so. Five of eight callers were affected,
+  among them `add-journal-block` and `add-note-content` (the sibling function
+  `insert_block_tree_as_siblings` already had `strict=True`; the inconsistency
+  was unintentional).
+  `strict` is now the default, and `insert_block_tree_at_page_top()` verifies
+  the top-level append through `require_insert()` as well. `strict=False`
+  remains available for callers that deliberately tolerate partial writes.
 
-- **`get-properties` meldete faelschlich "No properties".** Der Befehl las nur
-  `page_data["properties"]`, Logseq legt Page-Properties aber auf dem ersten
-  Block ab (dem Property-Block), wenn sie per `set-property` geschrieben
-  wurden - dort blieb das Page-Objekt leer. Ergebnis: intakte Properties wurden
-  als nicht vorhanden gemeldet, was `set-property` so aussehen liess, als haette
-  es still versagt. Genau das steht als Symptom in der Projekt-Doku ("Properties
-  kaputt", "Reparatur nur per delete-page + Neuaufbau") - tatsaechlich war es
-  ein Lesefehler, kein Datenverlust. Jetzt mit Fallback auf den ersten Block;
-  liefert das Page-Objekt Properties, bleibt es beim bisherigen Pfad ohne
-  Zusatz-Call.
+- **`get-properties` wrongly reported "No properties".** The command read only
+  `page_data["properties"]`, but Logseq stores page properties on the first
+  block (the property block) when they were written via `set-property` — and
+  there the page object stayed empty. The result: intact properties were
+  reported as absent, which made `set-property` look as if it had silently
+  failed. That exact symptom was recorded in the project notes ("properties
+  broken", "only fixable via delete-page and rebuild") — in reality it was a
+  read error, not data loss. There is now a fallback to the first block; if the
+  page object does return properties, the previous path is used with no extra
+  call.
 
 ### Changed
 
-- `delete-page` entscheidet die Bestaetigung jetzt ueber `sys.stdin.isatty()`
-  statt ueber `--json`. Bisher wirkte `--json` als impliziter Force-Schalter;
-  ein Skript kann JSON aber rein zur Datenverarbeitung anfordern. Interaktiv
-  wird gefragt, nicht-interaktiv ist `--force` Pflicht (sonst Exit 1).
-  Trennt Ausgabeformat von Sicherheitsbestaetigung.
-- `get-page` liefert Exit 1, wenn eine angeforderte Seite nicht existiert
-  (Ausgabe `(page does not exist)`, im JSON `"exists": false`). Eine
-  existierende leere Seite bleibt Exit 0 mit `(empty page)`. Bisher waren
-  beide Faelle ununterscheidbar. Batch-Reads geben weiterhin alle vorhandenen
-  Seiten aus und melden den Fehler erst am Ende.
-- Gekuerzte Journal-Ergebnisse melden auf stderr, wie viele Tage ausgelassen
-  wurden (`showing N of M ... K omitted`). Ohne Kuerzung kein Hinweis.
+- `delete-page` now decides on confirmation via `sys.stdin.isatty()` rather
+  than via `--json`. Previously `--json` acted as an implicit force switch, but
+  a script may well ask for JSON purely for data processing. Interactively it
+  asks; non-interactively `--force` is mandatory (otherwise exit 1). This
+  separates output format from safety confirmation.
+- `get-page` returns exit 1 when a requested page does not exist (output
+  `(page does not exist)`, `"exists": false` in JSON). An existing but empty
+  page stays exit 0 with `(empty page)`. Previously the two cases were
+  indistinguishable. Batch reads still output every page that does exist and
+  report the error only at the end.
+- Truncated journal results report on stderr how many days were omitted
+  (`showing N of M ... K omitted`). Without truncation, no such notice.
 
 ## [0.5.0] - 2026-05-08
 
@@ -381,5 +390,5 @@ ohne die neuen Flags verhalten sich alle Kommandos wie bisher.
 
 ## [0.3.0] - 2026-05-06
 
-Initial baseline (tagged `baseline-2026-05-06`). 30 commands across pages,
+Initial baseline. 30 commands across pages,
 journals, blocks, search, properties, page management, and graph analysis.

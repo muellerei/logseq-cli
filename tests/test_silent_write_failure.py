@@ -22,7 +22,7 @@ from logseq_cli.helpers import (
 )
 
 
-TREE = [{"content": "Kopf", "children": [{"content": "Detail"}]}]
+TREE = [{"content": "Head", "children": [{"content": "Detail"}]}]
 
 
 class TestHelperDefaults:
@@ -58,21 +58,21 @@ class TestHelperDefaults:
         assert uuids == [None]
 
     def test_successful_write_returns_uuids_in_dfs_order(self):
-        api = fake_api(["u-kopf", "u-detail"])
-        assert insert_block_tree_with_uuids(api, TREE, "parent") == ["u-kopf", "u-detail"]
+        api = fake_api(["u-head", "u-detail"])
+        assert insert_block_tree_with_uuids(api, TREE, "parent") == ["u-head", "u-detail"]
 
     def test_page_top_insert_aborts_on_failed_append(self):
         api = MagicMock()
         api.append_block_in_page.return_value = None
         with pytest.raises(Exception) as exc:
-            insert_block_tree_at_page_top(api, TREE, "Seite")
+            insert_block_tree_at_page_top(api, TREE, "Page One")
         assert "did not create" in str(exc.value)
 
     def test_page_top_insert_succeeds_normally(self):
         api = MagicMock()
         api.append_block_in_page.return_value = {"uuid": "u-top"}
         api.insert_block.return_value = {"uuid": "u-child"}
-        assert insert_block_tree_at_page_top(api, TREE, "Seite") == ["u-top", "u-child"]
+        assert insert_block_tree_at_page_top(api, TREE, "Page One") == ["u-top", "u-child"]
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ class TestCommandsSurfaceTheFailure:
         api.graph.set_fail_after(0)
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
-            "--content", "**09:00** Kopf\n\t- Detail"])
+            "--content", "**09:00** Head\n\t- Detail"])
         assert result.exit_code == 1
         assert "wrote 0 of 2 block(s)" in result.output
         assert "Added" not in result.output
@@ -104,18 +104,18 @@ class TestCommandsSurfaceTheFailure:
     def test_add_journal_block_succeeds_when_writes_land(self, api):
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
-            "--content", "**09:00** Kopf\n\t- Detail"])
+            "--content", "**09:00** Head\n\t- Detail"])
         assert result.exit_code == 0
         assert "Added 2 block(s)" in result.output
 
     def test_add_note_content_fails_loudly(self, api):
         """Uses the heading the fixture already provides, so the failure comes
         from the block insert itself rather than from heading creation."""
-        api.get_page.return_value = {"name": "Seite"}
+        api.get_page.return_value = {"name": "Page One"}
         api.graph.set_fail_after(0)
         result = CliRunner().invoke(cli, [
-            "add-note-content", "--page", "Seite",
-            "--under-heading", "## Log", "--content", "Kopf\n\t- Detail"])
+            "add-note-content", "--page", "Page One",
+            "--under-heading", "## Log", "--content", "Head\n\t- Detail"])
         assert result.exit_code == 1
         assert "wrote 0 of 2 block(s)" in result.output
         assert "Added" not in result.output

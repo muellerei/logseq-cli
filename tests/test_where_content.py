@@ -24,13 +24,13 @@ import click
 def _api(matches, block=None):
     api = MagicMock()
     api.datascript_query.return_value = [[m] for m in matches]
-    api.get_block.return_value = block or {"uuid": "u-1", "content": "alt"}
+    api.get_block.return_value = block or {"uuid": "u-1", "content": "old"}
     return api
 
 
-ONE = [{"uuid": "u-1", "content": "**14:22** Eintrag"}]
-TWO = [{"uuid": "u-1", "content": "Doppelt A"},
-       {"uuid": "u-2", "content": "Doppelt B"}]
+ONE = [{"uuid": "u-1", "content": "**14:22** Entry"}]
+TWO = [{"uuid": "u-1", "content": "Duplicate A"},
+       {"uuid": "u-2", "content": "Duplicate B"}]
 
 
 class TestResolveSingleBlock:
@@ -45,7 +45,7 @@ class TestResolveSingleBlock:
 
     def test_ambiguous_aborts_and_lists_candidates(self):
         with pytest.raises(click.ClickException) as exc:
-            resolve_single_block(_api(TWO), "Doppelt")
+            resolve_single_block(_api(TWO), "Duplicate")
         msg = str(exc.value)
         assert "2 blocks match" in msg
         assert "refusing to guess" in msg
@@ -63,15 +63,15 @@ class TestUpdateBlockWhereContent:
         api = _api(ONE)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--where-content", "14:22", "--content", "neu"])
+                "update-block", "--where-content", "14:22", "--content", "new"])
         assert r.exit_code == 0, r.output
-        api.update_block.assert_called_once_with("u-1", "neu", properties=None)
+        api.update_block.assert_called_once_with("u-1", "new", properties=None)
 
     def test_ambiguous_writes_nothing(self):
         api = _api(TWO)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--where-content", "Doppelt", "--content", "neu"])
+                "update-block", "--where-content", "Duplicate", "--content", "new"])
         assert r.exit_code == 1
         api.update_block.assert_not_called()
 
@@ -79,7 +79,7 @@ class TestUpdateBlockWhereContent:
         api = _api([])
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--where-content", "nope", "--content", "neu"])
+                "update-block", "--where-content", "nope", "--content", "new"])
         assert r.exit_code == 1
         api.update_block.assert_not_called()
 
@@ -98,7 +98,7 @@ class TestUpdateBlockWhereContent:
         api = _api(ONE)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--where-content", "14:22", "--content", "neu",
+                "update-block", "--where-content", "14:22", "--content", "new",
                 "--dry-run"])
         assert r.exit_code == 0, r.output
         assert "[DRY RUN]" in r.output
@@ -108,9 +108,9 @@ class TestUpdateBlockWhereContent:
         api = _api([])
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "neu"])
+                "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
-        api.update_block.assert_called_once_with("u-1", "neu", properties=None)
+        api.update_block.assert_called_once_with("u-1", "new", properties=None)
         api.datascript_query.assert_not_called()
 
 
@@ -130,8 +130,8 @@ class TestSetTodoStatusAmbiguity:
 
     def test_todo_marker_still_disambiguates_prose(self):
         """A TODO plus a prose mention is not ambiguous: the marker decides."""
-        api = _api([{"uuid": "u-A", "content": "TODO Report schreiben"},
-                    {"uuid": "u-B", "content": "siehe Report schreiben oben"}])
+        api = _api([{"uuid": "u-A", "content": "TODO Write report"},
+                    {"uuid": "u-B", "content": "see Write report above"}])
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "set-todo-status", "--content", "Report", "--page", "X",

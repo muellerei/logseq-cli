@@ -83,9 +83,9 @@ class TestGetPageMissing:
         api.get_page.side_effect = get_page
         api.get_page_blocks_tree.side_effect = blocks
 
-        result = CliRunner().invoke(cli, ["get-page", "--name", "Da", "--name", "Missing"])
+        result = CliRunner().invoke(cli, ["get-page", "--name", "Present", "--name", "Missing"])
         assert result.exit_code == 1
-        assert "content of Da" in result.output       # present page still rendered
+        assert "content of Present" in result.output       # present page still rendered
         assert "(page does not exist)" in result.output
 
 

@@ -146,8 +146,8 @@ class TestCopyBlockRemoveIsGuarded:
         """The root lands, a child does not: still no removal."""
         api = MagicMock()
         api.get_block.return_value = {
-            "uuid": SRC, "content": "Kopf",
-            "children": [{"content": "Kind", "children": []}]}
+            "uuid": SRC, "content": "Head",
+            "children": [{"content": "Child", "children": []}]}
         api.append_block_in_page.return_value = {"uuid": "new-root"}
         api.insert_block.return_value = None
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
@@ -158,7 +158,7 @@ class TestCopyBlockRemoveIsGuarded:
 
     def test_successful_copy_still_removes(self):
         api = MagicMock()
-        api.get_block.return_value = {"uuid": SRC, "content": "Kopf", "children": []}
+        api.get_block.return_value = {"uuid": SRC, "content": "Head", "children": []}
         api.append_block_in_page.return_value = {"uuid": "new-root"}
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
