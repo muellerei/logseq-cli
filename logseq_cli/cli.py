@@ -1016,7 +1016,10 @@ def analyze_graph(ctx, days, as_json):
     todo_pattern = re.compile(
         # The bullet may repeat: get_page_content prefixes each block with
         # "- ", so a block that already starts with one arrives as "- - TODO".
-        r"(?i:\[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
+        # The checkbox needs its bullet for the same reason the markers need
+        # the line anchor: a bare "[ ]" occurs in code snippets, empty
+        # markdown links and table cells, none of which are tasks.
+        r"(?i:- \[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
         re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
 
@@ -3954,11 +3957,24 @@ def delete_page(ctx, page, force, dry_run, as_json):
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
 
+    # The block count is what the user decides on, so a failed read must not
+    # become a "0". That is the one value that makes a full page look safe to
+    # drop, and it feeds the confirmation prompt as well as the preview.
     try:
         blocks = api.get_page_blocks_tree(page) or []
-    except Exception:
-        blocks = []
-    block_count = count_blocks(blocks)
+        block_count = count_blocks(blocks)
+    except Exception as exc:
+        block_count = None
+        read_error = exc
+
+    if block_count is None and (dry_run or not force):
+        # Both paths exist to let someone decide. Without the count there is
+        # nothing to decide on, so they stop instead of showing a number that
+        # was never measured. --force is deliberately exempt below: there the
+        # count is output, not a gate.
+        fail(f"Cannot read the blocks of page '{page}' to report what would be "
+             f"deleted ({read_error}). The page was left untouched.",
+             as_json=as_json, page=page)
 
     if dry_run:
         if as_json:
@@ -3984,11 +4000,15 @@ def delete_page(ctx, page, force, dry_run, as_json):
 
     api.delete_page(page)
 
+    # Only --force reaches this with an unknown count (see the guard above).
+    # "unknown" is the honest word for it: the delete happened, the size did
+    # not get measured, and reporting 0 would misdescribe what was removed.
     result = {"page": page, "status": "deleted", "blocks": block_count}
     if as_json:
         output(result, True)
     else:
-        click.echo(f"Deleted page '{page}' ({block_count} block(s))")
+        size = "unknown" if block_count is None else f"{block_count} block(s)"
+        click.echo(f"Deleted page '{page}' ({size})")
 
 
 # ---------------------------------------------------------------------------
@@ -4685,7 +4705,7 @@ def doctor(ctx, as_json):
                 ("graph", "projects_namespace"),
                 ("graph", "person_property"),
             )
-            if cfg.get(section, {}).get(key)
+            if get(cfg, section, key)
         ]
         if not cfg:
             add("config", None,

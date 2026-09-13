@@ -5,7 +5,7 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - 2026-09-13
+## [0.9.0] - 2026-09-14
 
 ### Security
 
@@ -75,7 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than asserting that output exists:
   - `analyze-graph` counted "todo" anywhere and case-insensitively, so
     "Todo-Liste" in prose and the `TODO` inside a DONE block's logbook line
-    counted as open tasks. It reported 438 for a graph with 256.
+    counted as open tasks. It reported 438 for a graph with 256. The checkbox
+    half of the same pattern kept that flaw one round longer: the markers were
+    anchored to the start of a block but a bare `[ ]` still matched anywhere,
+    so `tags = [ ]` in a code snippet, an empty markdown link and a table cell
+    each counted as an open task — a graph with no tasks at all reported three.
+    A checkbox is now `- [ ]` at the start of a block, which is what
+    `analyze-journal-patterns` had required all along; the two counters measure
+    the same thing and now agree.
   - The mood counters read negations backwards: "nicht zufrieden" and "not
     happy" both scored positive, 16% of positive hits in one 90-day sample.
     Free word counting is gone; a line now has to state a mood (`mood: good`,
@@ -143,6 +150,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standalone content block: the outline gained a bogus block and the
   property never reached its parent. Property lines now merge into the
   preceding block, matching Logseq's own semantics.
+- `doctor` crashed with a raw traceback when a section was written as a flat
+  key — `graph = "projects/"` instead of `[graph]`, which is valid TOML and an
+  easy typo. It reached into the section with `.get()`, and a string has none.
+  The one command whose job is to diagnose a broken config was the one that
+  fell over on it, and `--json` could not turn the crash into an error object
+  either. It now reads sections through the same accessor as the rest of the
+  code, which has carried the `isinstance` guard all along.
+- `delete-page` reported `0 block(s)` for a page whose block tree could not be
+  read: the failure was swallowed into an empty list. Zero is the one number
+  that makes a full page look safe to drop, and the same count feeds the
+  interactive confirmation prompt — so the reassuring value appeared exactly
+  where the decision is made. A failed read now stops `--dry-run` and the
+  prompt with a message naming the page, instead of describing it with a
+  number nobody measured. `--force` still deletes (there the count is output,
+  not a gate) but reports the size as `unknown`. A genuinely empty page keeps
+  its `0`: that is a fact, not a failed read.
 
 ### Removed
 

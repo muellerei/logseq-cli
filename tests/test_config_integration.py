@@ -443,6 +443,21 @@ class TestDoctorReportsConfig:
         assert check["ok"] is False
         assert "not valid TOML" in check["detail"]
 
+    def test_a_section_written_as_a_flat_key_does_not_crash_doctor(self, tmp_path):
+        """`graph = "projects/"` instead of `[graph]` is valid TOML and a
+        plausible typo: the brackets are easy to forget. It makes the section a
+        string, and reaching into it with .get() raised AttributeError — a raw
+        traceback from the one command whose job is to diagnose exactly this,
+        and one that --json could not turn into an error object either.
+
+        config.py guards every other reader with isinstance(); doctor reads the
+        sections directly and must go through the same accessor.
+        """
+        r = self._run(tmp_path, 'graph = "projects/"\n')
+        check = next(c for c in json.loads(r.output)["checks"] if c["check"] == "config")
+        assert check["ok"] is None
+        assert "smart-query" in check["detail"]
+
 
 class TestAnalysisPatternsComeFromConfig:
     """The word lists and project markers in analyze-journal are language- and
