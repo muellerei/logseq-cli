@@ -23,7 +23,12 @@ logseq-cli --token "YOUR_TOKEN" doctor --json
 ```
 
 `doctor` checks each step separately, so a failure names which one broke rather
-than leaving you to guess between "Logseq is down" and "the token is wrong".
+than leaving you to guess between "Logseq is down" and "the token is wrong". It
+also reports the config file, if there is one, and which `[graph]` settings it
+carries — see [docs/configuration.md](docs/configuration.md).
+
+Requires Python 3.10 or newer. `click`, `requests` and (on 3.10 only) `tomli`
+are installed with the package; nothing else is needed at runtime.
 Both also surface on any other command as `{"error": ..., "reason":
 "connection_refused" | "http_error"}` on stderr with exit 1.
 

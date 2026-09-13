@@ -13,6 +13,19 @@ See [AGENTS.md](AGENTS.md) for the workflows and gotchas.
 
 ## Installation
 
+### Requirements
+
+| | |
+|---|---|
+| Python | 3.10 or newer (tested on 3.10-3.13 in CI) |
+| `click` | >= 8.0 — command-line interface |
+| `requests` | >= 2.28 — HTTP calls to Logseq |
+| `tomli` | >= 2.0, installed only on Python 3.10; 3.11+ has `tomllib` built in |
+| Logseq | Desktop app running, with the HTTP API server enabled |
+
+Dependencies are installed for you by `pip`; nothing else is needed at runtime.
+`pytest` comes with the `dev` extra and is only used for the test suite.
+
 ```bash
 # Use it
 pip install git+https://github.com/muellerei/logseq-cli.git
@@ -23,7 +36,6 @@ cd logseq-cli
 pip install -e ".[dev]"
 ```
 
-Requires Python 3.10+ and a running Logseq Desktop app (HTTP API on port 12315).
 Developed and tested against Logseq Desktop 0.10.15 with a file-based
 (Markdown) graph. Logseq split in 2026: the Markdown line continues as
 Logseq OG (1.x) with an unchanged HTTP API, but this CLI is untested there.
@@ -41,8 +53,25 @@ is not supported.
 | `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` (e.g. `## Log`) |
 | `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
 | `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
+| `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |
 
 All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`.
+
+### Config file
+
+Most of the CLI needs no configuration. A few things cannot be guessed, because
+they describe your graph rather than Logseq: which namespace holds your project
+pages, which property marks a person page, what your journal sections are
+called. Those live in an optional file:
+
+```bash
+cp config.example.toml ~/.config/logseq-cli/config.toml
+```
+
+A command that needs a setting you have not made says which one, and exits
+non-zero rather than returning an empty result. See
+[docs/configuration.md](docs/configuration.md) for every option, what happens
+without it, and how to read the right values out of your own graph.
 
 ### Journal heading
 

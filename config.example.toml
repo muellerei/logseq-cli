@@ -1,0 +1,90 @@
+# logseq-cli configuration — example for an English graph.
+#
+# Everything in this file is optional. The CLI runs without it; only the
+# handful of settings below describe knowledge the code cannot have, because
+# they depend on how *your* graph is organised.
+#
+# Copy this file to one of:
+#   $XDG_CONFIG_HOME/logseq-cli/config.toml   (usually ~/.config/logseq-cli/config.toml)
+#   ~/.logseq-cli.toml
+# or point LOGSEQ_CLI_CONFIG at it.
+#
+# Precedence, highest first: command-line flag, environment variable, this
+# file, built-in default.
+#
+# See docs/configuration.md for the long version.
+
+
+[journal]
+
+# Heading that journal writes go under when neither --under-heading nor
+# --top-level is given. Applies to add-journal-block, add-journal-content and
+# add-block-ref.
+#
+# Without it: entries are appended at the top level of the journal page.
+# LOGSEQ_JOURNAL_HEADING overrides this value when set.
+# The heading is created if the journal page does not have it yet.
+default_heading = "## Log"
+
+
+[journal.headings]
+
+# Short names for headings you write under often, so
+# `--under-heading tasks` stands for `--under-heading "## Tasks"`.
+#
+# Without this table: --under-heading always takes the literal heading text.
+# A name that is not listed here is passed through unchanged and used as the
+# heading itself — a typo becomes a literal heading, it never resolves to
+# something else.
+log = "## Log"
+tasks = "## Tasks"
+meeting = "## Meetings"
+notes = "## Notes"
+
+
+[graph]
+
+# Namespace prefix that marks your project pages, e.g. pages named
+# "projects/Project Alpha". Used by `smart-query --request "projects"`.
+#
+# Without it: that one query reports the missing setting and exits 1. It does
+# not silently return an empty list, because "no config" and "no projects"
+# would then look identical. No other command is affected.
+projects_namespace = "projects/"
+
+# Page property that marks a person page, and the value it must have.
+# A page carrying `type:: Person` matches the pair below.
+# Used by `smart-query --request "persons"`.
+#
+# The value is compared exactly as written here. Unlike a page name, Logseq
+# does not lowercase property values, so `Person` does not match `person` —
+# copy the spelling from your own pages.
+#
+# Without them: that one query reports the missing setting and exits 1.
+# Both are needed — the property alone is not enough.
+person_property = "type"
+person_value = "Person"
+
+
+[analysis]
+
+# What `analyze-journal-patterns` looks for. Unlike the settings above these
+# have defaults — English ones — so the command runs without this section. In
+# a journal written in another language it then finds nothing, and a journal
+# with no moods in it looks exactly the same.
+#
+# Words match whole and case-insensitively, and are escaped, so a word may
+# contain regex characters. An empty list matches nothing, not everything.
+mood_positive = ["happy", "great", "excited", "good", "productive", "grateful"]
+mood_negative = ["sad", "tired", "stressed", "frustrated", "anxious", "bad"]
+
+# Labels of an explicit mood line, as in `mood: good`.
+mood_labels = ["mood", "feeling"]
+
+# Projects written as a namespace: both `#projects/alpha` and
+# `[[projects/alpha]]` count, since a namespaced graph usually has both.
+project_tag_prefix = "#projects/"
+
+# For graphs that tag flatly (`#alpha`) instead of namespacing: those names
+# cannot be derived from a prefix, so list them.
+# project_tags = ["alpha", "beta"]
