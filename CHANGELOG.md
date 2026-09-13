@@ -20,37 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A configuration file, for the handful of things that describe *your* graph
-  rather than Logseq: the namespace holding your project pages, the property
-  marking a person page, the heading journal writes go under, and the words
-  `analyze-journal-patterns` scores. These were literals in the source, taken
-  from the graph this CLI was written against — `smart-query --request
-  "projects"` searched `projekte/` for everyone. They now have no built-in
-  default at all: a command that needs one and does not find it names the
-  setting and exits 1, rather than returning the empty list that is
-  indistinguishable from "you have no projects". Read from
-  `LOGSEQ_CLI_CONFIG`, else `$XDG_CONFIG_HOME/logseq-cli/config.toml`, else
-  `~/.logseq-cli.toml`; flags and environment variables still win over it.
-  `[journal.headings]` adds short names, so `--under-heading tasks` can stand
-  for whatever that section is called in your graph, while an unlisted name is
-  passed through unchanged so literal headings keep working. Three commented
-  example files and `docs/configuration.md`, which covers what to put in when
-  a section does not exist in your graph and how to read the right values out
-  of it.
-- `logseq-cli init` writes that file for you, from the graph itself: the
-  headings your recent journals use, the namespace most pages sit under, the
-  most common `type::` value. Every suggestion carries the count it rests on,
-  and where counting cannot decide — two sections in every journal, two
-  namespaces of equal size — the alternatives are named in a comment instead
-  of one being picked by insertion order and presented as a finding. It reads
-  only the most recent journals, so a section abandoned years ago cannot
-  outrank the one in daily use, and it will not overwrite an existing config
-  without `--force`.
-- `doctor` now checks the runtime before the connection: the Python version,
-  whether `click`, `requests` and a TOML parser import, and which config file
-  is in effect. A broken install otherwise surfaces later as something
-  unrelated.
-
 - `--dry-run` on the seven write commands that lacked it: `set-todo-status`,
   `set-property`, `remove-property`, `set-block-property`, `add-block-ref`,
   `add-note-content` and `rename-page`. It was previously only on the writes
