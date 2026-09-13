@@ -9,8 +9,8 @@ Thanks for your interest in contributing to logseq-cli!
 git clone https://github.com/muellerei/logseq-cli.git
 cd logseq-cli
 
-# Install in editable mode, with the test dependencies
-pip install -e ".[dev]"
+# Install in editable mode
+pip install -e .
 
 # Verify installation
 logseq-cli --version
