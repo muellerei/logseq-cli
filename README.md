@@ -42,6 +42,33 @@ Logseq OG (1.x) with an unchanged HTTP API, but this CLI is untested there.
 The DB version (2.x) stores graphs in SQLite with a different data model and
 is not supported.
 
+## Quickstart
+
+The CLI talks to Logseq's HTTP API, which is off by default. Two things to do
+in the Logseq desktop app, both behind the **API** button in the toolbar:
+
+1. **Start the server.** The menu shows the address it listens on —
+   `http://127.0.0.1:12315` by default, which is what this CLI assumes. If the
+   menu says *Stop server*, it is already running.
+2. **Create a token** under *Authorization tokens*, and copy the value.
+
+Then check the whole chain in one call:
+
+```bash
+logseq-cli --token "TOKEN" doctor
+```
+
+`doctor` tests each step separately — Python, packages, port, token, API,
+graph — and names the one that broke rather than leaving you to guess. Exit 0
+means everything is ready. Once it is:
+
+```bash
+export LOGSEQ_TOKEN="TOKEN"          # so you can drop --token from here on
+logseq-cli get-all-pages | head
+```
+
+If that lists your pages, you are set. Everything below is detail.
+
 ## Configuration
 
 | Variable | Default | Description |
