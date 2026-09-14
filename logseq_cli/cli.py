@@ -39,6 +39,7 @@ from logseq_cli.helpers import (
     parse_hierarchical_content,
     parse_tree_input,
     read_content_file,
+    require_content,
     contains_hierarchical_content,
     reject_unsupported_multiline,
     MultilineContentError,
@@ -2253,6 +2254,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # Skipped for --content-file, which always takes the structured path.
     if not from_file:
         for c in contents:
+            require_content(c)
             try:
                 reject_unsupported_multiline(
                     c, command="add-journal-block", accepts_tree=True
@@ -2575,6 +2577,8 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
 
     For single blocks, prefer add-journal-block instead.
     """
+    require_content(content)
+
     if top_level:
         under_heading = None
     else:
@@ -2789,6 +2793,7 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run
         raise click.UsageError(str(e))
 
     api = ctx.obj["api"]
+    require_content(content)
     if bool(block_id) == bool(where_content):
         fail("Specify exactly one of: --id, --where-content.", as_json=as_json)
     if where_content:
@@ -3127,6 +3132,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     if content is None:
         click.echo("Specify --content or --tree.", err=True)
         sys.exit(1)
+    require_content(content)
 
     targets = sum(1 for x in [page, after, before, child_of] if x)
     if targets == 0:

@@ -69,6 +69,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The writing commands accepted empty `--content` and wrote a blank block,
+  reporting success. `--content "$(cat file)"` collapses to an empty string
+  when the file is missing: the shell reports that on stderr but still exits
+  0, so three empty blocks reached a journal under an `Inserted block ...`
+  confirmation for each. `--content-file` had refused empty input since it was
+  added; `--content`, where a failed substitution is more likely, had no such
+  check. `insert-block`, `update-block`, `add-journal-block` (each value of
+  the repeatable form) and `add-journal-content` now reject content that is
+  empty or only whitespace, before any API call and before `--dry-run` prints
+  a plan. For `update-block` the blank value did not add a block but erased
+  the text of an existing one.
+
 - The analysis commands reported numbers that looked like measurements but
   were not, which is worse than an obvious failure because a plausible number
   gets believed. Found by judging their output against a real graph rather
