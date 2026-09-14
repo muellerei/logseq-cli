@@ -57,7 +57,7 @@ class TestReplaceTextSparesProperties:
         api = _api(content)
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "Server", "--replace", "Host"])
+                "replace-text", "--page", "P", "--find", "Service", "--replace", "Host"])
         assert r.exit_code == 0, r.output
         written = api._written["content"]
         assert "id:: abcdef12-3456-7890-abcd-ef1234567890" in written
