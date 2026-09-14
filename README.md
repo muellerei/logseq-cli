@@ -176,7 +176,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `get-all-pages` | List all pages |
 | `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line |
 | `get-block --id UUID` | Block by UUID |
-| `find-block --content TEXT [--page NAME] [--regex] [--first] [--with-children]` | Find blocks by content. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
+| `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N] [--with-children]` | Find blocks by content. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME` | Pages linking to NAME |
@@ -211,6 +211,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
 | `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
+| `insert-block --tree ... --keep-ids` | Keep the `id::` values in the tree instead of letting Logseq mint new ones, for moving or restoring an outline. Without it they are dropped and the count is reported on stderr, because a copy whose original still exists would otherwise put one uuid on two blocks |
 | `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
 | `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 
@@ -350,8 +351,8 @@ LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli get-journal-range \
 
 ## Bounded output
 
-Journal reads grow with the range. On a real graph (four years of daily entries)
-the unbounded commands produce far more text than an LLM agent can hold:
+Reads grow with the graph. On a real one (four years of daily entries) the
+unbounded commands produce far more text than an LLM agent can hold:
 
 | Call | Output |
 |------|--------|
@@ -370,8 +371,12 @@ For scale: Claude Code caps tool responses at 25,000 tokens by default.
 - `--no-content` (summary only) drops the bodies but keeps date, character
   count, topics and top concepts — enough for an overview, without the text.
 
-Truncation is never silent: whenever days are omitted, a note goes to **stderr**
-(`showing 3 of 20 journal day(s) ... 17 omitted`) while stdout stays pure
+Search has the same shape: a word that recurs across months of notes matches
+thousands of blocks, so `find-block --limit N` caps the output.
+
+Truncation is never silent: whenever anything is omitted, a note goes to
+**stderr** (`showing 3 of 20 journal day(s) ... 17 omitted`,
+`showing 10 of 1382 match(es) ... 1372 omitted`) while stdout stays pure
 payload. Without truncation there is no note.
 
 ## Design notes
