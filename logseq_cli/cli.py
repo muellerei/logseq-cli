@@ -4124,7 +4124,9 @@ Examples:
   logseq-cli --token TOKEN query-pages-by-property --key "team"
 Note:
   Without --value: lists all pages that have the key (with their values).
-  With --value: exact-match filter.
+  With --value: matches the whole value, and also a page whose value is a
+  collection containing it — Logseq stores `team:: Core` as "Core" on one
+  page and ["Core"] on another, and the page does not show which.
 """)
 @click.option("--key", required=True, help="Property key to filter by (e.g. 'type', 'team', 'role')")
 @click.option("--value", default=None, help="Property value to match (omit to find all pages with this key)")
