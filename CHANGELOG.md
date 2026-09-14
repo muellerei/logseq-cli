@@ -5,6 +5,22 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The read cache no longer lists `logseq.Editor.getPageProperties` as a
+  cacheable method. It was in that set from the initial commit and never called
+  once: the method is declared in Logseq's plugin API, which is presumably
+  where the list was first copied from, but the HTTP server does not expose it
+  and answers `MethodNotExist: get_page_properties` (checked against 0.10.15,
+  in three argument forms, against a page `getPage` resolves fine). Page
+  properties are read through `get_page` plus the first block instead, which is
+  what 0.6.0 describes. Nothing changes at runtime — an entry for a call that
+  never happens costs nothing — but the set is read to learn which reads the
+  tool makes, and it was making a claim that was not true. A test now holds
+  every remaining entry to a call site in `api.py`.
+
 ## [0.10.0] - 2026-09-14
 
 ### Added

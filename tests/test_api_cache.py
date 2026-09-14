@@ -119,3 +119,35 @@ class TestErrorsAreNotCached:
             api.datascript_query("[:find ?b :where [?b :block/marker]]")
             api.datascript_query("[:find ?b :where [?b :block/marker]]")
         assert mock_post.call_count == 1
+
+
+class TestCacheableSetMatchesReality:
+    """The set is a claim about which reads the tool makes. It has been wrong.
+
+    `logseq.Editor.getPageProperties` sat in it from the initial commit and was
+    never called once: the method is declared in Logseq's plugin API but the
+    HTTP server answers `MethodNotExist` for it. An entry for a call that does
+    not happen misleads anyone reading the set to learn what the tool does.
+    """
+
+    def test_every_cacheable_method_is_actually_called_somewhere(self):
+        from pathlib import Path
+        from logseq_cli.api import _CACHEABLE_METHODS
+
+        src = Path(__file__).resolve().parent.parent / "logseq_cli"
+        code = "\n".join(
+            f.read_text(encoding="utf-8") for f in src.glob("*.py") if f.name != "api.py"
+        )
+        api_src = (src / "api.py").read_text(encoding="utf-8")
+
+        for method in _CACHEABLE_METHODS:
+            # api.py names the method in the call() that wraps it; the rest of
+            # the package reaches it through that wrapper.
+            assert f'"{method}"' in api_src, (
+                f"{method} is cacheable but api.py never calls it"
+            )
+
+    def test_get_page_properties_stays_out(self):
+        from logseq_cli.api import _CACHEABLE_METHODS
+
+        assert "logseq.Editor.getPageProperties" not in _CACHEABLE_METHODS
