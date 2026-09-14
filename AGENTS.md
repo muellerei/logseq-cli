@@ -20,7 +20,15 @@ logseq-cli --version
 
 # 2. Connectivity, token, API and graph access in one call
 logseq-cli --token "TOKEN" doctor --json
+
+# 3. Put the token in the environment for every call after this one
+export LOGSEQ_TOKEN="TOKEN"
 ```
+
+Every example below assumes `LOGSEQ_TOKEN` is set. Pass `--token` only to
+override it — for a second graph, say. Prefer the environment variable:
+command-line arguments are visible to any process via `ps` and land in the
+shell history.
 
 `doctor` checks each step separately, so a failure names which one broke rather
 than leaving you to guess between "Logseq is down" and "the token is wrong". It
@@ -40,78 +48,78 @@ If Logseq is not running, fall back to direct filesystem access on the graph's m
 
 ```bash
 # Human-readable
-logseq-cli --token "TOKEN" get-page --name "Page Name"
+logseq-cli get-page --name "Page Name"
 
 # JSON (for parsing)
-logseq-cli --token "TOKEN" get-page --name "Page Name" --json
+logseq-cli get-page --name "Page Name" --json
 
 # Logseq-compatible markdown (for export)
-logseq-cli --token "TOKEN" get-page --name "Page Name" --format markdown --no-backlinks
+logseq-cli get-page --name "Page Name" --format markdown --no-backlinks
 ```
 
 ### 2. Write to Journal
 
 ```bash
 # Single entry under default heading (from LOGSEQ_JOURNAL_HEADING env var)
-logseq-cli --token "TOKEN" add-journal-block --content "**14:30** Meeting notes"
+logseq-cli add-journal-block --content "**14:30** Meeting notes"
 
 # Under a specific heading
-logseq-cli --token "TOKEN" add-journal-block --under-heading "## Meeting" --content "Agenda item"
+logseq-cli add-journal-block --under-heading "## Meeting" --content "Agenda item"
 
 # Hierarchical content (multiple nested blocks)
-logseq-cli --token "TOKEN" add-journal-content --content "- ## Notes\n\t- Point 1\n\t- Point 2"
+logseq-cli add-journal-content --content "- ## Notes\n\t- Point 1\n\t- Point 2"
 
 # Preview without writing
-logseq-cli --token "TOKEN" add-journal-block --dry-run --content "Test entry"
+logseq-cli add-journal-block --dry-run --content "Test entry"
 
 # Retroactive entry (past date)
-logseq-cli --token "TOKEN" add-journal-block --date 2026-04-03 --content "**14:30** Late note"
+logseq-cli add-journal-block --date 2026-04-03 --content "**14:30** Late note"
 
 # Top-level (ignore heading env var)
-logseq-cli --token "TOKEN" add-journal-block --top-level --content "Top-level block"
+logseq-cli add-journal-block --top-level --content "Top-level block"
 ```
 
 ### 3. Search and Query
 
 ```bash
 # Page name search
-logseq-cli --token "TOKEN" search-pages --query "keyword"
+logseq-cli search-pages --query "keyword"
 
 # Natural language query (supports German and English)
-logseq-cli --token "TOKEN" smart-query --request "open tasks"
-logseq-cli --token "TOKEN" smart-query --request "offene aufgaben"
-logseq-cli --token "TOKEN" smart-query --request "erledigt"
+logseq-cli smart-query --request "open tasks"
+logseq-cli smart-query --request "offene aufgaben"
+logseq-cli smart-query --request "erledigt"
 
 # Raw Datalog query
-logseq-cli --token "TOKEN" smart-query --advanced --request '[:find (pull ?b [*]) :where [?b :block/marker "TODO"]]'
+logseq-cli smart-query --advanced --request '[:find (pull ?b [*]) :where [?b :block/marker "TODO"]]'
 
 # Find backlinks
-logseq-cli --token "TOKEN" get-backlinks --name "Page Name"
+logseq-cli get-backlinks --name "Page Name"
 ```
 
 ### 4. Manage TODOs
 
 ```bash
 # All open tasks
-logseq-cli --token "TOKEN" get-todos
+logseq-cli get-todos
 
 # Filter by status
-logseq-cli --token "TOKEN" get-todos --status TODO --status DOING
+logseq-cli get-todos --status TODO --status DOING
 
 # Filter by page (substring)
-logseq-cli --token "TOKEN" get-todos --page "Project Alpha"
+logseq-cli get-todos --page "Project Alpha"
 
 # Filter by tag
-logseq-cli --token "TOKEN" get-todos --tag urgent
+logseq-cli get-todos --tag urgent
 
 # Mark as done
-logseq-cli --token "TOKEN" set-todo-status --id UUID --status DONE
+logseq-cli set-todo-status --id UUID --status DONE
 
 # ... or without knowing the UUID (aborts if the text matches several blocks)
-logseq-cli --token "TOKEN" set-todo-status --content "Task" --page "Page" --status DONE
+logseq-cli set-todo-status --content "Task" --page "Page" --status DONE
 
 # Follow a ((uuid)) reference in a journal to the original block
-logseq-cli --token "TOKEN" set-todo-status --id JOURNAL-REF-UUID --status DONE --follow-refs
+logseq-cli set-todo-status --id JOURNAL-REF-UUID --status DONE --follow-refs
 ```
 
 Do not use `replace-text` to change a marker: it rewrites by text match, so it
@@ -122,16 +130,16 @@ line. `set-todo-status` swaps only the marker, in one call.
 
 ```bash
 # Read all properties
-logseq-cli --token "TOKEN" get-properties --name "Page"
+logseq-cli get-properties --name "Page"
 
 # Read single property
-logseq-cli --token "TOKEN" get-properties --name "Page" --property status
+logseq-cli get-properties --name "Page" --property status
 
 # Set property
-logseq-cli --token "TOKEN" set-property --name "Page" --key status --value Active
+logseq-cli set-property --name "Page" --key status --value Active
 
 # Find pages by property
-logseq-cli --token "TOKEN" query-pages-by-property --key type --value Person
+logseq-cli query-pages-by-property --key type --value Person
 ```
 
 ## Common Gotchas
@@ -145,7 +153,7 @@ Every parameter uses `--flag value` syntax. This is different from git, npm, and
 logseq-cli get-page "My Page"
 
 # CORRECT
-logseq-cli --token "TOKEN" get-page --name "My Page"
+logseq-cli get-page --name "My Page"
 ```
 
 ### 2. Journal Page Naming
@@ -154,13 +162,13 @@ Logseq uses locale-specific page names for journals. The CLI handles this automa
 
 ```bash
 # CORRECT: Let the CLI resolve the page name
-logseq-cli --token "TOKEN" add-journal-block --date 2026-04-05 --content "Entry"
+logseq-cli add-journal-block --date 2026-04-05 --content "Entry"
 
 # ALSO CORRECT: Reference by resolved name
-logseq-cli --token "TOKEN" get-page --name "2026-04-05, saturday"
+logseq-cli get-page --name "2026-04-05, saturday"
 
 # WRONG: Filesystem date format
-logseq-cli --token "TOKEN" get-page --name "2026_04_05"
+logseq-cli get-page --name "2026_04_05"
 ```
 
 ### 3. Block Hierarchy
@@ -169,7 +177,7 @@ Content with parent-child relationships must use tab indentation:
 
 ```bash
 # Tabs for nesting (the CLI handles both tabs and 2-space indentation)
-logseq-cli --token "TOKEN" add-journal-content \
+logseq-cli add-journal-content \
   --content "- ## Section\n\t- Child item\n\t\t- Grandchild"
 ```
 
@@ -192,10 +200,10 @@ exits 0 means the real call would too.
 
 ```bash
 # Preview first
-logseq-cli --token "TOKEN" replace-text --page "Page" --find "X" --replace "Y" --dry-run
+logseq-cli replace-text --page "Page" --find "X" --replace "Y" --dry-run
 
 # Then execute
-logseq-cli --token "TOKEN" replace-text --page "Page" --find "X" --replace "Y"
+logseq-cli replace-text --page "Page" --find "X" --replace "Y"
 ```
 
 To relocate a block, prefer `move-block` over `copy-block --remove`: it moves the
@@ -214,7 +222,7 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` and `add-journal-content` (e.g. `## Log`) |
-| `LOGSEQ_TOKEN` | (none) | Bearer token (alternative to `--token` flag) |
+| `LOGSEQ_TOKEN` | (none) | Bearer token; the documented way to pass it. `--token` overrides it |
 | `LOGSEQ_HOST` | `127.0.0.1` | Logseq API host |
 | `LOGSEQ_PORT` | `12315` | Logseq API port |
 | `LOGSEQ_API_URL` | auto | Full API URL override |
