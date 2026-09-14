@@ -1,5 +1,7 @@
 # logseq-cli
 
+[![tests](https://github.com/muellerei/logseq-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/muellerei/logseq-cli/actions/workflows/tests.yml)
+
 Read and write a Logseq graph from a shell — pages, journals, blocks,
 properties and graph analysis, without opening the app. It is built for a
 caller that is a script or an AI agent rather than a person at a prompt:
