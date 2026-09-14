@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `query-pages-by-property` found only the pages whose value happens to be
+  stored as a scalar. Logseq keeps a property value either as a plain value or
+  inside a collection, and the page does not show which: on a real graph `team`
+  was `"Core"` on two pages and `["Core"]` on ten others, and the query
+  compared with equality, so it reported one match where eleven existed and
+  said nothing about the rest. 592 of that graph's property values are
+  collections — `alias` (228), `tags` (141), `team` (46), `role` (14) — so this
+  is not an edge case of one unusual key; the same key holds both shapes in one
+  graph. The value clause now covers both forms. `coll?` and `set` are not
+  available as datalog predicates here, so the two shapes are tried side by
+  side rather than normalised first.
+  `smart-query`'s person lookup carried the same construction. It was not
+  failing, because `person_property` pointed at a scalar-valued key — but that
+  setting is configurable, and aimed at a list-valued one it would have
+  returned too few just as quietly. Fixed alongside rather than left as a
+  known latent defect.
+  The listing also printed a collection as Python's repr (`team:: ['Core']`);
+  it now reads as the page spells it (`team:: Core`, and
+  `tags:: git, Monorepo, Multiapps` for several values). `get-properties` was
+  not affected — it prefers Logseq's own text values.
+
 ### Changed
 
 - The read cache no longer lists `logseq.Editor.getPageProperties` as a
