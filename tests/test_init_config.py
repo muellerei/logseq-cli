@@ -11,7 +11,11 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-import tomllib
+
+try:  # tomllib is stdlib from 3.11; 3.10 uses the tomli backport
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
+    import tomli as tomllib
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
