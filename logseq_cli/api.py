@@ -5,11 +5,17 @@ import requests
 
 
 # Methods that are pure reads and safe to cache.
+# Deliberately absent: logseq.Editor.getPageProperties. It is declared in
+# Logseq's plugin API (LSPlugin.ts), which is presumably where this list was
+# first copied from, but the HTTP server does not expose it — it answers
+# `MethodNotExist: get_page_properties` (checked against 0.10.15). It was in
+# this set from the initial commit and never called even once, so the entry
+# claimed a read the tool does not make. Page properties are read through
+# get_page plus the first block instead; see the 0.6.0 changelog entry.
 _CACHEABLE_METHODS = frozenset({
     "logseq.Editor.getPage",
     "logseq.Editor.getBlock",
     "logseq.Editor.getPageBlocksTree",
-    "logseq.Editor.getPageProperties",
     "logseq.Editor.getPageLinkedReferences",
     "logseq.Editor.getAllPages",
     "logseq.App.getUserConfigs",
