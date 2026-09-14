@@ -5,6 +5,29 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `insert-block --tree` dropped every `id::` property in the tree and reported
+  success. An `id::` names the UUID a block is meant to keep; Logseq only
+  honours it when the write asks for it, so the blocks landed under fresh UUIDs
+  and every `((uuid))` elsewhere in the graph that pointed at the originals was
+  left dangling — damage outside the page that was written, which Logseq then
+  writes back as plain text. The existing verification could not see it: it
+  counts the new blocks, and the count was right; only the ids were not the
+  ones asked for. Both write paths were affected, the batch and the per-block
+  one, so a single-block tree lost its id just the same.
+  Keeping the ids unconditionally would trade one silent fault for another: an
+  outline copied while the original still exists would put the same UUID on two
+  blocks and make `((ref))` ambiguous. So the ids are kept only on request, via
+  `--keep-ids`, and their loss is never silent again — without the flag the
+  command says on stderr how many were dropped. With the flag, ids that are not
+  RFC 4122 UUIDs abort the command before anything is written rather than being
+  ignored. `--keep-ids` cannot preserve ids on top-level blocks inserted with
+  `--page X --top-level`, because the page-append API takes no UUID; the
+  command says so instead of half-working.
+
 ## [0.9.0] - 2026-09-14
 
 ### Security
