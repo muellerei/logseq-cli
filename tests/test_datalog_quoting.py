@@ -109,7 +109,7 @@ class TestCommandsWithoutOwnHandler:
         assert "Cannot parse clause" in payload["error"]
 
     def test_find_block_does_not_fabricate_a_match(self):
-        """helpers.py:855 turned the error dict into the single hit ['e'].
+        """find_blocks_by_content turned the error dict into the single hit ['e'].
 
         Over resolve_single_block that fed the write path ("exactly one
         found" on a block nobody meant), so the fabricated hit is the worst
