@@ -196,6 +196,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI was developed against. They are Alice/Bob/Carol now.
 - The test suite runs in CI on Python 3.10 through 3.13. `pytest` is
   installable from the repo as the `dev` extra: `pip install -e ".[dev]"`.
+- `AGENTS.md` passed the token as `--token` in all 34 examples. Command-line
+  arguments are visible to any process via `ps` and land in the shell
+  history, so the documented path is `LOGSEQ_TOKEN` in the environment now;
+  `--token` stays in the setup check, where nothing is exported yet, and is
+  documented once as the override.
+- The README opening named features rather than saying what the tool is for
+  or who drives it, and a new "Design notes" section records four decisions
+  that shaped it — verified writes, escaping in one place, analysis measured
+  against a real graph, bounded output — each linking to the release it came
+  from.
+- The MIT copyright named "logseq-cli contributors" for a repository with a
+  single commit identity, and carried a year range starting before the first
+  commit.
 
 ## [0.8.0] - 2026-08-28
 
