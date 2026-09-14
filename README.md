@@ -1,15 +1,15 @@
 # logseq-cli
 
-CLI for Logseq knowledge graph: pages, journals, blocks, search, properties, and graph analysis.
+Read and write a Logseq graph from a shell — pages, journals, blocks,
+properties and graph analysis, without opening the app. It is built for a
+caller that is a script or an AI agent rather than a person at a prompt:
+`--json` on every command, payload on stdout, errors as JSON on stderr,
+non-zero exit on failure, `--dry-run` on everything that writes, and output
+bounded so it fits in a context window.
 
-## Using this from an agent
-
-The CLI is built to be driven by scripts and AI agents: `--json` on every
-command, payload on stdout, errors as JSON on stderr, non-zero exit on
-failure, `--dry-run` on everything destructive. No vendor coupling: it is a
-plain Python package with `click` and `requests`.
-
-See [AGENTS.md](AGENTS.md) for the workflows and gotchas.
+No vendor coupling — a plain Python package with `click` and `requests`.
+See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
+[design notes](#design-notes) for the decisions behind the above.
 
 ## Installation
 
@@ -373,6 +373,57 @@ For scale: Claude Code caps tool responses at 25,000 tokens by default.
 Truncation is never silent: whenever days are omitted, a note goes to **stderr**
 (`showing 3 of 20 journal day(s) ... 17 omitted`) while stdout stays pure
 payload. Without truncation there is no note.
+
+## Design notes
+
+Four decisions that shaped the tool more than any feature did. Each one came
+out of a defect; the [CHANGELOG](CHANGELOG.md) carries the full account of what
+was wrong, how it was found and what the fix cost.
+
+### Writes are verified, not assumed
+
+Logseq answers a failed write with HTTP 200 and a `null` body, so a command
+that trusts the status code reports "Added N block(s)" over a journal entry
+that was never written — and for a journal entry, nothing else will ever tell
+you. Every insert path now proves the write by reading the block back, which
+costs a round trip per write and is worth it: `copy-block --remove` used to
+delete the source against a copy that had not landed. The strict path is the
+default; tolerating partial writes is something a caller now has to ask for.
+See [0.6.0](CHANGELOG.md#060---2026-08-07) and [0.8.0](CHANGELOG.md#080---2026-08-28).
+
+### Query values are escaped in one place
+
+Values entering datalog queries were interpolated with f-strings: one call site
+escaped quotes but not backslashes, the rest escaped nothing, so a page name
+could alter the query around it. The fix was a build layer
+([`datalog.py`](logseq_cli/datalog.py)) that every interpolating call site goes
+through, rather than a patch at each site — scattered escaping is the kind of
+thing that holds until the next call site is added and nobody remembers the
+rule. `smart-query --advanced` stays a raw pass-through, because a documented
+escape hatch is safer than one people invent for themselves.
+See [0.9.0, Security](CHANGELOG.md#090---2026-09-14).
+
+### Analysis output is measured against a real graph
+
+`analyze-graph` reported 438 open tasks for a graph with 256, because it
+counted "todo" anywhere in any casing; the mood counters scored "nicht
+zufrieden" as positive, 16% of positive hits in a 90-day sample; and
+`find-knowledge-gaps` reported 596 orphans that were mostly Logseq's own
+by-products. None of that was caught by tests asserting that output exists —
+it took reading the numbers next to a graph whose real answer was known. A
+plausible number that gets believed is worse than an obvious failure, so these
+commands now measure one defined thing each and agree with one another.
+See [0.9.0, Fixed](CHANGELOG.md#090---2026-09-14).
+
+### Output is bounded because the consumer has a context limit
+
+An agent reading a month of journals gets 431,996 characters, against a tool
+response cap of roughly 25,000 tokens — the call does not fail, it truncates
+somewhere and the agent reasons on a fragment without knowing it. So `--tail`
+and `--limit` filter **before** fetching rather than after, which keeps the
+omitted days from costing API calls as well. Truncation is never silent: the
+count of omitted days goes to stderr while stdout stays pure payload.
+See [0.6.0](CHANGELOG.md#060---2026-08-07).
 
 ## Internationalization
 
