@@ -1691,6 +1691,18 @@ def _find_stored_property_key(props: dict, key: str):
     return None
 
 
+def _format_property_value(value) -> str:
+    """A property value as the page writes it, not as Python prints it.
+
+    A collection rendered with ``str()`` comes out as ``['Core']`` - Python
+    syntax for something the page spells ``Core``, or ``Core, Edge``
+    when it carries several values.
+    """
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
 def _read_property_value(props: dict, key: str):
     """Read a property value trying every spelling of the key.
 
@@ -1937,11 +1949,17 @@ def smart_query(ctx, request, include_query, advanced, as_json):
                                f"smart-query --request {request!r}")
                 value = require(cfg, section, "person_value",
                                 f"smart-query --request {request!r}")
+                # Same shape as query-pages-by-property: the value may be
+                # stored as a scalar or inside a collection. Not a live defect
+                # while person_property points at a scalar-valued key, but it
+                # is configurable - aim it at one Logseq stores as a list and
+                # the query would quietly return too few.
+                literal = edn_string(str(value))
                 query_str = (
                     '[:find (pull ?p [*]) :where [?p :block/name] '
                     '[?p :block/properties ?props] '
                     f'[(get ?props :{edn_keyword(str(prop))}) ?t] '
-                    f'[(= ?t {edn_string(str(value))})]]'
+                    f'(or [(= ?t {literal})] [(contains? ?t {literal})])]'
                 )
 
         # Handle timestamp placeholder
@@ -4128,13 +4146,20 @@ def query_pages_by_property(ctx, key, value, as_json):
     )
     key_clause = key_get if len(key_forms) == 1 else f"(or {key_get})"
     if value:
-        # Query pages where property key matches value
+        # Logseq stores a property value either as a scalar or as a collection,
+        # and which one is not visible from the page: on one real graph `team`
+        # was "Core" on two pages and ["Core"] on ten others. Equality alone
+        # matched the two and silently dropped the rest. `contains?` covers the
+        # collection form; neither `coll?` nor `set` is available as a predicate
+        # here, so the two shapes are tried side by side rather than normalised.
+        literal = edn_string(value)
+        value_clause = f"(or [(= ?v {literal})] [(contains? ?v {literal})])"
         query = f'''[:find (pull ?p [:block/name :block/original-name :block/properties])
                      :where
                      [?p :block/name]
                      [?p :block/properties ?props]
                      {key_clause}
-                     [(= ?v {edn_string(value)})]]'''
+                     {value_clause}]'''
     else:
         # Query pages that have this property key (any value)
         query = f'''[:find (pull ?p [:block/name :block/original-name :block/properties])
@@ -4157,11 +4182,11 @@ def query_pages_by_property(ctx, key, value, as_json):
             if isinstance(page, dict):
                 name = page.get("original-name") or page.get("name", "?")
                 prop_value = _read_property_value(page.get("properties", {}), key)
-                pages_found.append({"name": name, "value": str(prop_value)})
+                pages_found.append({"name": name, "value": _format_property_value(prop_value)})
         elif isinstance(item, dict):
             name = item.get("original-name") or item.get("name", "?")
             prop_value = _read_property_value(item.get("properties", {}), key)
-            pages_found.append({"name": name, "value": str(prop_value)})
+            pages_found.append({"name": name, "value": _format_property_value(prop_value)})
 
     pages_found.sort(key=lambda x: x["name"].lower())
 
