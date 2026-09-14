@@ -210,7 +210,27 @@ To relocate a block, prefer `move-block` over `copy-block --remove`: it moves th
 block itself, so its UUID and every `((block-ref))` pointing at it survive, and
 nothing is deleted.
 
-### 5. Connection Errors
+### 5. `id::` in a Tree Insert
+
+An `id::` line inside `--tree` content names the UUID that block is meant to
+keep — it appears in any outline copied out of a graph where something links to
+it. Logseq only honours it when the write asks for it, so by default those ids
+are dropped and the blocks land under fresh UUIDs. Every `((uuid))` elsewhere in
+the graph that pointed at the originals then dangles, and Logseq rewrites such
+references as plain text.
+
+The command says how many ids it dropped, on stderr. Pass `--keep-ids` when you
+are **moving or restoring** an outline:
+
+```bash
+logseq-cli insert-block --child-of UUID --tree-file outline.md --keep-ids
+```
+
+Do NOT pass it when copying an outline whose original still exists: two blocks
+would share one uuid, and `((ref))` becomes ambiguous. Ids that are not valid
+UUIDs abort the command before anything is written.
+
+### 6. Connection Errors
 
 If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit with code 1. In this case, fall back to direct filesystem access:
 
@@ -241,8 +261,8 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `smart-query` | Natural language or Datalog queries |
 | `get-todos` | List and filter tasks |
 | `get-backlinks` | Find pages linking to a page |
-| `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child) |
-| `find-block` | Find blocks by content; `--with-children` prints the subtree |
+| `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in a tree |
+| `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree |
 | `update-block` | Change one block's content (by `--id` or `--where-content`); its properties are kept |
 | `set-todo-status` | Change a TODO/DOING/DONE marker (never `replace-text`) |
 | `move-block` | Relocate a block, keeping its UUID and refs |
