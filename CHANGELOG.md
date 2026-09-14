@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `find-block --limit N`. A word that recurs across months of notes matches
+  thousands of blocks, and every one of them was printed: 1382 matches came to
+  220,049 characters of text, 556,888 as JSON — more than the 30-day journal
+  range the README uses as its example of unbounded output, against a response
+  cap of roughly 25,000 tokens. The command had `--first` or nothing in
+  between. The cut cannot move into the query, because DataScript ignores a
+  `:limit` clause and hands back the whole result set either way (measured:
+  71 ms and 473 KB for those 1382 matches), so it happens after the read and
+  what was withheld is always named on stderr —
+  `showing 10 of 1382 match(es) ... 1372 omitted`. stdout stays pure payload in
+  both output forms. `--first` now carries the same notice: it used to drop the
+  rest in silence, so a caller could not tell an unambiguous hit from one of
+  hundreds.
+
 ### Fixed
 
 - `insert-block --tree` dropped every `id::` property in the tree and reported

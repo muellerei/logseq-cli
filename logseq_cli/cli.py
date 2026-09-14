@@ -585,22 +585,42 @@ Note:
   insert-block --child-of, update-block, remove-block downstream.
   --with-children prints each match with its sub-blocks indented, instead of
   guessing a line count with `get-page | grep -A<n>`.
+  A common word matches thousands of blocks: --limit N caps the output, and
+  whatever is withheld is reported on stderr. --first is --limit 1 with the
+  same notice.
 """)
 @click.option("--content", required=True, help="Content text (substring match or regex with --regex)")
 @click.option("--page", "--name", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
 @click.option("--first", "first_only", is_flag=True, help="Output only the first match")
+@click.option("--limit", "limit", type=int, default=None, help="Print at most N matches; the number withheld is reported on stderr")
 @click.option("--with-children", "with_children", is_flag=True, help="Print each match with its sub-blocks (one extra API read per match)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def find_block(ctx, content, page, use_regex, first_only, with_children, as_json):
+def find_block(ctx, content, page, use_regex, first_only, limit, with_children, as_json):
     """Find blocks by content substring or regex."""
     api = ctx.obj["api"]
     matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
 
+    if first_only and limit is not None:
+        fail("Specify either --first or --limit, not both.", as_json)
+    if limit is not None and limit < 1:
+        fail("--limit must be 1 or greater.", as_json)
+
+    # A common word matches thousands of blocks, and printing all of them is
+    # the unbounded-output failure the journal paths fixed in 0.6.0: the caller
+    # hits its response cap and reasons on a fragment without being told. The
+    # cut cannot move into the query - DataScript ignores a :limit clause, and
+    # the whole result set arrives either way (measured: 71ms, 473KB for 1382
+    # matches) - so it happens here, and what was withheld is always named.
+    withheld = 0
     if first_only:
+        withheld = max(len(matches) - 1, 0)
         matches = matches[:1]
+    elif limit is not None and len(matches) > limit:
+        withheld = len(matches) - limit
+        matches = matches[:limit]
 
     # The datalog pull returns no children, so each subtree costs one extra
     # read. Bounded so a broad --content cannot fan out into hundreds of calls;
@@ -617,6 +637,15 @@ def find_block(ctx, content, page, use_regex, first_only, with_children, as_json
             full = api.get_block(uuid, include_children=True)
             if full:
                 block["children"] = full.get("children") or []
+
+    # stdout stays pure payload in both forms, so the notice goes to stderr
+    # whether or not --json is set; a caller parsing stdout must still learn
+    # that it is holding part of an answer.
+    if withheld:
+        shown = len(matches)
+        click.echo(
+            f"showing {shown} of {shown + withheld} match(es) ... {withheld} omitted "
+            "(raise --limit, or narrow --content/--page)", err=True)
 
     if as_json:
         output(matches, True)
