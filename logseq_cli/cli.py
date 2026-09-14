@@ -53,6 +53,9 @@ from logseq_cli.helpers import (
     insert_block_tree_as_siblings,
     insert_block_tree_as_first_children,
     insert_block_tree_at_page_top,
+    collect_block_ids,
+    invalid_block_ids,
+    block_id_property,
     insert_formatted_content_with_uuids,
     block_uuid_from_result,
     require_insert,
@@ -3019,6 +3022,9 @@ Notes:
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
   --first puts the block at the HEAD of the child list instead of appending it
   last; it only applies together with --child-of.
+  id:: lines in a tree are dropped unless --keep-ids is given, and the command
+  says so. Use --keep-ids when moving or restoring an outline; do NOT use it
+  when copying one whose original still exists, or two blocks share a uuid.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -3030,12 +3036,13 @@ Notes:
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the tree instead of letting Logseq mint new ones. For moving or restoring an outline; do NOT use when copying one that still exists, as two blocks would share a uuid")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--quiet", is_flag=True, help="With --tree: print only the confirmation line, not one uuid line per block")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, content, tree_input, tree_file, properties, dry_run, quiet, as_json):
+def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, content, tree_input, tree_file, properties, keep_ids, dry_run, quiet, as_json):
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
 
@@ -3066,26 +3073,60 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             click.echo("Tree input is empty.", err=True)
             sys.exit(1)
 
+        # An id:: in the tree names a UUID the block is meant to keep. Logseq
+        # only honours it when the write asks for it, so without --keep-ids
+        # those ids are dropped and every ((uuid)) pointing at them dangles.
+        # That used to happen silently; it is now either refused or announced.
+        tree_ids = collect_block_ids(tree)
+        if keep_ids:
+            bad = invalid_block_ids(tree)
+            if bad:
+                msg = (f"{len(bad)} id:: value(s) are not valid UUIDs and cannot become "
+                       f"block ids: {', '.join(bad[:3])}"
+                       f"{' ...' if len(bad) > 3 else ''}. Nothing was written.")
+                if as_json:
+                    output({"error": msg, "invalid_ids": bad}, True)
+                else:
+                    click.echo(f"Error: {msg}", err=True)
+                sys.exit(1)
+        elif tree_ids:
+            click.echo(
+                f"Note: {len(tree_ids)} id:: propert(ies) in the tree will be dropped; "
+                "Logseq mints new UUIDs and any ((uuid)) pointing at the old ones "
+                "will dangle. Pass --keep-ids to preserve them (only when the "
+                "source outline is gone, or two blocks would share a uuid).",
+                err=True,
+            )
+
         # Resolve target + position first (no writes), so --dry-run can report
         # the plan and bail before touching the graph.
         if child_of:
             clean_id = child_of.strip().replace("((", "").replace("))", "")
             position = f"{'first child' if as_first else 'child'} of {clean_id[:8]}..."
             if as_first:
-                do_insert = lambda: insert_block_tree_as_first_children(api, tree, clean_id)
+                do_insert = lambda: insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
-                do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+                do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
         elif after:
             clean_id = after.strip().replace("((", "").replace("))", "")
             position = f"after {clean_id[:8]}..."
-            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=False)
+            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
         elif before:
             clean_id = before.strip().replace("((", "").replace("))", "")
             position = f"before {clean_id[:8]}..."
-            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=True)
+            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
         elif page and top_level:
             position = f"top-level of '{page}'"
-            do_insert = lambda: insert_block_tree_at_page_top(api, tree, page)
+            if keep_ids and any(block_id_property(b.get("content", "")) for b in tree):
+                # appendBlockInPage takes no options, so the roots cannot keep
+                # their ids here. Saying so beats a flag that half works.
+                click.echo(
+                    "Note: --keep-ids cannot preserve ids on top-level blocks "
+                    "(the page-append API takes no uuid); their children keep theirs. "
+                    "Insert relative to a block (--child-of/--after/--before) to keep all of them.",
+                    err=True,
+                )
+            do_insert = lambda: insert_block_tree_at_page_top(api, tree, page, keep_ids=keep_ids)
         else:
             click.echo(
                 "Tree insert requires --child-of, --after, --before, or --page NAME --top-level",

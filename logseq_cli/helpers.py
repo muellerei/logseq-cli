@@ -472,6 +472,52 @@ PROPERTY_LINE_RE = re.compile(r'^[A-Za-z0-9_?!*+<>=-]+:: ')
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
+# An ``id::`` line inside a block's content names the UUID that block is meant
+# to keep. Logseq only honours it when the write asks for it (``customUUID`` on
+# insertBlock, ``keepUUID`` on insertBatchBlock); otherwise it mints a fresh one
+# and drops the id, which leaves every ((uuid)) pointing at the old one
+# dangling. Verified against a live graph, both ways.
+_ID_PROPERTY_RE = re.compile(r'^id:: *(\S+) *$', re.MULTILINE)
+
+# Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot
+# become a block id, so a tree carrying one has to be refused before the write
+# rather than after: the batch call answers null either way and the per-block
+# call would simply ignore the option.
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+    re.IGNORECASE,
+)
+
+
+def block_id_property(content: str) -> str:
+    """The ``id::`` value in ``content``, or ``""`` if it carries none."""
+    match = _ID_PROPERTY_RE.search(content or "")
+    return match.group(1) if match else ""
+
+
+def collect_block_ids(tree: list) -> list:
+    """Every ``id::`` value in ``tree``, DFS pre-order.
+
+    Used both to warn that ids would be dropped and to validate them before a
+    write that promises to keep them.
+    """
+    found = []
+    for block in tree or []:
+        if not isinstance(block, dict):
+            continue
+        value = block_id_property(block.get("content", ""))
+        if value:
+            found.append(value)
+        found.extend(collect_block_ids(block.get("children") or []))
+    return found
+
+
+def invalid_block_ids(tree: list) -> list:
+    """The ``id::`` values in ``tree`` that are not RFC 4122 UUIDs."""
+    return [v for v in collect_block_ids(tree) if not _UUID_RE.match(v)]
+
+
+
 
 def normalize_heading(text: str) -> str:
     """Normalize a heading string for comparison.
@@ -703,7 +749,7 @@ def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     return uuid
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, _written: int = 0) -> list:
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
@@ -732,11 +778,19 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
         # is why the batch path verifies by re-reading instead of trusting the
         # response. Single blocks keep the per-block path, which returns the
         # UUID directly and needs no verifying read.
-        return insert_block_tree_batched(api, tree, parent_uuid)
+        return insert_block_tree_batched(api, tree, parent_uuid, keep_ids=keep_ids)
 
     uuids = []
     for block in tree:
-        result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
+        opts = {"sibling": False}
+        if keep_ids:
+            # Without customUUID the id:: line stays in the content while the
+            # block answers to a different UUID - the property would then lie
+            # about the block carrying it.
+            wanted = block_id_property(block.get("content", ""))
+            if wanted:
+                opts["customUUID"] = wanted
+        result = api.insert_block(parent_uuid, block["content"], opts)
         if strict:
             new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
         else:
@@ -745,7 +799,8 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
         children = block.get("children") or []
         if new_uuid and children:
             uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, strict=strict, _written=_written + len(uuids)))
+                api, children, new_uuid, strict=strict, keep_ids=keep_ids,
+                _written=_written + len(uuids)))
     return uuids
 
 
@@ -761,7 +816,7 @@ def _collect_child_uuids(node) -> list:
     return out
 
 
-def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
+def insert_block_tree_batched(api, tree: list, parent_uuid: str, *, keep_ids: bool = False) -> list:
     """Insert a tree under ``parent_uuid`` in ONE API call, then verify.
 
     ``insertBatchBlock`` replaces N ``insertBlock`` round-trips with one. It is
@@ -801,6 +856,12 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
         anchor, opts = existing[-1]["uuid"], {"sibling": True}
     else:
         anchor, opts = parent_uuid, {"sibling": False}
+
+    if keep_ids:
+        # Without this Logseq mints fresh UUIDs and discards every id:: in the
+        # tree. The verifying read below cannot see that: it counts new blocks,
+        # and the count is right - only the ids are not the ones asked for.
+        opts["keepUUID"] = True
 
     api.insert_batch_block(anchor, tree, opts)
 
@@ -968,7 +1029,7 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
         )
 
 
-def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, _written: int = 0) -> list:
+def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, keep_ids: bool = False, _written: int = 0) -> list:
     """Insert a parsed tree at the HEAD of ``parent_uuid``'s child list.
 
     ``insertBlock`` can address the first child position (``sibling: false`` +
@@ -982,20 +1043,26 @@ def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, _w
     """
     if not tree:
         return []
-    head = api.insert_block(parent_uuid, tree[0]["content"], {"sibling": False, "before": True})
+    head_opts = {"sibling": False, "before": True}
+    if keep_ids:
+        wanted = block_id_property(tree[0].get("content", ""))
+        if wanted:
+            head_opts["customUUID"] = wanted
+    head = api.insert_block(parent_uuid, tree[0]["content"], head_opts)
     head_uuid = require_insert(head, "the first child", written_so_far=_written)
     uuids = [head_uuid]
     children = tree[0].get("children") or []
     if children:
         uuids.extend(insert_block_tree_with_uuids(
-            api, children, head_uuid, strict=True, _written=_written + len(uuids)))
+            api, children, head_uuid, strict=True, keep_ids=keep_ids,
+            _written=_written + len(uuids)))
     if len(tree) > 1:
         uuids.extend(insert_block_tree_as_siblings(
-            api, tree[1:], head_uuid, _written=_written + len(uuids)))
+            api, tree[1:], head_uuid, keep_ids=keep_ids, _written=_written + len(uuids)))
     return uuids
 
 
-def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True, _written: int = 0) -> list:
+def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
     """Insert a parsed tree as sibling(s) after (or before) ``anchor_uuid``.
 
     The first top-level node is inserted as a sibling of the anchor; its
@@ -1010,7 +1077,12 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     uuids = []
     cursor = anchor_uuid
     for block in tree:
-        result = api.insert_block(cursor, block["content"], {"sibling": True, "before": before})
+        opts = {"sibling": True, "before": before}
+        if keep_ids:
+            wanted = block_id_property(block.get("content", ""))
+            if wanted:
+                opts["customUUID"] = wanted
+        result = api.insert_block(cursor, block["content"], opts)
         if strict:
             new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
         else:
@@ -1022,7 +1094,8 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
         children = block.get("children") or []
         if children:
             uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, strict=strict, _written=_written + len(uuids)))
+                api, children, new_uuid, strict=strict, keep_ids=keep_ids,
+                _written=_written + len(uuids)))
         # When inserting "before", keep each new top node before the anchor in
         # order by advancing the cursor to the node just placed; when "after",
         # the next sibling must follow the one we just inserted.
@@ -1030,7 +1103,7 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     return uuids
 
 
-def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, _written: int = 0) -> list:
+def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: bool = False, _written: int = 0) -> list:
     """Insert tree starting at the top of ``page_name``.
 
     Top-level nodes use ``append_block_in_page`` (which currently appends; the
@@ -1043,6 +1116,10 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, _written: 
     """
     uuids = []
     for block in tree:
+        # ``appendBlockInPage`` takes no options, so a top-level node cannot
+        # keep its id here even when ``keep_ids`` is set; the command warns
+        # about that rather than pretending otherwise. Children go through
+        # ``insertBlock`` and can keep theirs.
         result = api.append_block_in_page(page_name, block["content"])
         new_uuid = require_insert(
             result, f"a block on '{page_name}'", written_so_far=_written + len(uuids))
@@ -1050,7 +1127,8 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, _written: 
         children = block.get("children") or []
         if children:
             uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, _written=_written + len(uuids)))
+                api, children, new_uuid, keep_ids=keep_ids,
+                _written=_written + len(uuids)))
     return uuids
 
 
