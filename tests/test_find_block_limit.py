@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 def _blocks(n):
@@ -31,7 +32,7 @@ def _run(args, n_matches=50, split=False):
     only way to assert that the payload stayed parseable."""
     api = MagicMock()
     api.datascript_query.return_value = [[b] for b in _blocks(n_matches)]
-    runner = CliRunner(mix_stderr=False) if split else CliRunner()
+    runner = split_runner() if split else CliRunner()
     with patch("logseq_cli.cli.LogseqAPI", return_value=api):
         return runner.invoke(cli, ["--token", "T", "find-block"] + args)
 
