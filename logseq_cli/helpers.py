@@ -584,6 +584,23 @@ def parse_tree_input(raw: str) -> list:
     return parse_hierarchical_content(raw)
 
 
+def require_content(content: str, option: str = "--content") -> str:
+    """Reject content that is empty or only whitespace, before any write.
+
+    The mirror of the guard in :func:`read_content_file`, for text arriving on
+    the command line. ``--content "$(cat missing.md)"`` collapses to an empty
+    string when the substitution fails, and the shell reports that on stderr
+    while still exiting 0 -- so without this check the CLI writes an empty
+    block and reports success. A block with no content is never the intent,
+    which is why this is an error rather than a warning.
+
+    Returns the content unchanged, so callers can wrap the value in place.
+    """
+    if not content.strip():
+        raise click.BadParameter(f"{option} is empty")
+    return content
+
+
 def read_content_file(path: str) -> str:
     """Read block content from a file, for ``--content-file``.
 
