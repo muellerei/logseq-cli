@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-backlinks --with-context` shows the blocks that do the linking, not
+  only the page names. `getPageLinkedReferences` already answers
+  `[page, [block, ...]]` pairs, so the blocks arrive with the call that yields
+  the names — a caller who wanted to know *why* a page links back was fetching
+  and searching each page again for a read that had already been paid for.
+
+  Behind a flag because the plain listing is a pinned shape, and because a page
+  mentioned fifty times would otherwise decide the size of the output.
+  `--limit` (default 3) caps the blocks per linking page and reports the
+  remainder as `withheld`, the same bargain the other reads make. A properties
+  block is skipped: it is the linking page's own metadata and holds no mention.
+
 - `get-page --resolve-refs` names the block refs whose target is gone. The
   detection already existed and was discarded: a failed lookup falls back to
   printing the raw `((uuid))`, which is exactly how an unresolved ref renders —

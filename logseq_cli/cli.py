@@ -371,6 +371,48 @@ def _extract_backlink_names(refs) -> list:
     return sorted(names)
 
 
+def _extract_backlink_context(refs, limit: int) -> list:
+    """Extract linking pages together with the blocks that do the linking.
+
+    ``getPageLinkedReferences`` already answers ``[page, [block, ...]]`` pairs,
+    so the blocks arrive with the same call that yields the names — no second
+    read. ``_extract_backlink_names`` keeps only the name; this keeps both.
+
+    ``limit`` caps the blocks kept per page and the remainder is reported as
+    ``withheld``, the same bargain the other reads make: a page mentioned fifty
+    times must not decide the size of the output.
+    """
+    if not refs or not isinstance(refs, list):
+        return []
+    entries = []
+    for entry in refs:
+        if not (isinstance(entry, (list, tuple)) and len(entry) >= 1):
+            continue
+        page_info = entry[0]
+        if not isinstance(page_info, dict):
+            continue
+        name = page_info.get("originalName") or page_info.get("name", "")
+        if not name:
+            continue
+        raw_blocks = entry[1] if len(entry) > 1 and isinstance(entry[1], list) else []
+        blocks = []
+        for block in raw_blocks:
+            if not isinstance(block, dict):
+                continue
+            content = (block.get("content") or "").strip()
+            # A properties block is the linking page's own metadata; it holds no
+            # mention and would read as context that is not there.
+            if not content or _is_properties_block(content):
+                continue
+            blocks.append({"uuid": block.get("uuid", ""), "content": content})
+        kept = blocks[:limit] if limit else blocks
+        item = {"page": name, "blocks": kept}
+        if limit and len(blocks) > limit:
+            item["withheld"] = len(blocks) - limit
+        entries.append(item)
+    return sorted(entries, key=lambda e: e["page"])
+
+
 def _is_properties_block(content: str) -> bool:
     """Check if block content is a Logseq properties block (key:: value lines)."""
     lines = content.strip().split("\n")
@@ -780,17 +822,23 @@ Examples:
   logseq-cli --token TOKEN get-backlinks --name "Alice" --name "Bob"    # batch
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name to find backlinks for (repeatable for batch: --name A --name B)")
+@click.option("--with-context", is_flag=True, help="Also show the blocks that do the linking, not just the page names. They come with the same API call, so this costs no extra read")
+@click.option("--limit", type=int, default=3, show_default=True, help="With --with-context: blocks kept per linking page; the remainder is reported as withheld. 0 keeps all")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_backlinks(ctx, page, as_json):
+def get_backlinks(ctx, page, with_context, limit, as_json):
     """Find pages that link to the given page(s) (uses native Logseq API). Pass --name multiple times for batch."""
     api = ctx.obj["api"]
 
     def _fetch_one(page_name):
         try:
             refs = api.get_page_linked_references(page_name)
-            return _extract_backlink_names(refs) if refs else []
+            if not refs:
+                return []
+            if with_context:
+                return _extract_backlink_context(refs, limit)
+            return _extract_backlink_names(refs)
         except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
             return find_backlinks(api, page_name)
@@ -813,7 +861,14 @@ def get_backlinks(ctx, page, as_json):
             else:
                 click.echo(f"Backlinks to '{p}' ({len(backlinks)}):")
                 for bl in backlinks:
-                    click.echo(f"  <- {bl}")
+                    if isinstance(bl, dict):
+                        click.echo(f"  <- {bl['page']}")
+                        for block in bl["blocks"]:
+                            click.echo(f"       {block['content']}")
+                        if bl.get("withheld"):
+                            click.echo(f"       ... {bl['withheld']} more not shown")
+                    else:
+                        click.echo(f"  <- {bl}")
             if len(results) > 1:
                 click.echo()
 
