@@ -193,18 +193,18 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `get-all-pages` | List all pages |
-| `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
-| `get-block --id UUID` | Block by UUID |
+| `get-page --page NAME [--no-backlinks] [--resolve-refs] [--with-ids] [--heading "## X"] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. `--no-backlinks` skips the backlink lookup, `--heading` returns only that section (searched recursively). With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
+| `get-block --id UUID [--no-children]` | Block by UUID; `--no-children` returns the block alone |
 | `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N] [--with-children]` | Find blocks by content. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder |
 | `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
 | `analyze-graph [--days N]` | Graph structure analysis |
-| `find-knowledge-gaps` | Missing/underdeveloped/orphaned pages |
-| `analyze-journal-patterns` | Journal entry patterns |
-| `smart-query --request TEXT` | Datalog queries (natural language or `--advanced` for raw Datalog) |
-| `suggest-connections` | Topic-based connection suggestions |
+| `find-knowledge-gaps [--min-refs N] [--include-orphans/--no-include-orphans]` | Missing/underdeveloped/orphaned pages. `--min-refs` (default 2) is how many incoming references a short page needs before it counts as underdeveloped rather than unused |
+| `analyze-journal-patterns [--timeframe RANGE] [--mood/--no-mood] [--topics/--no-topics]` | Journal entry patterns over `--timeframe` (default "last 30 days"). `--no-mood` and `--no-topics` drop those sections |
+| `smart-query --request TEXT [--advanced] [--include-query]` | Datalog queries (natural language, or `--advanced` to pass raw Datalog through). `--include-query` prints the generated query alongside the result |
+| `suggest-connections [--min-confidence N] [--min-shared N] [--max-suggestions N] [--focus PAGE]` | Topic-based connection suggestions. `--min-shared` (default 3) is the real filter — it sets how many topics two pages must share before the pair counts at all; `--min-confidence` (default 0.3) then scores it. `--focus` restricts to one page |
 | `get-page-stats --page NAME` | Page statistics (blocks, words, in/outbound links) |
 
 ### Write (5)
@@ -212,10 +212,10 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `create-page --name NAME [--content TEXT] [--dry-run]` | Create a new page. Fails if it already exists, rather than appending `--content` to what is there; `--dry-run` reports which of the two a run would be |
-| `add-journal-entry --content TEXT [--dry-run]` | Add journal entry (deprecated, use add-journal-block) |
-| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots. `--content-file -` reads stdin |
-| `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
-| `add-note-content --page NAME --content TEXT [--under-heading "## X"] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). `--dry-run` reports the target, the block count and whether page or heading would be created |
+| `add-journal-entry --content TEXT [--date DATE] [--multi-block] [--dry-run]` | Add journal entry (deprecated, use add-journal-block). `--date` defaults to today; `--multi-block` splits multi-line content into one block per line |
+| `add-journal-block --content TEXT [--date DATE] [--upsert-heading "### X"] [--no-preserve]` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--top-level`, `--dry-run`). `--date` defaults to today. `--upsert-heading` updates a matching child block under `--under-heading` instead of adding a second one. `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots; `--content-file -` reads stdin |
+| `add-journal-content --content TEXT [--date DATE]` | Add hierarchical content to journal (`--under-heading`, `--top-level`, `--dry-run`). `--date` defaults to today |
+| `add-note-content --page NAME --content TEXT [--under-heading "## X"] [--no-create] [--property K=V] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). The page is created when missing unless `--no-create` is given. `--property` sets `key:: value` on the root block, repeatable. `--dry-run` reports the target, the block count and whether page or heading would be created |
 
 ### Edit (11)
 
@@ -226,7 +226,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"] [--dry-run]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING`. `--dry-run` also verifies the source block exists — a ref to a missing UUID renders as nothing |
 | `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs] [--dry-run]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates. `--dry-run` shows the old and new marker |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
-| `insert-block --content TEXT [--child-of UUID]` | Insert block at position (after/before/child-of/page) |
+| `insert-block --content TEXT (--page NAME \| --after UUID \| --before UUID \| --child-of UUID)` | Insert one block at a position: appended to a page, as a sibling after or before a block, or as a child. `--property K=V` sets properties on it, repeatable |
 | `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
 | `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |

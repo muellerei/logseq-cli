@@ -5,6 +5,34 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The README documented 20 options that the CLI accepts but never named —
+  among them `--min-refs`, `--min-shared`, `--upsert-heading`, `--no-backlinks`
+  and the `--date` of the three journal writers. Some of them decide what a
+  command returns: `suggest-connections --min-shared` (default 3) is the filter
+  that determines whether a pair is considered at all, and a reader who cannot
+  see it has no way to tell why a result is empty.
+
+  Found by checking every option in the command registry against the README
+  instead of reading the tables, which is how they stayed invisible: a table
+  looks complete when you read it, and only a comparison shows what is not in
+  it. The gap predates this release — `--min-refs` was already undocumented in
+  0.9.0.
+
+  Boolean options are listed in the form a caller actually types: `--no-create`,
+  `--multi-block`, `--no-preserve`. Writing the default-on form would have
+  documented a flag nobody passes. `--no-preserve` in particular is not the
+  `--no-preserve-formatting` one would guess from its positive form.
+
+- `CONTRIBUTING.md` said `cli.py` was "~4000 lines". It was 4771 when that
+  sentence was written and is over five thousand now, so the number was never
+  right and drifted further with every release. Replaced with a statement that
+  does not go stale and names the consequence instead of a count — a figure
+  maintained by hand is the same defect this project documents elsewhere.
+
 ## [0.12.0] - 2026-09-15
 
 ### Fixed
