@@ -35,7 +35,7 @@ logseq-cli/
 
 ## Making Changes
 
-1. **Read the code first.** `cli.py` is the main file (~4000 lines). Each command is a self-contained function decorated with `@cli.command()`.
+1. **Read the code first.** `cli.py` is the main file — over five thousand lines, which is more than one file should carry and is being split. Each command is a self-contained function decorated with `@cli.command()`.
 
 2. **Follow existing patterns.** New commands should:
    - Use `@click.option("--page", "--name", ...)` for page parameters (dual alias)
