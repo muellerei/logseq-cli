@@ -13,6 +13,14 @@ No vendor coupling — a plain Python package with `click` and `requests`.
 See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
 [design notes](#design-notes) for the decisions behind the above.
 
+> **Which Logseq.** This is a tool for **file-based (Markdown) graphs**, driven
+> over Logseq's local HTTP API — the 0.10.x line, tested against 0.10.15, and
+> Logseq OG, which continues it. The DB version (2.x) keeps graphs in SQLite
+> under a different data model and is **out of scope**; it answers the same API,
+> so it connects and then reads empty. `logseq-cli doctor` names which one it
+> found, so that is not something to work out by hand. Details under
+> [Requirements](#requirements).
+
 ## Installation
 
 ### Requirements
@@ -41,8 +49,14 @@ pip install -e ".[dev]"
 Developed and tested against Logseq Desktop 0.10.15 with a file-based
 (Markdown) graph. Logseq split in 2026: the Markdown line continues as
 Logseq OG (1.x) with an unchanged HTTP API, but this CLI is untested there.
-The DB version (2.x) stores graphs in SQLite with a different data model and
-is not supported.
+
+The DB version (2.x) is **not supported**. It answers the same HTTP API, so
+connecting to one succeeds — but it keeps the graph in SQLite under a
+different data model, where `:block/original-name` and `:block/content` are
+now `:block/title`. The fields these commands read are simply absent, so reads
+come back empty rather than failing. `logseq-cli doctor` reports the graph
+kind for exactly this reason, so an empty result does not have to be told
+apart from an empty graph by hand.
 
 ## Quickstart
 
@@ -61,8 +75,8 @@ logseq-cli --token "TOKEN" doctor
 ```
 
 `doctor` tests each step separately — Python, packages, port, token, API,
-graph — and names the one that broke rather than leaving you to guess. Exit 0
-means everything is ready. Once it is:
+graph kind, graph — and names the one that broke rather than leaving you to
+guess. Exit 0 means everything is ready. Once it is:
 
 ```bash
 export LOGSEQ_TOKEN="TOKEN"          # so you can drop --token from here on
@@ -223,7 +237,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `get-todos [--page NAME] [--status S] [--tag TAG]` | List tasks (page name shown inline in plain-text output) |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
-| `doctor` | Health-check: Python, packages, connectivity, token, API, graph, config. Exit 0 = ready |
+| `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
 
 ### Properties (3)
@@ -383,9 +397,19 @@ payload. Without truncation there is no note.
 
 ## Design notes
 
-Four decisions that shaped the tool more than any feature did. Each one came
-out of a defect; the [CHANGELOG](CHANGELOG.md) carries the full account of what
-was wrong, how it was found and what the fix cost.
+Seven decisions that shaped the tool more than any feature did. Most came out of
+a defect; the [CHANGELOG](CHANGELOG.md) carries the full account of what was
+wrong, how it was found and what the fix cost. The last two are about what the
+tool deliberately does not do — one a mechanism not built, one the edge of what
+it is for.
+
+They are all the same rule applied in different places: **an answer must not
+have two possible causes.** An empty list has to mean "nothing matched" and
+never "you did not configure which property to look at", which is why no
+graph-specific setting has a built-in default — a command that needs one says
+so and exits non-zero instead of returning an empty result that reads like an
+answer. The notes below are that rule meeting the places where Logseq's API
+makes it hard.
 
 ### Writes are verified, not assumed
 
@@ -396,6 +420,21 @@ you. Every insert path now proves the write by reading the block back, which
 costs a round trip per write and is worth it: `copy-block --remove` used to
 delete the source against a copy that had not landed. The strict path is the
 default; tolerating partial writes is something a caller now has to ask for.
+
+`move-block` is the clearest case. `moveBlock` answers `null` for a move that
+worked, for a target that does not exist, and for one Logseq refuses — it
+declines to move a block into its own subtree and says so only by doing
+nothing. So the move is proven by re-reading, and the obvious check is not
+enough: for `--before`, "same parent" would also hold for a move that did
+nothing at all, since source and target usually share one already, so the
+sibling order is what gets compared. The option names mislead as well, which
+only a live graph will tell you: `before: true` inserts a sibling in front, and
+everything else — including the `sibling: true` the API's own option list
+suggests — nests the block as the target's first child. This matters beyond
+tidiness, because the alternative route quietly destroys data: `copy-block
+--remove` writes a new block with a new UUID and deletes the original, so every
+`((block-ref))` aimed at it dangles afterwards. A structural move keeps the
+UUID and the references with it.
 See [0.6.0](CHANGELOG.md#060---2026-08-07) and [0.8.0](CHANGELOG.md#080---2026-08-28).
 
 ### Query values are escaped in one place
@@ -431,6 +470,87 @@ and `--limit` filter **before** fetching rather than after, which keeps the
 omitted days from costing API calls as well. Truncation is never silent: the
 count of omitted days goes to stderr while stdout stays pure payload.
 See [0.6.0](CHANGELOG.md#060---2026-08-07).
+
+### A block reference is not readable on its own
+
+Logseq stores a quoted block as `((uuid))`, which is enough for the app to
+render the original but tells a reader nothing at all. A page full of them
+arrives as a page full of holes, and the caller has to spend one `get-block`
+per hole to find out what it said.
+
+`--resolve-refs` on `get-page` and `get-journal-range` replaces each reference
+with the text it points at, followed by the page it came from
+(`the actual text ↳ Meeting Notes`), and descends into child blocks so a nested
+quote resolves too. A reference whose target cannot be read is left as
+`((uuid))` rather than dropped or blanked: a hole you can see beats a sentence
+that silently lost a clause.
+
+Without the flag both commands count what is left and say so on stderr —
+`3 unresolved block-ref(s) in output` — because the output otherwise looks
+complete and is not. `get-page` was silent about this until the count was added
+there too; the same page read through two commands had given two different
+answers about whether it was whole.
+
+### Failure has one exit code, and no resume
+
+A command exits `0` when it did what it said, and non-zero when it did not.
+There is deliberately no second exit code separating "your input was wrong" from
+"the operation failed": with `--json`, the error object already carries the
+reason as text, and a numeric code repeating that classification is a second
+view that can drift away from the first. Callers that need to distinguish the
+cases read the JSON on stderr; callers that only need to know whether to stop
+read the exit status. A non-zero status is not on its own a reason to retry — a
+missing UUID fails identically on the second attempt.
+
+The harder question is what happens when a multi-block write dies halfway.
+`insertBatchBlock` is not atomic — verified against a live graph, a malformed
+node is skipped while its siblings land — and the API offers no rollback, so
+the blocks that made it stay. Other tools solve this with a durable operation
+record and a `--resume` flag. This one does not, and the reason is a count: over
+the recorded history of this tool, 353 real write invocations produced **zero**
+partial writes. The two partial-write bugs in the CHANGELOG were defects in the
+counting, found while testing, not aborts in use. A resume path would mean
+durable local state, an idempotency story for every one of the write commands,
+and a check that the graph has not moved underneath — a large mechanism for an
+event that has not yet happened. Instead the abort names the damage: how many
+blocks are already in the graph, that there is no rollback, and that retrying
+the same input will duplicate them. If the count ever stops being zero, that is
+the signal to build the mechanism, and the measurement is cheap to repeat.
+
+### This is a tool for file-based graphs
+
+Logseq split in 2026. The Markdown line continues as
+[Logseq OG](https://github.com/logseq/og); the DB version (2.x) keeps the name
+and the roadmap, and stores graphs in SQLite.
+
+This tool is for the Markdown side, by preference and not by accident. Notes
+kept as plain text on disk can be read by a dozen other programs, versioned in
+git, and grepped without asking anything for permission; driving them from a
+shell is the natural extension of that, not a workaround. A database buys other
+things — speed on large graphs, richer properties — and that is a fair trade for
+those who want it; it is simply not the trade these notes are kept under.
+Logseq OG is where file-based graphs live now, and this follows them there.
+
+Scope is the decision; the cost only says how firm it is. Of the fourteen
+datalog attributes used here, seven survive into the
+[DB schema](https://github.com/logseq/logseq/blob/master/deps/db/src/logseq/db/frontend/schema.cljs)
+and seven do not: `content`, `original-name`, `properties`, `marker`,
+`deadline`, `scheduled` and `journal` have no counterpart, which is 46 of 100
+attribute uses. `:block/content` becoming `:block/title` is the easy half. The
+rest are model changes — properties are entities rather than a map inside a
+block, task markers give way to a `Status` property whose values are themselves
+entities, and blocks and pages are unified as nodes without `((uuid))`
+references. Every property command and the whole todo surface would be
+rewritten, not ported. Two data models under one set of commands is how a tool
+gets a dialect problem, and neither side ends up well served.
+
+None of this rules out a DB version later, as its own project or as a port.
+It would be a different tool, and it should be built as one.
+
+Until then `doctor` names the graph kind, because the failure is quiet: a 2.x
+graph answers the same API on the same port, so it connects, and then returns
+empty results that read exactly like an empty graph. Being told which Logseq is
+on the other end beats inferring it from nothing.
 
 ## Internationalization
 

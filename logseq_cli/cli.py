@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 import requests
 
-from logseq_cli.api import LogseqAPI, DatalogQueryError
+from logseq_cli.api import LogseqAPI, DatalogQueryError, InvalidPortError
 from logseq_cli.config import (
     ConfigError,
     config_search_paths,
@@ -4442,6 +4442,48 @@ def get_page_stats(ctx, page, as_json):
 # ---------------------------------------------------------------------------
 # 31. doctor
 # ---------------------------------------------------------------------------
+# Logseq's own rule, from deps/db/src/logseq/db/sqlite/util.cljs:
+#     (defn db-based-graph? [graph-name]
+#       (when graph-name (string/starts-with? graph-name db-version-prefix)))
+# with the two prefixes defined in deps/common/src/logseq/common/config.cljs
+# as "logseq_db_" and "logseq_local_". Taken from there rather than inferred
+# from an observed response, so the rule rests on the definition both kinds are
+# built from.
+#
+# Not used: logseq.App.checkCurrentIsDbGraph. It is exported in 2.x
+# (src/main/logseq/api.cljs) and is the direct answer, but 0.10.15 does not
+# carry it — it answers `MethodNotExist: check_current_is_db_graph`, checked
+# against the running server. The prefix is the one signal both lines share.
+#
+# Also not used: logseq.App.getInfo().supportDb. It reads like the flag for
+# this, and is not: the implementation returns a hardcoded `true`
+# (src/main/logseq/api/app.cljs), meaning "this build can open DB graphs",
+# not "this graph is one". On 0.10.15 getInfo does not exist at all.
+#
+# Rejected as signals, measured against a 1845-page graph: `file` is set on
+# 962 pages and `format` on 22, so neither separates the two kinds — they
+# only look like they would.
+_DB_GRAPH_PREFIX = "logseq_db_"
+_FILE_GRAPH_PREFIX = "logseq_local_"
+
+
+def _graph_kind(graph_url):
+    """Classify the current graph from its url.
+
+    Returns ``(kind, ok, detail)`` where kind is ``"db"``, ``"file"`` or
+    ``None``. An unrecognised or absent url yields ``ok=None``: a wrong
+    "file graph, all good" is worse than no answer, because it rules out the
+    one cause the reader should be looking at.
+    """
+    if not isinstance(graph_url, str) or not graph_url:
+        return None, None, "could not be determined (no graph url in the API answer)"
+    if graph_url.startswith(_DB_GRAPH_PREFIX):
+        return "db", False, "Logseq 2.x (DB/SQLite) — not supported by this CLI"
+    if graph_url.startswith(_FILE_GRAPH_PREFIX):
+        return "file", True, "file-based (Markdown) graph — supported"
+    return None, None, f"could not be determined from {graph_url!r}"
+
+
 def _port_has_listener(host: str, port: str, timeout: float = 2.0) -> bool:
     """True if something accepts TCP connections on host:port."""
     import socket
@@ -4809,6 +4851,23 @@ def doctor(ctx, as_json):
         except Exception as e:  # noqa: BLE001 - doctor must never crash
             add("api", False, f"{type(e).__name__}: {e}")
             remedy = "Unexpected error talking to the API."
+
+    # 3b. Graph kind. A 2.x (DB) graph answers this same API, so reachability
+    # proves nothing about whether the reads below will mean anything: it keeps
+    # a different data model, and the fields these commands ask for are simply
+    # absent. That surfaces as empty names and empty lists — the exact shape an
+    # empty graph has, which sends people looking at their own notes for a
+    # cause that is one version number away.
+    if graph is not None or any(c["check"] == "api" and c["ok"] for c in checks):
+        kind, kind_ok, kind_detail = _graph_kind(graph)
+        add("graph kind", kind_ok, kind_detail)
+        if kind == "db":
+            remedy = (
+                "This is a Logseq 2.x (DB) graph, which this CLI does not "
+                "support: it stores the graph in SQLite under a different data "
+                "model, so reads return nothing rather than failing. Use a "
+                "file-based (Markdown) graph on the 0.10.x line."
+            )
 
     # 4. Graph read: proves a graph is actually loaded, not just the API alive.
     if any(c["check"] == "api" and c["ok"] for c in checks):
