@@ -28,6 +28,8 @@ from logseq_cli.datalog import (
     page_name_literal,
 )
 from logseq_cli.helpers import (
+    parse_repeater,
+    next_occurrence,
     escape_regex,
     journal_day_to_date,
     format_journal_date,
@@ -3623,11 +3625,13 @@ Notes:
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
 @click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal page a task sits on, so tasks on ordinary pages are excluded whenever a range is given.")
 @click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
+@click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. Repeating tasks are excluded and reported — Logseq stores their first occurrence, not the next")
+@click.option("--due-to", "due_to", default=None, help="Only tasks due on or before this date. Same rule as --due-from")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json):
+def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, include_done, as_json):
     """List all TODOs/tasks in the graph."""
     api = ctx.obj["api"]
 
@@ -3637,7 +3641,7 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
 
     markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (
-        '[:find (pull ?b [:block/content :block/marker :block/uuid]) '
+        '[:find (pull ?b [:block/content :block/marker :block/uuid '':block/scheduled :block/deadline :block/repeated?]) '
         '(pull ?p [:block/original-name :block/name :block/journal-day]) '
         ':where [?b :block/marker ?m] '
         f'[(contains? #{{{markers_str}}} ?m)] '
@@ -3653,19 +3657,65 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
         page_name = page_data.get("original-name") or page_data.get("name", "")
         journal_day = page_data.get("journal-day") or page_data.get("journalDay")
 
-        # Strip properties from content (lines with key:: value)
-        content_lines = [l for l in content.split("\n") if not re.match(r"^\w[\w-]*::\s", l)]
+        # Strip properties (key:: value), the SCHEDULED/DEADLINE lines and the
+        # LOGBOOK drawer. Those are metadata of the task, not the task: left in,
+        # a repeating task reported on stderr printed its own timestamp line and
+        # a ":LOGBOOK:" fragment instead of what it says.
+        content_lines = []
+        in_logbook = False
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped == ":LOGBOOK:":
+                in_logbook = True
+                continue
+            if stripped == ":END:":
+                in_logbook = False
+                continue
+            if in_logbook:
+                continue
+            if re.match(r"^\w[\w-]*::\s", line):
+                continue
+            if re.match(r"^\s*(SCHEDULED|DEADLINE):\s*<", line):
+                continue
+            content_lines.append(line)
         clean_content = "\n".join(content_lines).strip()
         # Strip leading marker from content (e.g. "TODO some task" -> "some task")
         clean_content = re.sub(r"^(TODO|DOING|DONE|NOW|LATER|WAITING|CANCELLED)\s+", "", clean_content)
 
-        todos.append({
+        record = {
             "marker": marker,
             "content": clean_content,
             "page": page_name,
             "uuid": uuid,
             "_journal_day": journal_day,
-        })
+        }
+        # scheduled/deadline are YYYYMMDD integers, the same shape as
+        # journal-day (verified against a live graph), so the existing
+        # conversion applies. Absent keys stay absent: a graph that does not
+        # use these fields must see the payload it saw before.
+        for field in ("scheduled", "deadline"):
+            raw = block_data.get(field)
+            if raw:
+                try:
+                    record[field] = str(journal_day_to_date(raw))
+                except (ValueError, TypeError):
+                    pass
+        if block_data.get("repeated?"):
+            record["repeating"] = True
+            # Logseq stores the date as written, never the next occurrence, so
+            # the next one is derived with the source's own formula (see
+            # next_occurrence). A repeater whose interval cannot be read is
+            # left without next_due and reported rather than guessed at.
+            repeater = parse_repeater(content)
+            stored = record.get("deadline") or record.get("scheduled")
+            if repeater and stored:
+                try:
+                    nxt = next_occurrence(datetime.date.fromisoformat(stored), repeater)
+                except (ValueError, TypeError):
+                    nxt = None
+                if nxt:
+                    record["next_due"] = str(nxt)
+        todos.append(record)
 
     # Filter by page if requested
     if page:
@@ -3711,6 +3761,45 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
                 continue
         todos = filtered
 
+    # Filter by due date. Separate from --from/--to on purpose: those date a
+    # task by the journal page it sits on, which is when it was written down.
+    #
+    # Repeating tasks are excluded rather than placed. Measured against a live
+    # graph: :block/scheduled holds the date written in the text, not the next
+    # occurrence, so a weekly task created in 2020 still reads 20200106. Logseq
+    # does not store the next date anywhere, and computing it here would put a
+    # second answer beside the graph's own - and could not be done at all for
+    # the `.+` form, which repeats from completion. They are reported instead.
+    repeating_excluded = []
+    if due_from or due_to:
+        due_start = parse_date_keyword(due_from) if due_from else None
+        due_end = parse_date_keyword(due_to) if due_to else None
+        kept = []
+        for t in todos:
+            # A deadline is the commitment; a schedule is when work starts. A
+            # task carrying both is placed by its deadline.
+            # A deadline is the commitment; a schedule is when work starts. A
+            # task carrying both is placed by its deadline. For a repeater the
+            # derived next occurrence replaces the stored date, which is its
+            # first one — filtering on that would place a live weekly task in
+            # the year it was created.
+            due = t.get("next_due") or t.get("deadline") or t.get("scheduled")
+            if not due:
+                continue
+            if t.get("repeating") and not t.get("next_due"):
+                repeating_excluded.append(t)
+                continue
+            try:
+                d = datetime.date.fromisoformat(due)
+            except (ValueError, TypeError):
+                continue
+            if due_start and d < due_start:
+                continue
+            if due_end and d > due_end:
+                continue
+            kept.append(t)
+        todos = kept
+
     # Strip internal _journal_day before output
     for t in todos:
         t.pop("_journal_day", None)
@@ -3719,8 +3808,22 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
     marker_order = {"DOING": 0, "NOW": 1, "TODO": 2, "LATER": 3, "DONE": 4}
     todos.sort(key=lambda t: (marker_order.get(t["marker"], 9), t["page"].lower()))
 
+    if repeating_excluded:
+        # Named, not just counted: a bare number would leave the caller unable
+        # to tell which commitments were left out of the answer.
+        click.echo(
+            f"⚠️  {len(repeating_excluded)} repeating task(s) excluded from the "
+            f"due range — their repeat interval could not be read, so the next "
+            f"occurrence cannot be derived:",
+            err=True)
+        for t in repeating_excluded:
+            click.echo(f"     {t['content'][:70]} ({t['page']})", err=True)
+
     if as_json:
-        output({"todos": todos, "count": len(todos)}, True)
+        payload = {"todos": todos, "count": len(todos)}
+        if repeating_excluded:
+            payload["repeating_excluded"] = len(repeating_excluded)
+        output(payload, True)
     else:
         if not todos:
             click.echo("No tasks found.")
