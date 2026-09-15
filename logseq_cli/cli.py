@@ -2159,12 +2159,40 @@ Note:
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
+@click.option("--dry-run", is_flag=True, help="Report whether the page exists and what would be created, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def create_page(ctx, page, content, as_json):
+def create_page(ctx, page, content, as_json, dry_run):
     """Create a new page, optionally with initial content."""
     api = ctx.obj["api"]
+
+    # Logseq answers createPage for an existing page with that page, so the
+    # call alone cannot tell "created" from "was already there" — the command
+    # reported success either way, and --content went on to append to the page
+    # that existed. A retry after a timeout therefore duplicated content and
+    # was told the write had succeeded. Ask first.
+    exists = api.get_page(page) is not None
+
+    if dry_run:
+        # The preview reports the state the live run would refuse on, rather
+        # than refusing here: a preview that exits non-zero is indistinguishable
+        # from one that failed to run.
+        if as_json:
+            output({"page": page, "exists": exists, "would_create": not exists,
+                    "has_content": content is not None, "dry_run": True}, True)
+        elif exists:
+            click.echo(f"[DRY RUN] Page '{page}' already exists — would not be created")
+        else:
+            click.echo(f"[DRY RUN] Would create page: {page}")
+            if content:
+                click.echo(f"  content: {content[:60]}{'...' if len(content) > 60 else ''}")
+        return
+
+    if exists:
+        fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
+             "or delete-page first.", as_json=as_json, page=page, exists=True)
+
     properties = {"journal?": True} if is_journal_date(page) else None
     result = api.create_page(page, properties)
 
@@ -2192,10 +2220,11 @@ DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supp
 @click.option("--content", required=True, help="Content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--as-block/--multi-block", default=True, help="Add as single block or split into multiple")
+@click.option("--dry-run", is_flag=True, help="Report the target page and block count, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_entry(ctx, content, date, as_block, as_json):
+def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     """Add a simple entry to a journal page (top-level only).
 
     Deprecated: Prefer add-journal-block which supports --under-heading.
@@ -2220,10 +2249,24 @@ def add_journal_entry(ctx, content, date, as_block, as_json):
         existing = api.get_page(page_name)
     except Exception:
         existing = None
+    content = strip_title_heading(content, page_name)
+
+    # Before the journal page is created: the preview must not be the one run
+    # that leaves a page behind.
+    if dry_run:
+        planned = 1 if as_block else len(
+            [l for l in content.split("\n") if l.strip()])
+        if as_json:
+            output({"page": page_name, "date": str(d), "blocks_added": planned,
+                    "would_create_page": not existing, "dry_run": True}, True)
+        else:
+            click.echo(f"[DRY RUN] Would add {planned} block(s) to journal: {page_name}")
+            if not existing:
+                click.echo(f"  page: {page_name} (would be created)")
+        return
+
     if not existing:
         api.create_page(page_name, {"journal?": True})
-
-    content = strip_title_heading(content, page_name)
 
     # Count what the graph actually took, not how many lines were handed in:
     # reporting len(lines) turned a partial write into "Added 3 block(s)" with
