@@ -42,6 +42,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-backlinks --with-context` shows the blocks that do the linking, not
+  only the page names. `getPageLinkedReferences` already answers
+  `[page, [block, ...]]` pairs, so the blocks arrive with the call that yields
+  the names — a caller who wanted to know *why* a page links back was fetching
+  and searching each page again for a read that had already been paid for.
+
+  Behind a flag because the plain listing is a pinned shape, and because a page
+  mentioned fifty times would otherwise decide the size of the output.
+  `--limit` (default 3) caps the blocks per linking page and reports the
+  remainder as `withheld`, the same bargain the other reads make. A properties
+  block is skipped: it is the linking page's own metadata and holds no mention.
+
+- `get-page --resolve-refs` names the block refs whose target is gone. The
+  detection already existed and was discarded: a failed lookup falls back to
+  printing the raw `((uuid))`, which is exactly how an unresolved ref renders —
+  so the output held two different things spelled the same way, and nothing
+  said which was which. The uuids are now collected during resolution and
+  reported on stderr, with `dead_refs` in the JSON payload.
+
+  A notice, not an error, and only under `--resolve-refs`: without the flag
+  nothing is looked up, so no claim about liveness could be made. Measured at
+  0 dead refs across 821 distinct refs in the reference graph — this is not a
+  defect there, it is cheap because the detection was already being thrown
+  away, and graphs with more deletion history are the case it serves.
+
+- `--content-file -` reads stdin, so content that is already in a pipe no
+  longer needs a temporary file first — the one detour the option exists to
+  remove. It goes through `read_content_file`, the single place both
+  `--content-file` and `--tree-file` pass, so all of them gained it at once.
+
+  A file literally named `-` becomes unreachable through this flag. That is the
+  usual trade for the convention, and `./-` still names the file.
+
 - `--dry-run` on `create-page` and `add-journal-entry`, the last two writes
   without one. The README has promised "`--dry-run` on everything that writes"
   since 0.9.0, and nothing held it to that: every dry-run test named the

@@ -161,6 +161,9 @@ logseq-cli add-journal-block --dry-run --content "**14:30** Meeting notes"
 # Write content from a file — no shell quoting, several flush "- " roots allowed
 logseq-cli add-journal-block --content-file entry.md
 
+# Or straight from a pipe — "-" reads stdin
+printf '**14:30** Notes\n\t- detail\n' | logseq-cli add-journal-block --content-file -
+
 # Export page as Logseq-compatible markdown
 logseq-cli get-page --page "My Page" --format markdown
 
@@ -190,12 +193,12 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `get-all-pages` | List all pages |
-| `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line |
+| `get-page --page NAME [--resolve-refs] [--with-ids] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
 | `get-block --id UUID` | Block by UUID |
 | `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N] [--with-children]` | Find blocks by content. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
-| `get-backlinks --page NAME` | Pages linking to NAME |
+| `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder |
 | `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
 | `analyze-graph [--days N]` | Graph structure analysis |
 | `find-knowledge-gaps` | Missing/underdeveloped/orphaned pages |
@@ -210,7 +213,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `create-page --name NAME [--content TEXT] [--dry-run]` | Create a new page. Fails if it already exists, rather than appending `--content` to what is there; `--dry-run` reports which of the two a run would be |
 | `add-journal-entry --content TEXT [--dry-run]` | Add journal entry (deprecated, use add-journal-block) |
-| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots |
+| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots. `--content-file -` reads stdin |
 | `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
 | `add-note-content --page NAME --content TEXT [--under-heading "## X"] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). `--dry-run` reports the target, the block count and whether page or heading would be created |
 
