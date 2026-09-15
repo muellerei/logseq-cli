@@ -235,7 +235,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `get-todos [--page NAME] [--status S] [--tag TAG]` | List tasks (page name shown inline in plain-text output) |
+| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--include-done]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by the journal page it sits on, so a range excludes tasks on ordinary pages |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
 | `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
