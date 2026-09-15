@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-todos --from/--to` only filtered the journal subset of the result. A
+  task whose page carries no `journal-day` was admitted regardless of the
+  range, so a range that predates the graph still returned every task on an
+  ordinary page — most of the result, silently unfiltered. The `--help` text
+  said as much ("Non-journal pages are always included"), which made the
+  behaviour documented rather than defensible: no caller could tell which part
+  of the output had been filtered and which had been waved through.
+
+  A task that cannot be shown to fall inside the range now falls out of it.
+  The same applies to an unparseable `journal-day`, which took the exception
+  branch and was likewise let through — a rarer input reaching the same silent
+  pass-through.
+
+  This changes output for anyone passing `--from` or `--to`. Without a range
+  nothing changes, and the options were absent from the README, so the fix was
+  preferred over a second flag guarding the old behaviour.
+
 - `create-page` reported success for a page that already existed. Logseq
   answers createPage for an existing page with that page rather than an error,
   so the command could not tell "created" from "was already there" — and said

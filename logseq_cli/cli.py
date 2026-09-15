@@ -3535,8 +3535,8 @@ Notes:
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
 @click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
-@click.option("--from", "from_date", default=None, help="Only TODOs from journal pages on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
-@click.option("--to", "to_date", default=None, help="Only TODOs from journal pages on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Non-journal pages are always included.")
+@click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal page a task sits on, so tasks on ordinary pages are excluded whenever a range is given.")
+@click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -3591,7 +3591,11 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
         tag_pattern = re.compile(rf"#\b{re.escape(tag)}\b", re.IGNORECASE)
         todos = [t for t in todos if tag_pattern.search(t["content"])]
 
-    # Filter by date range (journal pages only; non-journal pages always pass through)
+    # Filter by date range. A task whose page carries no journal-day cannot be
+    # shown to fall inside the range, so it falls out of it. Letting it pass
+    # instead made the filter apply to the journal subset only and stay silent
+    # about the rest: a range predating the graph still returned every task on
+    # an ordinary page, and no caller could tell which part had been filtered.
     if from_date or to_date:
         date_start = (
             datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
@@ -3605,7 +3609,6 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
         for t in todos:
             jd = t.get("_journal_day")
             if jd is None:
-                filtered.append(t)
                 continue
             try:
                 d = journal_day_to_date(jd)
@@ -3616,7 +3619,10 @@ def get_todos(ctx, status, page, tag, from_date, to_date, include_done, as_json)
                     continue
                 filtered.append(t)
             except (ValueError, TypeError):
-                filtered.append(t)
+                # An unparseable journal-day is no more inside the range than a
+                # missing one; keeping it here would reintroduce the same
+                # silent pass-through for a rarer input.
+                continue
         todos = filtered
 
     # Strip internal _journal_day before output
