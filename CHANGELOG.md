@@ -32,6 +32,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The port was never checked. `LOGSEQ_PORT=nonsens` went straight into the
+  URL, and the run came back with `port: 127.0.0.1:nonsens no listener` —
+  which is the same sentence a correct port gets when Logseq is simply not
+  running. Two causes, one message, and the one people act on is the wrong
+  one: they go looking at Logseq's HTTP settings for a typo that sits in their
+  shell profile. It is now rejected before the first request, naming the
+  offending value and the range. The message names *where the value came
+  from*, `--port` or `LOGSEQ_PORT`, because that is the thing the reader has
+  to go and change; pointing at the environment variable for a value passed
+  as a flag sends them to a setting that is not the one in effect.
+
+  Two deliberate limits. Surrounding whitespace is stripped rather than
+  rejected — a trailing newline is what a shell pipeline leaves behind, and
+  the value is usable once it is gone. And the check only runs when the port
+  is actually used: `LOGSEQ_API_URL` replaces the assembled URL, so a stale
+  `LOGSEQ_PORT` in a profile must not fail a run that never reads it.
+
+  Found by re-reading a comparable project (`wolf-jonathan/logseq-cli`), which
+  hardened the same spot. Of its hardening items, this was the only one not
+  already covered here: the `KeyError: 'originalName'` from its issue #1 (and
+  the missing `uuid` beside it) cannot occur here — all nineteen reads use
+  `.get()` with a fallback, and the two direct `["uuid"]` accesses each sit
+  behind a check — its GET-based connectivity probe has no counterpart because
+  this client speaks POST throughout, and host/port were already configurable.
+  `LOGSEQ_CLI_CACHE_TTL` two lines below had carried this same guard since it
+  was introduced; the port had not.
+
 - `get-page` did not report unresolved block references. Without
   `--resolve-refs` the output keeps every `((uuid))` verbatim, which carries no
   meaning for a reader that is not the Logseq app; `get-journal-range` has
