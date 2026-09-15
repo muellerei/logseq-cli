@@ -234,8 +234,14 @@ _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "W
 FIND_BLOCK_CHILDREN_LIMIT = 25
 
 
-def _resolve_single_ref(api, uuid: str) -> str:
-    """Resolve one block UUID to its content text. Returns UUID unchanged on failure."""
+def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
+    """Resolve one block UUID to its content text. Returns UUID unchanged on failure.
+
+    A failed lookup means the target is gone — Logseq answers ``null`` for a
+    deleted block. The fallback then renders the ref exactly as an unresolved
+    one, so two different things end up spelled the same way in the output.
+    ``dead`` collects those uuids so the caller can say which is which.
+    """
     try:
         block = api.get_block(uuid, include_children=False)
         if block:
@@ -248,20 +254,26 @@ def _resolve_single_ref(api, uuid: str) -> str:
             return f"{ref_content}{source}"
     except Exception:
         pass
+    if dead is not None and uuid not in dead:
+        dead.append(uuid)
     return f"(({uuid}))"
 
 
-def _resolve_refs_in_blocks(api, blocks: list) -> None:
-    """Recursively resolve ((uuid)) references in block content, in-place."""
+def _resolve_refs_in_blocks(api, blocks: list, dead: list = None) -> None:
+    """Recursively resolve ((uuid)) references in block content, in-place.
+
+    ``dead`` collects the uuids whose target could not be read, in first-seen
+    order, so a caller can report them without walking the output again.
+    """
     for block in blocks:
         content = block.get("content", "")
         if content and "((" in content:
             block["content"] = _BLOCK_REF_RE.sub(
-                lambda m: _resolve_single_ref(api, m.group(1)), content
+                lambda m: _resolve_single_ref(api, m.group(1), dead), content
             )
         children = block.get("children", [])
         if children:
-            _resolve_refs_in_blocks(api, children)
+            _resolve_refs_in_blocks(api, children, dead)
 
 
 def _swap_todo_marker(content: str, new_status: str) -> str:
@@ -359,6 +371,48 @@ def _extract_backlink_names(refs) -> list:
     return sorted(names)
 
 
+def _extract_backlink_context(refs, limit: int) -> list:
+    """Extract linking pages together with the blocks that do the linking.
+
+    ``getPageLinkedReferences`` already answers ``[page, [block, ...]]`` pairs,
+    so the blocks arrive with the same call that yields the names — no second
+    read. ``_extract_backlink_names`` keeps only the name; this keeps both.
+
+    ``limit`` caps the blocks kept per page and the remainder is reported as
+    ``withheld``, the same bargain the other reads make: a page mentioned fifty
+    times must not decide the size of the output.
+    """
+    if not refs or not isinstance(refs, list):
+        return []
+    entries = []
+    for entry in refs:
+        if not (isinstance(entry, (list, tuple)) and len(entry) >= 1):
+            continue
+        page_info = entry[0]
+        if not isinstance(page_info, dict):
+            continue
+        name = page_info.get("originalName") or page_info.get("name", "")
+        if not name:
+            continue
+        raw_blocks = entry[1] if len(entry) > 1 and isinstance(entry[1], list) else []
+        blocks = []
+        for block in raw_blocks:
+            if not isinstance(block, dict):
+                continue
+            content = (block.get("content") or "").strip()
+            # A properties block is the linking page's own metadata; it holds no
+            # mention and would read as context that is not there.
+            if not content or _is_properties_block(content):
+                continue
+            blocks.append({"uuid": block.get("uuid", ""), "content": content})
+        kept = blocks[:limit] if limit else blocks
+        item = {"page": name, "blocks": kept}
+        if limit and len(blocks) > limit:
+            item["withheld"] = len(blocks) - limit
+        entries.append(item)
+    return sorted(entries, key=lambda e: e["page"])
+
+
 def _is_properties_block(content: str) -> bool:
     """Check if block content is a Logseq properties block (key:: value lines)."""
     lines = content.strip().split("\n")
@@ -453,6 +507,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
     """Get page content with backlinks. Pass --name multiple times for batch reads."""
     api = ctx.obj["api"]
     missing = []
+    dead_refs = []
 
     def _fetch_one(page_name):
         # A page that does not exist is an error, not an empty result: Logseq's
@@ -475,7 +530,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
             if not blocks:
                 click.echo(f"Warning: heading '{heading}' not found in '{page_name}'", err=True)
         if resolve_refs and blocks:
-            _resolve_refs_in_blocks(api, blocks)
+            _resolve_refs_in_blocks(api, blocks, dead_refs)
         return {"page": page_name, "blocks": blocks, "backlinks": backlinks}
 
     results = [_fetch_one(p) for p in page]
@@ -483,6 +538,12 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
     for result in results:
         if result["page"] in missing:
             result["exists"] = False
+    if dead_refs:
+        for result in results:
+            in_this = [u for u in dead_refs
+                       if f"(({u}))" in json.dumps(result.get("blocks") or [])]
+            if in_this:
+                result["dead_refs"] = in_this
 
     if not resolve_refs:
         total_refs = sum(_count_unresolved_refs(r.get("blocks") or []) for r in results)
@@ -492,6 +553,18 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
                 f"re-run with --resolve-refs to inline them.",
                 err=True,
             )
+    elif dead_refs:
+        # Only sayable with --resolve-refs: without it nothing is looked up, so
+        # a raw ((uuid)) in the output means "not resolved", not "gone". With
+        # it, the two look identical on stdout — this is what tells them apart.
+        # A notice rather than an error: the page is still readable, and one
+        # stale ref must not cost the whole read.
+        for uuid in dead_refs:
+            results_with = [r["page"] for r in results
+                            if f"(({uuid}))" in json.dumps(r.get("blocks") or [])]
+            where = f" (on {', '.join(results_with)})" if results_with else ""
+            click.echo(f"⚠️  block-ref (({uuid})) points at a block that no "
+                       f"longer exists{where}", err=True)
 
     if as_json:
         output(results if len(results) > 1 else results[0], True)
@@ -749,17 +822,23 @@ Examples:
   logseq-cli --token TOKEN get-backlinks --name "Alice" --name "Bob"    # batch
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name to find backlinks for (repeatable for batch: --name A --name B)")
+@click.option("--with-context", is_flag=True, help="Also show the blocks that do the linking, not just the page names. They come with the same API call, so this costs no extra read")
+@click.option("--limit", type=int, default=3, show_default=True, help="With --with-context: blocks kept per linking page; the remainder is reported as withheld. 0 keeps all")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_backlinks(ctx, page, as_json):
+def get_backlinks(ctx, page, with_context, limit, as_json):
     """Find pages that link to the given page(s) (uses native Logseq API). Pass --name multiple times for batch."""
     api = ctx.obj["api"]
 
     def _fetch_one(page_name):
         try:
             refs = api.get_page_linked_references(page_name)
-            return _extract_backlink_names(refs) if refs else []
+            if not refs:
+                return []
+            if with_context:
+                return _extract_backlink_context(refs, limit)
+            return _extract_backlink_names(refs)
         except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
             return find_backlinks(api, page_name)
@@ -782,7 +861,14 @@ def get_backlinks(ctx, page, as_json):
             else:
                 click.echo(f"Backlinks to '{p}' ({len(backlinks)}):")
                 for bl in backlinks:
-                    click.echo(f"  <- {bl}")
+                    if isinstance(bl, dict):
+                        click.echo(f"  <- {bl['page']}")
+                        for block in bl["blocks"]:
+                            click.echo(f"       {block['content']}")
+                        if bl.get("withheld"):
+                            click.echo(f"       ... {bl['withheld']} more not shown")
+                    else:
+                        click.echo(f"  <- {bl}")
             if len(results) > 1:
                 click.echo()
 

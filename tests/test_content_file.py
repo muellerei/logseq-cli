@@ -472,3 +472,64 @@ class TestInsertBlockTreeFile:
         assert result.exit_code == 0, result.output
         assert "DRY RUN" in result.output
         api.insert_block.assert_not_called()
+
+
+# ---------- stdin via "-" ---------------------------------------------------
+
+class TestContentFromStdin:
+    """``--content-file -`` reads stdin, the convention every Unix tool shares.
+
+    Without it a caller holding content in a pipe has to write a temp file
+    first, which is the one path --content-file exists to avoid.
+    """
+
+    def test_dash_reads_stdin(self, monkeypatch):
+        import io
+        monkeypatch.setattr("sys.stdin", io.StringIO("- a\n\t- b\n"))
+        assert read_content_file("-") == "- a\n\t- b"
+
+    def test_stdin_keeps_utf8_and_indentation(self, monkeypatch):
+        import io
+        monkeypatch.setattr(
+            "sys.stdin", io.StringIO("**09:00** Größe geprüft\n\t- Alice' Hinweis\n"))
+        assert read_content_file("-") == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
+
+    def test_empty_stdin_is_rejected(self, monkeypatch):
+        """Same guard as an empty file: fail before any write, not after."""
+        import io
+        monkeypatch.setattr("sys.stdin", io.StringIO("   \n"))
+        with pytest.raises(click.BadParameter) as exc:
+            read_content_file("-")
+        assert "empty" in str(exc.value).lower()
+
+    def test_a_file_literally_named_dash_is_not_reachable(self, tmp_path, monkeypatch):
+        """"-" means stdin even if a file of that name sits in the cwd.
+
+        Documented rather than worked around: the convention wins, and a caller
+        who really wants that file can write ``./-``.
+        """
+        import io
+        (tmp_path / "-").write_text("from the file", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.stdin", io.StringIO("from stdin\n"))
+        assert read_content_file("-") == "from stdin"
+
+    def test_end_to_end_through_add_journal_block(self):
+        """The flag reaches the command, not just the helper.
+
+        CliRunner installs its own stdin, so the pipe is handed over through
+        ``input=`` rather than a monkeypatch — which is also the closer
+        analogue of a real shell pipeline.
+        """
+        api = MagicMock()
+        api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
+        api.get_page.return_value = {"name": "journal"}
+        api.get_page_blocks_tree.return_value = []
+        api.append_block_in_page.return_value = {"uuid": "u1"}
+        from unittest.mock import patch
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = CliRunner().invoke(
+                cli, ["add-journal-block", "--content-file", "-", "--dry-run"],
+                input="piped entry\n")
+        assert result.exit_code == 0, result.output
+        assert "1 block" in result.output
