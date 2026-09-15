@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-page --resolve-refs` names the block refs whose target is gone. The
+  detection already existed and was discarded: a failed lookup falls back to
+  printing the raw `((uuid))`, which is exactly how an unresolved ref renders —
+  so the output held two different things spelled the same way, and nothing
+  said which was which. The uuids are now collected during resolution and
+  reported on stderr, with `dead_refs` in the JSON payload.
+
+  A notice, not an error, and only under `--resolve-refs`: without the flag
+  nothing is looked up, so no claim about liveness could be made. Measured at
+  0 dead refs across 821 distinct refs in the reference graph — this is not a
+  defect there, it is cheap because the detection was already being thrown
+  away, and graphs with more deletion history are the case it serves.
+
 - `--content-file -` reads stdin, so content that is already in a pipe no
   longer needs a temporary file first — the one detour the option exists to
   remove. It goes through `read_content_file`, the single place both
