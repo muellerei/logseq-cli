@@ -146,6 +146,35 @@ class TestEdnString:
         assert edn_string("a\nb") == '"a\\nb"'
         assert edn_string("a\rb\tc") == '"a\\rb\\tc"'
 
+    def test_every_control_character_leaves_as_an_escape(self):
+        r"""No raw control character reaches the query.
+
+        \n, \r and \t have their own short forms; the rest go out as \uXXXX.
+        Checked across the whole C0 range plus DEL rather than for the few
+        that seemed likely, because "likely" is what left this gap: the three
+        with familiar names were handled and the other twenty-nine were not.
+        """
+        for code in list(range(0x20)) + [0x7F]:
+            out = edn_string(chr(code))
+            assert chr(code) not in out, f"raw control char U+{code:04X} in {out!r}"
+
+    def test_control_characters_use_the_unicode_escape(self):
+        assert edn_string("a\x00b") == '"a\\u0000b"'
+        assert edn_string("a\x1bb") == '"a\\u001Bb"'
+        assert edn_string("a\x7fb") == '"a\\u007Fb"'
+
+    def test_the_short_forms_win_over_the_unicode_escape(self):
+        """\\n stays \\n, not \\u000A: both are correct EDN, but a query a
+        human may read should not spell the common case the long way."""
+        assert edn_string("\n") == '"\\n"'
+        assert edn_string("\r") == '"\\r"'
+        assert edn_string("\t") == '"\\t"'
+
+    def test_the_escaping_backslash_is_not_re_escaped(self):
+        r"""A literal backslash followed by 'n' must not become \n: the
+        backslash pass runs first, so the output carries \\ then a plain n."""
+        assert edn_string("a\\nb") == '"a\\\\nb"'
+
 
 class TestEdnKeyword:
     ACCEPTED = ["type", "journal?", "exclude-from-graph-view", "last-updated",

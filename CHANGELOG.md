@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `edn_string` let most control characters through unescaped. Only `\n`, `\r`
+  and `\t` had short forms; the other twenty-nine in the C0 range, and DEL,
+  travelled into the query as raw bytes — while the function's own docstring
+  already claimed that "control characters become EDN escapes". They now leave
+  as `\uXXXX`, the three familiar ones keeping their short form so a query a
+  human may read does not spell the common case the long way.
+
+  Not a way out of the string literal: that still needs a quote or a newline,
+  and both were already covered, so nothing could be injected through this.
+  What it fixes is the same class of defect as the escaping gap in 0.9.0 — a
+  value that does not arrive as it was meant, and a stated rule that the code
+  did not keep. Found by re-reading the upstream project whose hardening
+  prompted the 0.9.0 work (`kerim/logseq-http-server` 0.0.7), which escapes
+  control characters as a group; three of its four hardening items were
+  already covered here, this one was not.
+
+  The test walks the whole C0 range plus DEL rather than the few that seemed
+  likely — "likely" is what left the gap, since the three with familiar names
+  were handled and the rest were not.
+
+
 ### Fixed
 
 - `get-page` did not report unresolved block references. Without
