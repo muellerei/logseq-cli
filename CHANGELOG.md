@@ -5,6 +5,27 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `get-todos --from/--to` only filtered the journal subset of the result. A
+  task whose page carries no `journal-day` was admitted regardless of the
+  range, so a range that predates the graph still returned every task on an
+  ordinary page — most of the result, silently unfiltered. The `--help` text
+  said as much ("Non-journal pages are always included"), which made the
+  behaviour documented rather than defensible: no caller could tell which part
+  of the output had been filtered and which had been waved through.
+
+  A task that cannot be shown to fall inside the range now falls out of it.
+  The same applies to an unparseable `journal-day`, which took the exception
+  branch and was likewise let through — a rarer input reaching the same silent
+  pass-through.
+
+  This changes output for anyone passing `--from` or `--to`. Without a range
+  nothing changes, and the options were absent from the README, so the fix was
+  preferred over a second flag guarding the old behaviour.
+
 ## [0.11.0] - 2026-09-15
 
 ### Security
