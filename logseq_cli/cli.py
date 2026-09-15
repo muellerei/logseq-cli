@@ -2165,6 +2165,16 @@ Note:
 def create_page(ctx, page, content, as_json):
     """Create a new page, optionally with initial content."""
     api = ctx.obj["api"]
+
+    # Logseq answers createPage for an existing page with that page, so the
+    # call alone cannot tell "created" from "was already there" — the command
+    # reported success either way, and --content went on to append to the page
+    # that existed. A retry after a timeout therefore duplicated content and
+    # was told the write had succeeded. Ask first.
+    if api.get_page(page) is not None:
+        fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
+             "or delete-page first.", as_json=as_json, page=page, exists=True)
+
     properties = {"journal?": True} if is_journal_date(page) else None
     result = api.create_page(page, properties)
 

@@ -130,8 +130,12 @@ class TestAddJournalEntry:
 
 
 class TestCreatePageWithContent:
+    # create-page refuses a page that already exists, so a run that is meant to
+    # reach the write path has to start from an absent one. _dead_api answers
+    # get_page with a page, which is the existing case.
     def test_failed_content_write_aborts(self):
         api = _dead_api()
+        api.get_page.return_value = None
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "create-page", "--name", "New", "--content", "Text"])
@@ -139,6 +143,7 @@ class TestCreatePageWithContent:
 
     def test_page_without_content_is_unaffected(self):
         api = _dead_api()
+        api.get_page.return_value = None
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, ["create-page", "--name", "New"])
         assert r.exit_code == 0, r.output
