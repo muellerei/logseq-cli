@@ -42,6 +42,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-todos --due-from/--due-to` filter by when a task is due, from
+  `SCHEDULED`/`DEADLINE`, as opposed to `--from/--to`, which date a task by the
+  journal page it sits on. Both dates are surfaced per task; a task carrying
+  both is placed by its deadline, since that is the commitment.
+
+  **Repeating tasks needed a decision.** Logseq stores the date as written and
+  never the next occurrence — a weekly task created in 2020 still reads
+  `20200106` — so filtering on the stored value would place a live task in the
+  year it was created. The next occurrence is derived instead, and reported as
+  `next_due` beside the stored date rather than replacing it.
+
+  The interval grammar (`+`, `++`, `.+`) and the weekday rule for week repeats
+  are Logseq's own, read off `frontend/handler/repeated.cljs` (0.10.12). The
+  starting point deliberately is not: `next-timestamp-text` runs when a task is
+  ticked off (`update-timestamps-content!` in `handler/editor.cljs`), where the
+  stored date is near today and a single step suffices. Applied to a task that
+  was never ticked off, `+` and `++` return a date still in the past, which
+  answers nothing about what is due. So the single step is kept where it lands
+  in the future, and otherwise the `.+` loop runs for every form.
+
+  An initial version excluded repeaters from the range and reported them, on
+  the assumption that `.+` needed the completion time and could not be derived.
+  Reading the source refuted that — all three forms compute from the written
+  date, the clock and the interval — so the weaker answer was replaced. What
+  survives of it: a repeater whose interval cannot be read gets no `next_due`,
+  and is reported on stderr rather than guessed at.
+
+  Also fixed while here: the task text no longer carries the `SCHEDULED:`/
+  `DEADLINE:` lines or the `:LOGBOOK:` drawer. Those are metadata of the task,
+  not the task, and left in they made a reported repeater print its own
+  timestamp line instead of what it says.
+
 - `get-backlinks --with-context` shows the blocks that do the linking, not
   only the page names. `getPageLinkedReferences` already answers
   `[page, [block, ...]]` pairs, so the blocks arrive with the call that yields

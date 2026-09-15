@@ -1,5 +1,6 @@
 import re
 import sys
+import calendar
 import json
 import datetime
 from collections import Counter
@@ -78,6 +79,115 @@ def journal_day_to_date(jd: int) -> datetime.date:
     """Convert YYYYMMDD integer to a date object."""
     s = str(jd)
     return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+
+
+# Repeating tasks
+# ---------------
+# Logseq stores a repeater's date as written, never the next occurrence, and
+# :block/scheduled follows that. The next one is therefore derived — using the
+# source's own formula rather than a second answer invented here.
+#
+# From frontend/handler/repeated.cljs (0.10.12), next-timestamp-text. All three
+# forms compute from the written date, the current time and the interval; the
+# completion time is not an input, which is what makes this derivable:
+#
+#   .+   add delta until the result is in the future; week intervals keep their
+#        weekday (repeat-until-future-timestamp)
+#   ++   add delta once, but only if the written date is already past
+#   +    add delta once, unconditionally
+_REPEATER_RE = re.compile(
+    r"(?:SCHEDULED|DEADLINE):\s*<[^>]*?(\+\+|\.\+|\+)(\d+)([hdwmy])[^>]*>"
+)
+
+
+def parse_repeater(content: str):
+    """Extract ``(kind, num, unit)`` from a SCHEDULED/DEADLINE line, or None.
+
+    ``kind`` is ``"+"``, ``"++"`` or ``".+"`` exactly as Logseq spells it. The
+    order in the pattern matters: ``++`` and ``.+`` must be tried before the
+    bare ``+``, or every repeater would read as ``+``.
+    """
+    if not content:
+        return None
+    match = _REPEATER_RE.search(content)
+    if not match:
+        return None
+    return match.group(1), int(match.group(2)), match.group(3)
+
+
+def _add_interval(start: datetime.date, num: int, unit: str):
+    """Add ``num`` units to ``start``. Returns None for an unknown unit.
+
+    Months and years are handled by arithmetic on the calendar fields rather
+    than by a fixed day count, clamping the day to the target month's length
+    (31 January plus one month is 28 or 29 February, as a calendar reads it).
+    """
+    if unit == "h":
+        # Hour repeats exist in the grammar; at date granularity the smallest
+        # step that can move the result is a day.
+        return start + datetime.timedelta(days=1)
+    if unit == "d":
+        return start + datetime.timedelta(days=num)
+    if unit == "w":
+        return start + datetime.timedelta(weeks=num)
+    if unit == "m":
+        month_index = start.month - 1 + num
+        year = start.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(start.day, calendar.monthrange(year, month)[1])
+        return datetime.date(year, month, day)
+    if unit == "y":
+        year = start.year + num
+        day = min(start.day, calendar.monthrange(year, start.month)[1])
+        return datetime.date(year, start.month, day)
+    return None
+
+
+def next_occurrence(start: datetime.date, repeater, today: datetime.date = None):
+    """Next due date of a repeating task, or None if it cannot be derived.
+
+    ``repeater`` is what :func:`parse_repeater` returns. ``today`` is injectable
+    so the rule can be tested against fixed dates instead of the clock.
+    """
+    if not repeater or start is None:
+        return None
+    kind, num, unit = repeater
+    if today is None:
+        today = datetime.date.today()
+
+    if _add_interval(start, num, unit) is None:
+        return None
+
+    # Logseq's own formula answers a different question than this one.
+    # next-timestamp-text runs at the moment a task is ticked off
+    # (update-timestamps-content! in handler/editor.cljs), where the stored date
+    # is near today and one step is enough. Applied to a task that was never
+    # ticked off, "+" and "++" return a date that is still in the past — useless
+    # for "what is due", which has to look forward from today whatever the form.
+    #
+    # So the single step is kept where it lands in the future, and otherwise the
+    # ".+" loop runs for every form. The interval is still Logseq's, and so is
+    # the weekday rule; only the starting point differs, because the question
+    # does.
+    if kind in ("+", "++"):
+        stepped = start if (kind == "++" and start > today) else _add_interval(start, num, unit)
+        if stepped is None or stepped > today:
+            return stepped
+
+    current = start
+    for _ in range(50000):
+        current = _add_interval(current, num, unit)
+        if current is None:
+            return None
+        if current > today:
+            break
+    else:
+        return None
+
+    if unit == "w" and current.weekday() != start.weekday():
+        delta = current.weekday() - start.weekday()
+        current += datetime.timedelta(days=(7 - delta) if delta > 0 else -delta)
+    return current
 
 
 def get_day_suffix(day: int) -> str:
