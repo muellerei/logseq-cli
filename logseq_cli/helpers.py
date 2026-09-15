@@ -1,4 +1,5 @@
 import re
+import sys
 import json
 import datetime
 from collections import Counter
@@ -656,9 +657,20 @@ def read_content_file(path: str) -> str:
     which is why this is the safe path for content with apostrophes, quotes or
     umlauts.
 
+    ``-`` reads stdin instead, the convention every Unix tool shares: content
+    that is already in a pipe would otherwise need a temporary file, which is
+    the one detour this option exists to remove. A file literally named ``-``
+    is then unreachable — the convention wins, and ``./-`` still names the file.
+
     Raises :class:`click.BadParameter` for a missing, unreadable, non-UTF-8 or
     effectively empty file, so the caller fails before any write.
     """
+    if path == "-":
+        raw = sys.stdin.read()
+        if not raw.strip():
+            raise click.BadParameter("--content-file is empty: stdin")
+        return raw.rstrip("\n")
+
     try:
         raw = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:

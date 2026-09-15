@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--content-file -` reads stdin, so content that is already in a pipe no
+  longer needs a temporary file first — the one detour the option exists to
+  remove. It goes through `read_content_file`, the single place both
+  `--content-file` and `--tree-file` pass, so all of them gained it at once.
+
+  A file literally named `-` becomes unreachable through this flag. That is the
+  usual trade for the convention, and `./-` still names the file.
+
 - `--dry-run` on `create-page` and `add-journal-entry`, the last two writes
   without one. The README has promised "`--dry-run` on everything that writes"
   since 0.9.0, and nothing held it to that: every dry-run test named the

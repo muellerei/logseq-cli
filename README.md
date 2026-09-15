@@ -161,6 +161,9 @@ logseq-cli add-journal-block --dry-run --content "**14:30** Meeting notes"
 # Write content from a file — no shell quoting, several flush "- " roots allowed
 logseq-cli add-journal-block --content-file entry.md
 
+# Or straight from a pipe — "-" reads stdin
+printf '**14:30** Notes\n\t- detail\n' | logseq-cli add-journal-block --content-file -
+
 # Export page as Logseq-compatible markdown
 logseq-cli get-page --page "My Page" --format markdown
 
@@ -210,7 +213,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 |---------|-------------|
 | `create-page --name NAME [--content TEXT] [--dry-run]` | Create a new page. Fails if it already exists, rather than appending `--content` to what is there; `--dry-run` reports which of the two a run would be |
 | `add-journal-entry --content TEXT [--dry-run]` | Add journal entry (deprecated, use add-journal-block) |
-| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots |
+| `add-journal-block --content TEXT` | Add block to journal — auto-detects hierarchical content (`--under-heading`, `--dry-run`). `--content-file FILE` reads the whole file as one tree: no shell quoting, flush `- ` lines become sibling roots. `--content-file -` reads stdin |
 | `add-journal-content --content TEXT` | Add hierarchical content to journal (`--under-heading`, `--dry-run`) |
 | `add-note-content --page NAME --content TEXT [--under-heading "## X"] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). `--dry-run` reports the target, the block count and whether page or heading would be created |
 
