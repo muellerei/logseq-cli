@@ -34,6 +34,12 @@ class InvalidKeywordError(ValueError):
 # stays allowed for foreign graphs and the camelCase view of getAllPages.
 _KEYWORD_RE = re.compile(r"^[A-Za-z0-9_?!*+<>=-]+$")
 
+# Everything left in the C0 range once \n, \r and \t have their short forms,
+# plus DEL. Handling only the three with familiar names was the actual gap:
+# a raw NUL or ESC travelled into the query unchanged while the docstring
+# already claimed otherwise.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 
 def edn_string(value: str) -> str:
     """Return ``value`` as an EDN string literal, quotes included.
@@ -41,8 +47,9 @@ def edn_string(value: str) -> str:
     Backslash is escaped FIRST, then the quote. The order looks swappable but
     is not: quoting first would leave the escaping backslashes themselves
     unescaped, which is exactly the bypass (input ending in ``\\``) this
-    function exists to close. Control characters become EDN escapes so they
-    cannot break the query across lines.
+    function exists to close. Every control character becomes an EDN escape —
+    ``\\n``, ``\\r`` and ``\\t`` in their short form, the rest as ``\\uXXXX`` —
+    so none can break the query across lines or reach Logseq as a raw byte.
 
     The surrounding quotes are part of the return value so a caller cannot
     forget them.
@@ -54,6 +61,7 @@ def edn_string(value: str) -> str:
         .replace("\r", "\\r")
         .replace("\t", "\\t")
     )
+    escaped = _CONTROL_RE.sub(lambda m: f"\\u{ord(m.group()):04X}", escaped)
     return f'"{escaped}"'
 
 
