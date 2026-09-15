@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-page` did not report unresolved block references. Without
+  `--resolve-refs` the output keeps every `((uuid))` verbatim, which carries no
+  meaning for a reader that is not the Logseq app; `get-journal-range` has
+  counted them on stderr since the flag existed, but `get-page` stayed silent,
+  so the same page read through two commands gave two different answers about
+  whether the output was complete. It now emits the same count. stdout is
+  unchanged, `--json` stays parseable, and a page without references prints
+  nothing extra.
+
 - `query-pages-by-property` found only the pages whose value happens to be
   stored as a scalar. Logseq keeps a property value either as a plain value or
   inside a collection, and the page does not show which: on a real graph `team`
