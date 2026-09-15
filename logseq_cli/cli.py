@@ -305,7 +305,13 @@ def _resolve_version() -> str:
 def cli(ctx, host, port, token, no_cache):
     """CLI for Logseq knowledge graph - pages, journals, blocks, search, and graph analysis."""
     ctx.ensure_object(dict)
-    api = LogseqAPI(host=host, port=port, token=token)
+    try:
+        api = LogseqAPI(host=host, port=port, token=token)
+    except InvalidPortError as e:
+        # Raised before any request. A traceback here would be worse than the
+        # unchecked value was: the group callback runs ahead of every command,
+        # so this is the first thing a user sees, including under --json.
+        raise click.ClickException(str(e)) from None
     if no_cache:
         api.cache_enabled = False
     ctx.obj["api"] = api

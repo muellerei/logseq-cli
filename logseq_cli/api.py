@@ -55,14 +55,62 @@ class DatalogQueryError(RuntimeError):
         self.query = query
 
 
+class InvalidPortError(ValueError):
+    """The configured port is not a port.
+
+    Raised before the first request, because the alternative is worse: an
+    unchecked value travels into the URL and comes back one step later as
+    "no listener" — the same message a correct port gets when Logseq is not
+    running. Two causes, one message, and the wrong one is the one people act
+    on.
+    """
+
+    def __init__(self, value: str, source: str = "LOGSEQ_PORT"):
+        super().__init__(
+            f"Invalid port {value!r}: {source} must be a number "
+            f"between 1 and 65535."
+        )
+        self.value = value
+        self.source = source
+
+
+def _validated_port(value: str, source: str = "LOGSEQ_PORT") -> str:
+    """Return ``value`` if it names a usable TCP port, else raise.
+
+    ``source`` names where the value came from, because that is what the
+    reader has to go and change: pointing at LOGSEQ_PORT when the value came
+    from ``--port`` sends them to a setting that is not the one in effect.
+
+    Surrounding whitespace is stripped rather than rejected: a trailing
+    newline is what a shell pipeline leaves behind, and the value is usable
+    once it is gone. Returned as a string because that is what the URL needs;
+    the int is only the check.
+    """
+    stripped = value.strip()
+    try:
+        port = int(stripped)
+    except ValueError:
+        raise InvalidPortError(value, source) from None
+    if not 1 <= port <= 65535:
+        raise InvalidPortError(value, source)
+    return stripped
+
+
 class LogseqAPI:
     def __init__(self, host=None, port=None, token=None):
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
+        port_source = "--port" if port else "LOGSEQ_PORT"
         self.port = port or os.getenv("LOGSEQ_PORT", "12315")
         self.token = token or os.getenv("LOGSEQ_TOKEN", "")
-        self.base_url = os.getenv(
-            "LOGSEQ_API_URL", f"http://{self.host}:{self.port}/api"
-        )
+        # Only checked when the port is actually used. LOGSEQ_API_URL replaces
+        # the assembled URL, and a LOGSEQ_PORT left over in a shell profile
+        # must not fail a run that never reads it.
+        explicit_url = os.getenv("LOGSEQ_API_URL")
+        if explicit_url:
+            self.base_url = explicit_url
+        else:
+            self.port = _validated_port(self.port, port_source)
+            self.base_url = f"http://{self.host}:{self.port}/api"
         try:
             ttl = int(os.getenv("LOGSEQ_CLI_CACHE_TTL", "60"))
         except ValueError:
