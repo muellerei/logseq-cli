@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 def _api_with_blocks(blocks, ref_block=None):
@@ -189,3 +190,67 @@ class TestGetPageHeading:
         # Either stderr (mix_stderr default) or stdout carries a not-found warning.
         combined = result.output.lower()
         assert "not found" in combined or "warning" in combined
+
+
+class TestGetPageUnresolvedRefWarning:
+    """A ((uuid)) left in the output is dead weight for the caller.
+
+    get-journal-range has warned about this since the flag existed; get-page
+    stayed silent, so the same page read through two commands gave two
+    different answers about whether the output was complete.
+    """
+
+    UUID = "11111111-2222-3333-4444-555555555555"
+
+    def test_warns_on_stderr_when_flag_is_missing(self):
+        blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
+        api = _api_with_blocks(blocks)
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "Foo", "--no-backlinks"])
+        assert result.exit_code == 0, result.output
+        assert "1 unresolved block-ref" in result.stderr
+        assert "--resolve-refs" in result.stderr
+
+    def test_counts_refs_in_children_too(self):
+        blocks = [{
+            "content": f"parent (({self.UUID}))", "uuid": "b1",
+            "children": [{"content": f"child (({self.UUID}))", "uuid": "b2", "children": []}],
+        }]
+        api = _api_with_blocks(blocks)
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "Foo", "--no-backlinks"])
+        assert result.exit_code == 0, result.output
+        assert "2 unresolved block-ref" in result.stderr
+
+    def test_silent_when_flag_resolves_them(self):
+        blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
+        ref = {"content": "the target", "page": {"originalName": "Src"}}
+        api = _api_with_blocks(blocks, ref_block=ref)
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "Foo", "--no-backlinks", "--resolve-refs"])
+        assert result.exit_code == 0, result.output
+        assert "unresolved" not in result.stderr
+
+    def test_silent_when_page_has_no_refs(self):
+        blocks = [{"content": "plain text", "uuid": "b1", "children": []}]
+        api = _api_with_blocks(blocks)
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "Foo", "--no-backlinks"])
+        assert result.exit_code == 0, result.output
+        assert "unresolved" not in result.stderr
+
+    def test_warning_does_not_pollute_json_payload(self):
+        """stdout must stay parseable; the warning belongs on stderr."""
+        import json
+        blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
+        api = _api_with_blocks(blocks)
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "Foo", "--no-backlinks", "--json"])
+        assert result.exit_code == 0, result.output
+        json.loads(result.stdout)
+        assert "unresolved" in result.stderr

@@ -478,6 +478,15 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
         if result["page"] in missing:
             result["exists"] = False
 
+    if not resolve_refs:
+        total_refs = sum(_count_unresolved_refs(r.get("blocks") or []) for r in results)
+        if total_refs > 0:
+            click.echo(
+                f"⚠️  {total_refs} unresolved block-ref(s) in output — "
+                f"re-run with --resolve-refs to inline them.",
+                err=True,
+            )
+
     if as_json:
         output(results if len(results) > 1 else results[0], True)
     else:
