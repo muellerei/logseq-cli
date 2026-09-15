@@ -29,6 +29,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   likely — "likely" is what left the gap, since the three with familiar names
   were handled and the rest were not.
 
+### Added
+
+- `doctor` now names which Logseq generation is on the other end. A 2.x (DB)
+  graph answers this same HTTP API, so every existing check passed against one:
+  port open, token accepted, API responding. What it does not carry are the
+  fields these commands read — 2.x renamed `:block/original-name` and
+  `:block/content` to `:block/title` — so reads came back empty instead of
+  failing, which is the shape an empty graph has. The user was left comparing
+  their own notes against a result that could not tell them the cause was one
+  version number away.
+
+  The rule is Logseq's own: a graph url starting `logseq_db_` is a DB graph,
+  `logseq_local_` a file graph (`db-based-graph?` in
+  `deps/db/src/logseq/db/sqlite/util.cljs`, prefixes in
+  `deps/common/src/logseq/common/config.cljs`). Taken from upstream rather than
+  inferred from a response, so the classification rests on the definition both
+  kinds are built from instead of on one observed example.
+
+  Two candidate signals were rejected by measuring rather than reasoning:
+  `file` is set on 962 of 1845 pages and `format` on 22, so neither separates
+  the kinds. Two API routes were rejected by reading upstream:
+  `checkCurrentIsDbGraph` exists in 2.x but not in 0.10.15
+  (`MethodNotExist`), and `getInfo().supportDb` reads like the flag for this
+  while being hardcoded `true` — it says the build can open DB graphs, not
+  that this graph is one.
+
+  An unrecognised or absent url reports as undetermined and leaves the run
+  healthy. A wrong "file graph, all good" would be worse than no answer: it
+  rules out the one cause the reader should be looking at.
 
 ### Fixed
 

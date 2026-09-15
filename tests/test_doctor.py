@@ -185,3 +185,83 @@ class TestRuntimeChecks:
         assert "requests" in packages["detail"]
         assert payload["healthy"] is False
         assert "remedy" in payload
+
+
+class TestGraphKind:
+    """Which Logseq generation is on the other end.
+
+    A DB graph (2.x) answers the same API but keeps a different data model:
+    the fields these commands read are not there, so reads come back empty
+    rather than failing. Empty is the same shape an empty graph has, which
+    leaves the user comparing their own graph against a result that cannot
+    tell them why. `doctor` names the kind so that question is answered where
+    it is asked.
+
+    The rule is Logseq's own (deps/db/src/logseq/db/sqlite/util.cljs,
+    `db-based-graph?`): the graph url starts with `logseq_db_` for a DB graph,
+    `logseq_local_` for a file graph.
+    """
+
+    def test_a_file_graph_is_reported_as_supported(self, api, listener):
+        listener(True)
+        api.call.return_value = {"currentGraph": "logseq_local_/Users/x/notes"}
+        api.get_all_pages.return_value = [{"name": "a", "originalName": "A"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        checks = {c["check"]: c for c in json.loads(result.stdout)["checks"]}
+        assert checks["graph kind"]["ok"] is True
+        assert "file" in checks["graph kind"]["detail"].lower()
+        assert json.loads(result.stdout)["healthy"] is True
+
+    def test_a_db_graph_fails_and_says_why(self, api, listener):
+        """The whole point: not "0 pages", but which Logseq this is."""
+        listener(True)
+        api.call.return_value = {"currentGraph": "logseq_db_my-notes"}
+        api.get_all_pages.return_value = [{"id": 1, "title": "A"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        payload = json.loads(result.stdout)
+        checks = {c["check"]: c for c in payload["checks"]}
+        assert checks["graph kind"]["ok"] is False
+        assert "2.x" in checks["graph kind"]["detail"]
+        assert payload["healthy"] is False
+        assert "remedy" in payload
+        assert "0.10" in payload["remedy"] or "file" in payload["remedy"].lower()
+
+    def test_a_db_graph_says_so_in_plain_output_too(self, api, listener):
+        listener(True)
+        api.call.return_value = {"currentGraph": "logseq_db_my-notes"}
+        api.get_all_pages.return_value = []
+        result = CliRunner().invoke(cli, ["doctor"])
+        assert result.exit_code == 1
+        assert "graph kind" in result.output
+        assert "2.x" in result.output
+
+    def test_an_unknown_url_shape_does_not_claim_to_know(self, api, listener):
+        """Neither prefix: report it as undetermined rather than guess.
+
+        A wrong "file graph, all good" is worse than no answer, because it
+        rules out the one cause the user should be looking at.
+        """
+        listener(True)
+        api.call.return_value = {"currentGraph": "something-else"}
+        api.get_all_pages.return_value = [{"name": "a"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        payload = json.loads(result.stdout)
+        checks = {c["check"]: c for c in payload["checks"]}
+        assert checks["graph kind"]["ok"] is None
+        assert payload["healthy"] is True, "an undetermined kind must not fail a working setup"
+
+    def test_a_missing_graph_url_reports_undetermined(self, api, listener):
+        listener(True)
+        api.call.return_value = {}
+        api.get_all_pages.return_value = [{"name": "a"}]
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        checks = {c["check"]: c for c in json.loads(result.stdout)["checks"]}
+        assert checks["graph kind"]["ok"] is None
+
+    def test_the_kind_is_not_claimed_when_the_api_never_answered(self, api, listener, process):
+        """No answer is not evidence about the graph kind."""
+        listener(False)
+        process(False)
+        result = CliRunner().invoke(cli, ["doctor", "--json"])
+        checks = {c["check"] for c in json.loads(result.stdout)["checks"]}
+        assert "graph kind" not in checks
