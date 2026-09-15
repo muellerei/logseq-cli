@@ -10,6 +10,7 @@ Validation must survive the preview too: a --dry-run that swallows "block not
 found" or "ambiguous selector" would report a write that could never succeed.
 """
 import json
+import pathlib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -522,3 +523,101 @@ class TestDryRunNeverCreatesTheJournalPage:
         api.get_page.return_value = {"name": "sep 13th, 2026"}
         result = self._run(api, "--content", "Entry", "--dry-run")
         assert "would be created" not in result.stdout
+
+
+class TestEveryWriteHasADryRun:
+    """The README promises "--dry-run on everything that writes".
+
+    Nothing held it to that. ``create-page`` shipped without one and the gap
+    survived because every test here names the commands it checks, so a command
+    that was never named was never missed. This walks the registry instead: a
+    new write command is covered the moment it is added.
+
+    A command counts as writing if it calls a mutating API method. That is read
+    off the source rather than declared in a list here, so the two cannot drift
+    apart the way a hand-kept inventory would.
+    """
+
+    # The wrappers in api.py that mutate the graph, by the name the CLI calls.
+    _MUTATING_CALLS = (
+        "create_page", "delete_page", "rename_page",
+        "append_block_in_page", "insert_block", "insert_batch_block",
+        "update_block", "remove_block", "move_block", "replace_text",
+        "upsert_block_property", "remove_block_property",
+    )
+
+    @staticmethod
+    def _command_bodies():
+        """Map each command function name to its source text.
+
+        Read from the module file rather than via ``inspect``: every command is
+        wrapped by ``handle_connection_error``, and ``functools.wraps`` copies
+        enough metadata that ``getsource`` hands back the wrapper for all of
+        them. Splitting the file on top-level ``def`` keeps this independent of
+        the decorator stack.
+        """
+        import re
+        import logseq_cli.cli as cli_module
+
+        source = pathlib.Path(cli_module.__file__).read_text(encoding="utf-8")
+        bodies = {}
+        starts = [(m.start(), m.group(1))
+                  for m in re.finditer(r"^def ([a-z_][a-z0-9_]*)\(", source, re.M)]
+        for index, (offset, name) in enumerate(starts):
+            end = starts[index + 1][0] if index + 1 < len(starts) else len(source)
+            bodies[name] = source[offset:end]
+        return bodies
+
+    def _writing_commands(self):
+        from logseq_cli.cli import cli as root
+
+        bodies = self._command_bodies()
+        writing = {}
+        for name, command in root.commands.items():
+            func = command.callback
+            while hasattr(func, "__wrapped__"):
+                func = func.__wrapped__
+            source = bodies.get(func.__name__, "")
+            if any(f"api.{call}(" in source for call in self._MUTATING_CALLS):
+                writing[name] = command
+        return writing
+
+    def test_the_scan_finds_the_known_writers(self):
+        """Guards the guard: a scan that finds nothing would pass silently."""
+        found = self._writing_commands()
+        for expected in ("create-page", "delete-page", "rename-page",
+                         "update-block", "insert-block"):
+            assert expected in found, (
+                f"{expected} writes but the scan missed it — the detection is "
+                f"broken, not the commands. Found: {sorted(found)}"
+            )
+
+    def test_every_writing_command_offers_dry_run(self):
+        missing = []
+        for name, command in self._writing_commands().items():
+            flags = {opt for param in command.params
+                     for opt in getattr(param, "opts", ())}
+            if "--dry-run" not in flags:
+                missing.append(name)
+        assert not missing, (
+            "these commands write but have no --dry-run, while the README "
+            f"promises one on every write: {sorted(missing)}"
+        )
+
+    def test_add_journal_entry_dry_run_creates_no_page(self):
+        """The preview ran after the journal page had been created.
+
+        A --dry-run that writes is worse than none: it is the run people reach
+        for to find out what would happen. Caught by hand while adding the flag,
+        which is why it is asserted rather than assumed — the scan above only
+        sees that the option exists.
+        """
+        api = MagicMock()
+        api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
+        api.get_page.return_value = None  # journal page not there yet
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = CliRunner().invoke(
+                cli, ["add-journal-entry", "--content", "Entry", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        api.create_page.assert_not_called()
+        api.append_block_in_page.assert_not_called()

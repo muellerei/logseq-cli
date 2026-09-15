@@ -26,6 +26,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing changes, and the options were absent from the README, so the fix was
   preferred over a second flag guarding the old behaviour.
 
+- `create-page` reported success for a page that already existed. Logseq
+  answers createPage for an existing page with that page rather than an error,
+  so the command could not tell "created" from "was already there" — and said
+  `created` either way, with exit 0. `--content` then appended to the page that
+  was already there, so an agent retrying after a timeout duplicated content
+  and was told the write had succeeded.
+
+  The page is now looked up first and an existing one is refused, naming
+  `add-note-content` as the way to add to a page that is there. This is the
+  same class of defect as the silent write failures closed in 0.6.0: an
+  operation that could not have worked, reported as though it had. The comment
+  beside the content write already named the class for `--content`; the page
+  itself had been left out.
+
+### Added
+
+- `--dry-run` on `create-page` and `add-journal-entry`, the last two writes
+  without one. The README has promised "`--dry-run` on everything that writes"
+  since 0.9.0, and nothing held it to that: every dry-run test named the
+  commands it checked, so a command that was never named was never missed.
+
+  A test now walks the command registry instead, marking a command as writing
+  if its body calls a mutating API wrapper and failing if it has no `--dry-run`.
+  That is read off the module source rather than a list kept by hand, so the
+  two cannot drift apart — a new write command is covered the moment it is
+  added.
+
+  Worth recording, because it is the same mistake one layer up: the first
+  version of `add-journal-entry --dry-run` previewed *after* creating the
+  journal page, so the one run meant to change nothing left a page behind. The
+  registry test does not catch that — it only sees the flag exists — so the
+  assertion that a preview issues no mutating call is spelled out separately.
+
 ## [0.11.0] - 2026-09-15
 
 ### Security
