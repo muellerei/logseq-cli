@@ -398,3 +398,23 @@ class TestGetTodosBlockReferences:
         line = next(l for l in result.output.splitlines() if "also on" in l)
         assert "Wednesday; 2026-09-14" in line, (
             f"occurrences are not separably delimited: {line!r}")
+
+    def test_lifting_the_cap_does_not_zero_the_withheld_count(self):
+        """--refs-limit 0 lifts the cap; it does not widen the range.
+
+        The two are easy to conflate, because "0 keeps all" reads as though the
+        cap were the only reason an occurrence goes uncounted. It is not: with a
+        range set, occurrences outside it are withheld too, and that is the
+        point — a task carried since March must not look new.
+        """
+        refs = [self._ref(20260319)] + [self._ref(20260101 + i) for i in range(3)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--refs-limit", "0", "--from", "2026-03-17",
+                      "--to", "2026-03-19", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 1, todo["references"]
+        assert todo["references_withheld"] == 3, (
+            f"--refs-limit 0 must not smuggle out-of-range occurrences in: {todo!r}")

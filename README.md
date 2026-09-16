@@ -238,7 +238,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 keeps all) and the remainder is reported as `references_withheld`. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
+| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 lifts the cap) and `references_withheld` counts what was left out — with a range that includes occurrences outside it, so lifting the cap does not make the count zero. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
 | `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
@@ -520,6 +520,12 @@ carried into. `--refs-limit` caps that list and `references_withheld` counts
 the rest, because a task carried 33 times must not decide the size of the
 output, and `--no-follow-refs` restores the older reading for callers who want
 to know where blocks live rather than where they appear.
+
+`references_withheld` counts two things a range query leaves out: occurrences
+beyond the cap, and occurrences outside the range itself. Lifting the cap with
+`--refs-limit 0` therefore does not drive the count to zero — a task carried
+since March still reports the days before the queried week. That is the reading
+a range query wants, because the alternative is a task that looks new.
 
 ### Failure has one exit code, and no resume
 

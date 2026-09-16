@@ -3724,7 +3724,7 @@ Notes:
 @click.option("--due-to", "due_to", default=None, help="Only tasks due on or before this date. Same rule as --due-from")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
 @click.option("--refs-limit", "refs_limit", type=int, default=10, show_default=True,
-              help="Occurrences kept per task in 'references'; the remainder is reported as references_withheld. 0 keeps all")
+              help="Occurrences kept per task in 'references'; 0 lifts the cap. references_withheld counts everything left out, which with --from/--to also includes occurrences outside the range and on pages with no journal-day — so 0 does not make it zero")
 @click.option("--no-follow-refs", "no_follow_refs", is_flag=True,
               help="Do not resolve block-refs: report only where task blocks live, not where they appear. Saves one read")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
