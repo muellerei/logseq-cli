@@ -23,7 +23,7 @@ def _api_with_page(properties, text_values=None):
 
 
 def _invoke(api, key):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return split_runner().invoke(
             cli, ["get-properties", "--name", "Contents", "--property", key, "--json"])
 

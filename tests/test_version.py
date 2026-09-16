@@ -8,7 +8,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli, resolve_version
+from logseq_cli.cli import cli
+from logseq_cli.group import resolve_version
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 

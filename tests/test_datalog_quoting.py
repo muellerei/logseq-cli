@@ -271,7 +271,7 @@ class TestInjectionPerCaller:
         # Markers are a fixed whitelist, but still routed through edn_string,
         # so the built query carries them as proper string literals.
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(cli, ["get-todos", "--status", "TODO", "--json"])
         assert r.exit_code == 0, r.output
         assert rec.queries, "no query was built"
@@ -284,7 +284,7 @@ class TestInjectionPerCaller:
 
     def test_smart_query_content_search(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             split_runner().invoke(cli, ["smart-query", "--request", INJECTION, "--json"])
         assert rec.queries, "no query was built"
         q = rec.queries[0]
@@ -293,7 +293,7 @@ class TestInjectionPerCaller:
 
     def test_smart_query_links_to_lowercases(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             split_runner().invoke(cli, ["smart-query", "--request", "links to Alice", "--json"])
         assert rec.queries, "no query was built"
         # The case bug: :block/name is stored lowercased. Must query "alice".
@@ -302,7 +302,7 @@ class TestInjectionPerCaller:
 
     def test_smart_query_tagged_wraps_hash_in_literal(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             split_runner().invoke(cli, ["smart-query", "--request", "tagged foo", "--json"])
         assert rec.queries, "no query was built"
         q = rec.queries[0]
@@ -311,7 +311,7 @@ class TestInjectionPerCaller:
 
     def test_query_pages_by_property_value(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             split_runner().invoke(
                 cli,
                 ["query-pages-by-property", "--key", "type",
@@ -346,7 +346,7 @@ class TestStep4ErrorHandling:
 
     def test_rejected_property_key_has_its_own_reason(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "type) ?v] [?p",
                       "--json"])
@@ -359,7 +359,7 @@ class TestStep4ErrorHandling:
 
     def test_valid_property_key_still_works(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "type", "--json"])
         assert r.exit_code == 0, r.output
@@ -374,7 +374,7 @@ class TestPropertyKeyCasing:
 
     def test_camelcase_key_query_contains_kebab_form(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "excludeFromGraphView",
                       "--json"])
@@ -386,7 +386,7 @@ class TestPropertyKeyCasing:
 
     def test_kebab_key_still_works(self):
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "exclude-from-graph-view",
                       "--json"])
@@ -397,7 +397,7 @@ class TestPropertyKeyCasing:
         """A camelCase key must match both spellings, since a foreign graph
         might store either. Both appear in the built query."""
         rec = QueryRecorder(result=[])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "techStack", "--json"])
         q = rec.queries[0]
@@ -410,7 +410,7 @@ class TestPropertyKeyCasing:
         page = {"name": "P", "original-name": "P",
                 "properties": {"tech-stack": "Python"}}
         rec = QueryRecorder(result=[[page]])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+        with patch("logseq_cli.group.LogseqAPI", return_value=rec):
             r = split_runner().invoke(
                 cli, ["query-pages-by-property", "--key", "techStack", "--json"])
         assert r.exit_code == 0, r.output

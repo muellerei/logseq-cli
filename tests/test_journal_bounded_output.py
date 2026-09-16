@@ -27,7 +27,7 @@ def _journal_pages(days):
 @pytest.fixture
 def api(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_all_pages.return_value = _journal_pages(range(1, 11))  # 1..10 Aug
     mock.get_page_blocks_tree.return_value = [
         {"uuid": "h", "content": "## Log",

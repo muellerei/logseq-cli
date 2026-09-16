@@ -29,7 +29,7 @@ PAGES = [
 def _run(query):
     api = MagicMock()
     api.get_all_pages.return_value = PAGES
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return CliRunner().invoke(cli, ["--token", "T", "search-pages", "--query", query])
 
 

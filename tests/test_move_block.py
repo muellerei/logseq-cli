@@ -52,7 +52,7 @@ def _api(*, children_after=None, target_parent=1, src_parent_after=None,
 class TestMoveBlock:
     def test_under_moves_and_reports(self):
         api = _api(children_after=[{"uuid": SRC}])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--under", TGT])
         assert r.exit_code == 0, r.output
@@ -61,7 +61,7 @@ class TestMoveBlock:
 
     def test_before_moves_as_sibling(self):
         api = _api(sibling_order=[SRC, TGT])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--before", TGT])
         assert r.exit_code == 0, r.output
@@ -71,7 +71,7 @@ class TestMoveBlock:
     def test_before_requires_source_directly_in_front(self):
         """Same parent is not enough: a move that did nothing must not pass."""
         api = _api(sibling_order=[TGT, SRC])  # source lands AFTER the target
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--before", TGT])
         assert r.exit_code == 1
@@ -80,7 +80,7 @@ class TestMoveBlock:
     def test_silent_refusal_is_reported(self):
         """Moving into the block's own subtree: Logseq just does nothing."""
         api = _api(children_after=[])  # source never shows up under the target
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--under", TGT])
         assert r.exit_code == 1
@@ -91,7 +91,7 @@ class TestMoveBlock:
         api = _api()
         api.get_block.side_effect = lambda uuid, include_children=True: (
             {"uuid": SRC, "content": "x", "children": []} if uuid == SRC else None)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--under", "nope"])
         assert r.exit_code == 1
@@ -100,7 +100,7 @@ class TestMoveBlock:
 
     def test_same_block_is_rejected(self):
         api = _api()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--before", SRC])
         assert r.exit_code == 1
@@ -109,7 +109,7 @@ class TestMoveBlock:
 
     def test_exactly_one_position_flag(self):
         api = _api()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             both = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--under", TGT, "--before", TGT])
             neither = CliRunner().invoke(cli, ["move-block", "--id", SRC])
@@ -120,7 +120,7 @@ class TestMoveBlock:
 
     def test_dry_run_writes_nothing(self):
         api = _api(children_after=[{"uuid": SRC}])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "move-block", "--id", SRC, "--under", TGT, "--dry-run"])
         assert r.exit_code == 0, r.output
@@ -135,7 +135,7 @@ class TestCopyBlockRemoveIsGuarded:
         api = MagicMock()
         api.get_block.return_value = {"uuid": SRC, "content": "WICHTIG", "children": []}
         api.append_block_in_page.return_value = None  # silent write failure
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
         assert r.exit_code == 1
@@ -150,7 +150,7 @@ class TestCopyBlockRemoveIsGuarded:
             "children": [{"content": "Child", "children": []}]}
         api.append_block_in_page.return_value = {"uuid": "new-root"}
         api.insert_block.return_value = None
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
         assert r.exit_code == 1
@@ -160,7 +160,7 @@ class TestCopyBlockRemoveIsGuarded:
         api = MagicMock()
         api.get_block.return_value = {"uuid": SRC, "content": "Head", "children": []}
         api.append_block_in_page.return_value = {"uuid": "new-root"}
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
         assert r.exit_code == 0, r.output

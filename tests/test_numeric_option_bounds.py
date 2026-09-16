@@ -78,7 +78,7 @@ def _run(args):
     api.get_page_linked_references.return_value = []
     api.datascript_query.return_value = []
     api.get_page_blocks_tree.return_value = []
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return split_runner().invoke(cli, args), api
 
 

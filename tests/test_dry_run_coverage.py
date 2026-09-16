@@ -38,7 +38,7 @@ def _assert_no_mutation(api):
 def api():
     """A MagicMock LogseqAPI injected into the CLI context."""
     mock = MagicMock()
-    with patch("logseq_cli.cli.LogseqAPI", return_value=mock):
+    with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
 
@@ -485,7 +485,7 @@ class TestDryRunNeverCreatesTheJournalPage:
         return api
 
     def _run(self, api, *args):
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             return split_runner().invoke(cli, ["--token", "X", "add-journal-block", *args])
 
     def test_single_content_does_not_create_the_page(self):
@@ -661,7 +661,7 @@ class TestEveryWriteHasADryRun:
         api = MagicMock()
         api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
         api.get_page.return_value = None  # journal page not there yet
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = CliRunner().invoke(
                 cli, ["add-journal-entry", "--content", "Entry", "--dry-run"])
         assert result.exit_code == 0, result.output

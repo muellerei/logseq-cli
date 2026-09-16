@@ -24,7 +24,7 @@ class TestAddNoteContentProperties:
             {"content": "## Collection", "uuid": "heading-uuid"},
         ])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -49,7 +49,7 @@ class TestAddNoteContentProperties:
     def test_property_append_path_uses_appended_uuid(self):
         api = _build_api()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -65,7 +65,7 @@ class TestAddNoteContentProperties:
     def test_invalid_property_fails_before_any_write(self):
         api = _build_api()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -81,7 +81,7 @@ class TestAddNoteContentProperties:
     def test_numeric_value_is_coerced(self):
         api = _build_api()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -99,7 +99,7 @@ class TestInsertBlockProperties:
     def test_property_on_appended_block(self):
         api = _build_api()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--page", "Foo",
@@ -116,7 +116,7 @@ class TestInsertBlockProperties:
     def test_invalid_property_fails_before_write(self):
         api = _build_api()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--page", "Foo",
@@ -144,7 +144,7 @@ class TestUpdateBlockKeepsProperties:
 
     def test_properties_are_passed_back(self):
         api = self._api({"ticket": "ISSUE-42", "owner": ["Bob"]})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
@@ -153,7 +153,7 @@ class TestUpdateBlockKeepsProperties:
 
     def test_block_without_properties_passes_none(self):
         api = self._api({})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
@@ -161,7 +161,7 @@ class TestUpdateBlockKeepsProperties:
 
     def test_dry_run_names_what_it_keeps(self):
         api = self._api({"ticket": "ISSUE-42"})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--id", "u-1", "--content", "new", "--dry-run"])
         assert r.exit_code == 0, r.output
@@ -186,7 +186,7 @@ class TestRemovePropertyById:
     def test_id_targets_that_block(self):
         api = MagicMock()
         api.get_block.return_value = {"uuid": "b-9", "content": "x"}
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "remove-property", "--id", "b-9", "--key", "prio"])
         assert r.exit_code == 0, r.output
@@ -196,7 +196,7 @@ class TestRemovePropertyById:
     def test_page_path_still_uses_the_first_block(self):
         api = MagicMock()
         api.get_page_blocks_tree.return_value = [{"uuid": "first"}]
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "remove-property", "--name", "P", "--key", "type"])
         assert r.exit_code == 0, r.output
@@ -204,7 +204,7 @@ class TestRemovePropertyById:
 
     def test_exactly_one_selector(self):
         api = MagicMock()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             both = CliRunner().invoke(cli, [
                 "remove-property", "--name", "P", "--id", "b", "--key", "k"])
             neither = CliRunner().invoke(cli, ["remove-property", "--key", "k"])
@@ -216,7 +216,7 @@ class TestRemovePropertyById:
     def test_missing_block_aborts(self):
         api = MagicMock()
         api.get_block.return_value = None
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "remove-property", "--id", "nope", "--key", "k"])
         assert r.exit_code == 1

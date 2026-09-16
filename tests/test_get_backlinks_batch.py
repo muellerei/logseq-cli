@@ -24,7 +24,7 @@ def _api_with_refs(refs_by_page):
 
 def _run(args, api):
     runner = CliRunner()
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return runner.invoke(cli, args)
 
 

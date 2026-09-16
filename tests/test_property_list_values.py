@@ -26,7 +26,7 @@ def _api(rows):
 
 def _run(args, rows):
     api = _api(rows)
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         result = CliRunner().invoke(cli, ["--token", "T"] + args)
     return result, api
 
@@ -52,7 +52,7 @@ class TestTheQueryReachesBothForms:
         cfg.write_text('[graph]\nperson_property = "type"\nperson_value = "Person"\n',
                        encoding="utf-8")
         api = _api([])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             CliRunner().invoke(
                 cli, ["--token", "T", "smart-query", "--request", "personen"],
                 env={"LOGSEQ_CLI_CONFIG": str(cfg)})

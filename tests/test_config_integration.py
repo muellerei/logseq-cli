@@ -91,7 +91,7 @@ class TestProjectsNamespaceReachesTheQuery:
         """
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nprojects_namespace = "Projects/"\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte", "--json"])
         assert r.exit_code == 0, r.output
@@ -103,7 +103,7 @@ class TestProjectsNamespaceReachesTheQuery:
     def test_english_keyword_uses_the_same_setting(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nprojects_namespace = "Projects/"\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projects", "--json"])
         assert r.exit_code == 0, r.output
@@ -113,7 +113,7 @@ class TestProjectsNamespaceReachesTheQuery:
         """Guards against the setting being read but a default winning."""
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nprojects_namespace = "Partners/"\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte", "--json"])
         assert '"partners/"' in rec.queries[0]
@@ -123,7 +123,7 @@ class TestProjectsWithoutConfigFailsLoud:
     def test_exit_nonzero_and_nothing_queried(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte"])
         assert r.exit_code != 0
@@ -133,7 +133,7 @@ class TestProjectsWithoutConfigFailsLoud:
     def test_message_names_the_setting_and_the_section(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte"])
         msg = r.stderr
@@ -145,7 +145,7 @@ class TestProjectsWithoutConfigFailsLoud:
         "no projects found", which is exactly the confusion to avoid."""
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte"])
         assert r.stdout == ""
@@ -154,7 +154,7 @@ class TestProjectsWithoutConfigFailsLoud:
         """An empty prefix matches every page, so it must not be accepted."""
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nprojects_namespace = ""\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte"])
         assert r.exit_code != 0
@@ -167,7 +167,7 @@ class TestPersonPropertyReachesTheQuery:
     def test_property_and_value_both_appear(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "personen", "--json"])
         assert r.exit_code == 0, r.output
@@ -179,7 +179,7 @@ class TestPersonPropertyReachesTheQuery:
     def test_a_graphs_own_convention_is_used_verbatim(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nperson_property = "kind"\nperson_value = "Contact"\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "people", "--json"])
         assert r.exit_code == 0, r.output
@@ -192,7 +192,7 @@ class TestPersonPropertyReachesTheQuery:
     def test_missing_property_fails_loud(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "personen"])
         assert r.exit_code != 0
@@ -206,7 +206,7 @@ class TestPersonPropertyReachesTheQuery:
         query would match every page carrying the property at all."""
         rec = QueryRecorder(result=[])
         with config_env('[graph]\nperson_property = "type"\n'):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "personen"])
         assert r.exit_code != 0
@@ -226,7 +226,7 @@ class TestConfigErrorAsJson:
     def test_reason_is_config_error(self, config_env, request_text):
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", request_text, "--json"])
         assert r.exit_code != 0
@@ -237,7 +237,7 @@ class TestConfigErrorAsJson:
     def test_the_json_error_text_still_names_the_setting(self, config_env):
         rec = QueryRecorder(result=[])
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte", "--json"])
         payload = json.loads(r.stderr)
@@ -249,7 +249,7 @@ class TestConfigErrorAsJson:
         configure something."""
         rec = QueryRecorder(result=[])
         with config_env("[graph\nbroken"):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=rec):
+            with patch("logseq_cli.group.LogseqAPI", return_value=rec):
                 r = split_runner().invoke(
                     cli, ["smart-query", "--request", "projekte", "--json"])
         assert r.exit_code != 0
@@ -270,7 +270,7 @@ class TestHeadingShortcutEndToEnd:
     def test_shortcut_resolves_to_the_configured_heading(self, config_env):
         api = _journal_api()
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--under-heading", "tasks"])
@@ -289,7 +289,7 @@ class TestHeadingShortcutEndToEnd:
             {"content": "## Tasks", "uuid": "tasks-uuid"},
         ]
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--under-heading", "tasks"])
@@ -304,7 +304,7 @@ class TestHeadingShortcutEndToEnd:
             {"content": "## Notes", "uuid": "notes-uuid"},
         ]
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--under-heading", "## Notes"])
@@ -317,7 +317,7 @@ class TestHeadingShortcutEndToEnd:
         redirected write is not."""
         api = _journal_api()
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--under-heading", "taskz"])
@@ -328,7 +328,7 @@ class TestHeadingShortcutEndToEnd:
     def test_without_any_config_the_value_is_used_verbatim(self, config_env):
         api = _journal_api()
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--under-heading", "## Log"])
@@ -345,7 +345,7 @@ class TestDefaultHeadingPrecedence:
         api = _journal_api()
         with config_env(self.CONFIG):
             with patch.dict(os.environ, {"LOGSEQ_JOURNAL_HEADING": "## FromEnv"}):
-                with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+                with patch("logseq_cli.group.LogseqAPI", return_value=api):
                     r = split_runner().invoke(
                         cli, ["add-journal-block", "--content", "Entry"])
         assert r.exit_code == 0, r.output
@@ -355,7 +355,7 @@ class TestDefaultHeadingPrecedence:
     def test_config_default_applies_when_the_env_var_is_unset(self, config_env):
         api = _journal_api()
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry"])
         assert r.exit_code == 0, r.output
@@ -365,7 +365,7 @@ class TestDefaultHeadingPrecedence:
         api = _journal_api()
         with config_env(self.CONFIG):
             with patch.dict(os.environ, {"LOGSEQ_JOURNAL_HEADING": "## FromEnv"}):
-                with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+                with patch("logseq_cli.group.LogseqAPI", return_value=api):
                     r = split_runner().invoke(
                         cli, ["add-journal-block", "--content", "Entry",
                               "--under-heading", "## Explicit"])
@@ -376,7 +376,7 @@ class TestDefaultHeadingPrecedence:
         """--top-level means top level, whatever the file says."""
         api = _journal_api()
         with config_env(self.CONFIG):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry",
                           "--top-level"])
@@ -387,7 +387,7 @@ class TestDefaultHeadingPrecedence:
     def test_nothing_configured_means_top_level(self, config_env):
         api = _journal_api()
         with config_env(None):
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api):
                 r = split_runner().invoke(
                     cli, ["add-journal-block", "--content", "Entry"])
         assert r.exit_code == 0, r.output
