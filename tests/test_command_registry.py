@@ -18,7 +18,20 @@ same commit, and when it failed it would not say which name went.
 
 The cost is a deliberate line here for every new Command Name, next to the
 README row and the CHANGELOG entry that spec 007 already asks for.
+
+One thing the registry assertion alone cannot do, measured rather than
+assumed: run on its own it goes red when a module drops out of the import
+list, but in the full suite it stays green for four of the nine. Other test
+files import `logseq_cli.commands.blocks`, `.properties`, `.analysis` and
+`.pages` directly to reach a helper, and importing a command module registers
+its commands as a side effect. By the time this file runs, the registry has
+been filled by somebody else. `test_every_command_module_is_imported_by_the_entry_point`
+reads the import list itself, so it does not depend on what ran before it.
 """
+import ast
+import pathlib
+
+import logseq_cli.cli
 from logseq_cli.cli import cli
 
 # 38 Command Names for 37 Commands: `delete-block` is a second name for
@@ -67,3 +80,30 @@ EXPECTED = {
 
 def test_every_command_name_is_registered():
     assert set(cli.commands) == EXPECTED
+
+
+def test_every_command_module_is_imported_by_the_entry_point():
+    """The import list in cli.py names every module under commands/.
+
+    Asserted against the source rather than against `sys.modules`: a module
+    another test imported for a helper is loaded either way, so a registry
+    that looks complete says nothing about the entry point.
+    """
+    entry = pathlib.Path(logseq_cli.cli.__file__)
+    imported = {
+        alias.name
+        for node in ast.parse(entry.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.ImportFrom) and node.module == "logseq_cli.commands"
+        for alias in node.names
+    }
+    on_disk = {
+        p.stem
+        for p in (entry.parent / "commands").glob("*.py")
+        if p.stem != "__init__"
+    }
+    assert imported == on_disk, (
+        f"not imported by cli.py: {sorted(on_disk - imported)}; "
+        f"imported but no such module: {sorted(imported - on_disk)}. "
+        f"A command module that cli.py does not import registers nothing, and "
+        f"the CLI starts without its commands."
+    )
