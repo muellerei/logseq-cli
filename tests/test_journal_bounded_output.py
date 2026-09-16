@@ -119,7 +119,7 @@ class TestJournalRangeHeading:
 
 class TestJournalSummaryNoContent:
     def test_no_content_drops_bodies_but_keeps_length(self, api, monkeypatch):
-        monkeypatch.setattr("logseq_cli.cli.get_page_content",
+        monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
                             lambda api_, name: "x" * 500 + " [[Alice]]")
         result = CliRunner().invoke(cli, [
             "get-journal-summary", "--range", "this year", "--no-content", "--json"])
@@ -131,7 +131,7 @@ class TestJournalSummaryNoContent:
             assert entry["topics"] == ["Alice"]
 
     def test_default_still_includes_content(self, api, monkeypatch):
-        monkeypatch.setattr("logseq_cli.cli.get_page_content",
+        monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
                             lambda api_, name: "voller text")
         result = CliRunner().invoke(cli, [
             "get-journal-summary", "--range", "this year", "--json"])
