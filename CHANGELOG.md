@@ -28,14 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second layer is tested where it lives — on the extractor itself, since the
   guard otherwise hides it. See [#17](https://github.com/muellerei/logseq-cli/issues/17).
 
-- Three more numeric options accepted a negative value. None stated a false
-  number, which is why none of them had been found: they answered a different
-  question than the one asked, with exit code 0. `analyze-graph --days -1` moved
-  the cutoff into the future, so "recently updated" came back empty on a graph
-  that had been edited minutes earlier. `init --days -1` dropped the *oldest*
-  journal from the sample instead of limiting it, so the suggestion rested on a
-  quietly different set than the one asked for. `suggest-connections
-  --max-suggestions -1` dropped the weakest suggestion. All three now refuse the
+- Three more numeric options accepted a negative value. None of them announced
+  it, which is why none had been found: they answered a different question than
+  the one asked, with exit code 0. `analyze-graph --days -1` moved the cutoff
+  into the future, so "recently updated" came back empty on a graph that had
+  been edited minutes earlier. `init --days -1` dropped the *oldest* journal
+  from the sample instead of limiting it, so the suggestion rested on a quietly
+  different set than the one asked for. `suggest-connections
+  --max-suggestions -1` dropped the weakest suggestion — and, as the entry
+  below records, misreported the total while doing it. All three now refuse the
   value before reading anything.
 
 - `find-block` validated `--limit` after running its query, so a value it was
