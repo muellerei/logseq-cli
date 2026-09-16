@@ -28,6 +28,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second layer is tested where it lives — on the extractor itself, since the
   guard otherwise hides it. See [#17](https://github.com/muellerei/logseq-cli/issues/17).
 
+- Three more numeric options accepted a negative value. None stated a false
+  number, which is why none of them had been found: they answered a different
+  question than the one asked, with exit code 0. `analyze-graph --days -1` moved
+  the cutoff into the future, so "recently updated" came back empty on a graph
+  that had been edited minutes earlier. `init --days -1` dropped the *oldest*
+  journal from the sample instead of limiting it, so the suggestion rested on a
+  quietly different set than the one asked for. `suggest-connections
+  --max-suggestions -1` dropped the weakest suggestion. All three now refuse the
+  value before reading anything.
+
+- `find-block` validated `--limit` after running its query, so a value it was
+  going to refuse still cost a full graph read first (measured when the cap was
+  added: 71ms and 473KB for 1382 matches). The check now runs before the query,
+  which is where the other guards already sat. Found by a test asserting that a
+  refusal costs no API call — not by reading the code.
+
+### Changed
+
+- Every numeric option now states its lower bound in `--help`, including what
+  `0` means there, because it differs and the difference was written down
+  nowhere. `0` lifts the cap for `get-backlinks --limit` and `get-todos
+  --refs-limit`; it means "none at all" for `suggest-connections
+  --max-suggestions`, "today only" for the two `--days` windows, and is refused
+  by `find-block --limit` and `get-journal-range --tail/--limit`, where zero
+  matches is not an answer anyone asks for. `find-knowledge-gaps --min-refs` and
+  `suggest-connections --min-shared` are thresholds rather than caps and keep
+  taking any value.
+
+  The convention is recorded under *Design Principles* in `CONTRIBUTING.md`, and
+  `tests/test_numeric_option_bounds.py` derives the option list from the command
+  registry rather than naming them, so a numeric option added later is covered
+  the moment it exists. The two thresholds are named exceptions, checked in both
+  directions: an exemption for an option that no longer exists fails the suite
+  rather than silently covering a future option that inherits the name.
+
 ## [0.13.0] - 2026-09-16
 
 ### Changed

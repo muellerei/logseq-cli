@@ -73,6 +73,14 @@ logseq-cli/
 - **Locale-independent.** Weekday/month names are always English, regardless of system locale.
 - **Env var fallbacks.** User-configurable defaults via environment variables, not hardcoded values.
 - **Graceful degradation.** Connection errors print a clear message and exit with code 1.
+- **A numeric option validates its lower bound, before the first read.** Below
+  zero nothing here has a meaning, and an accepted nonsense value does not fail
+  loudly — it slices from the wrong end or moves a cutoff into the future and
+  answers a different question than the one asked. What `0` means differs per
+  option (no cap, none at all, today only, or invalid) and belongs in its
+  `--help` text, because that is where the caller looks. `tests/test_numeric_option_bounds.py`
+  derives the list from the command registry, so a new option is covered by it
+  the moment it exists.
 - **German + English.** `smart-query` keywords support both languages.
 
 ## Reporting Issues
