@@ -1,7 +1,7 @@
 """get-backlinks --with-context: which block does the linking, not just which page.
 
 The linking blocks already arrive in the API response — getPageLinkedReferences
-answers ``[page, [block, ...]]`` pairs — and ``_extract_backlink_names`` drops
+answers ``[page, [block, ...]]`` pairs — and ``extract_backlink_names`` drops
 everything but the name. A caller that wants to know *why* a page links back has
 to fetch and search each page again, which is the read the response had already
 paid for.
