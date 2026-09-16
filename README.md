@@ -625,13 +625,31 @@ See `examples/` directory:
 ```
 logseq-cli/
 ├── logseq_cli/
-│   ├── api.py       # HTTP API client (requests.post against Logseq)
-│   ├── datalog.py   # EDN/datalog query building (value quoting, keywords)
-│   ├── helpers.py   # Date parsing, block processing, backlink search
-│   └── cli.py       # Click CLI with all commands
-├── examples/        # Shell scripts for scripting/cronjobs
+│   ├── api.py        # HTTP API client (requests.post against Logseq)
+│   ├── config.py     # Config file discovery, loading and lookup
+│   ├── datalog.py    # EDN/datalog query building (value quoting, keywords)
+│   ├── helpers.py    # Date parsing, block processing, backlink search
+│   ├── group.py      # The click group: global options, API client
+│   ├── output.py     # Results on stdout, failures on stderr, --json
+│   ├── render.py     # Blocks to text, and resolving block references
+│   ├── commands/     # One module per group of commands
+│   │   ├── pages.py        # create/get/search/rename/delete a page
+│   │   ├── blocks.py       # read a block, find blocks
+│   │   ├── edit.py         # write, move, copy and remove blocks
+│   │   ├── journal.py      # journal entries and ranges
+│   │   ├── todos.py        # TODO markers and their references
+│   │   ├── properties.py   # page and block properties
+│   │   ├── analysis.py     # graph-wide analysis and suggestions
+│   │   ├── query.py        # smart-query
+│   │   └── meta.py         # init and doctor
+│   └── cli.py        # Entry point: imports every command module
+├── examples/         # Shell scripts for scripting/cronjobs
 └── pyproject.toml
 ```
+
+A command exists once its module has been imported, and `cli.py` is the file
+that imports them. `docs/adr/0001-explicit-command-registration.md` says why
+that list is written out rather than discovered by scanning the directory.
 
 The CLI communicates with Logseq's built-in HTTP API (Fastify server on port 12315).
 The core commands are inspired by [joelhooks/logseq-mcp-tools](https://github.com/joelhooks/logseq-mcp-tools), extended with property management, page operations, and property-based queries.
