@@ -1025,18 +1025,21 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
     """
     api = ctx.obj["api"]
 
+    # fail() rather than BadParameter: this command speaks --json, and Click's
+    # refusal is a usage dump on stderr that no caller can parse. An agent
+    # reading stderr as JSON got prose exactly where it expected an object.
     if tail is not None and tail < 1:
-        raise click.BadParameter("--tail must be >= 1")
+        fail("--tail must be 1 or greater.", as_json)
     if limit is not None and limit < 1:
-        raise click.BadParameter("--limit must be >= 1")
+        fail("--limit must be 1 or greater.", as_json)
     if tail is not None and limit is not None:
-        raise click.BadParameter("--tail and --limit are mutually exclusive")
+        fail("--tail and --limit are mutually exclusive.", as_json)
 
     start = datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
     end = datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
 
     if start > end:
-        raise click.BadParameter("--from must be before or equal to --to")
+        fail("--from must be before or equal to --to.", as_json)
 
     pages = api.get_all_pages()
 

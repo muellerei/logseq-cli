@@ -137,6 +137,44 @@ class TestNegativeValuesAreRefused:
         )
 
 
+class TestTheRefusalIsMachineReadable:
+    """One refusal channel, because the commands speak --json.
+
+    ``get-journal-range`` refused through ``click.BadParameter``, which exits 2
+    with a usage dump on stderr, while every other option used ``fail()`` —
+    exit 1 and, under ``--json``, an error object. An agent parsing stderr as
+    JSON got prose exactly where ``fail()`` promises an object. The sweep only
+    asserted a non-zero exit, so it covered the difference up rather than
+    catching it.
+    """
+
+    @pytest.mark.parametrize("command,param",
+                             [(n, p) for n, p in _bounded_options()],
+                             ids=lambda v: v if isinstance(v, str) else v.name)
+    def test_the_refusal_exits_one_not_two(self, command, param):
+        flag = param.opts[0]
+        result, _ = _run([command, flag, "-1"] + REQUIRED_ARGS.get(command, []))
+        assert result.exit_code == 1, (
+            f"{command} {flag} -1 exited {result.exit_code}; a rejected value is "
+            "an error the command reports, not a usage failure"
+        )
+
+    @pytest.mark.parametrize("command,param",
+                             [(n, p) for n, p in _bounded_options()],
+                             ids=lambda v: v if isinstance(v, str) else v.name)
+    def test_the_refusal_is_a_json_object_when_json_was_asked_for(self, command, param):
+        flag = param.opts[0]
+        result, _ = _run([command, flag, "-1", "--json"] + REQUIRED_ARGS.get(command, []))
+        try:
+            payload = json.loads(result.stderr)
+        except json.JSONDecodeError:
+            raise AssertionError(
+                f"{command} {flag} -1 --json wrote prose to stderr, not an error "
+                f"object: {result.stderr!r}"
+            )
+        assert flag in payload["error"]
+
+
 class TestTheRefusalCostsNoReads:
     """Validation belongs before the first API call, not after it."""
 
