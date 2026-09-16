@@ -275,7 +275,12 @@ class TestInjectionPerCaller:
             r = split_runner().invoke(cli, ["get-todos", "--status", "TODO", "--json"])
         assert r.exit_code == 0, r.output
         assert rec.queries, "no query was built"
-        assert edn_string("TODO") in rec.queries[0]
+        # Every query the command builds, not just the first: get-todos issues
+        # a second one for :block/refs, and it carries the same markers. They
+        # share one formatted string today, so checking queries[0] alone would
+        # keep passing if a later change gave the second query its own.
+        for q in rec.queries:
+            assert edn_string("TODO") in q, q
 
     def test_smart_query_content_search(self):
         rec = QueryRecorder(result=[])

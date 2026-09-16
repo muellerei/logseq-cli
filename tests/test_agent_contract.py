@@ -114,3 +114,55 @@ class TestQueryErrorsMeetTheContract:
         assert r.stdout == ""
         payload = json.loads(r.stderr)
         assert payload["reason"] == "datalog_query_failed"
+
+
+class TestShippedExamplesReadTheRealPayload:
+    """An example that mis-reads the payload teaches the mistake it makes.
+
+    `examples/weekly-todos.sh` read `data.get('tasks', [])` from the day of the
+    initial import, while `get-todos --json` has always answered `{"todos": …}`.
+    The default swallowed it: the script printed "Total: 0 open tasks" against
+    any graph, which reads as an empty week rather than as a broken script.
+    """
+
+    def test_every_example_reads_a_key_the_cli_emits(self):
+        """Checks every shipped example, not just the one that was wrong.
+
+        Scanning the directory rather than a list means a new example is
+        covered the day it is added, without anyone remembering to extend
+        this test.
+        """
+        import pathlib
+        import re
+
+        payload_keys = {"todos", "count", "repeating_excluded"}
+        examples = sorted((pathlib.Path(__file__).parent.parent
+                           / "examples").glob("*.sh"))
+        assert examples, "no example scripts found"
+
+        checked = []
+        for script_path in examples:
+            script = script_path.read_text()
+            if "get-todos" not in script:
+                continue
+            # Only top-level access counts: Python's data['x'] / data.get('x'),
+            # and jq expressions rooted at the payload. A field read inside a
+            # todo (.content, .page, .references) is a different contract,
+            # held by the get-todos tests.
+            read_keys = set(re.findall(r"data(?:\.get\(|\[)['\"](\w+)['\"]", script))
+            read_keys |= {m for m in re.findall(r"^\s*\.(\w+)", script, re.M)}
+            read_keys |= set(re.findall(r"\(\.(\w+)\s*\|\s*length\)", script))
+            unknown = read_keys - payload_keys
+            assert not unknown, (
+                f"{script_path.name} reads keys get-todos never emits: {unknown}")
+            checked.append(script_path.name)
+        assert checked, "no example exercises get-todos any more"
+
+    def test_get_todos_json_still_uses_those_keys(self):
+        """Pins the other half: the example is only right while this holds."""
+        api = MagicMock()
+        api.datascript_query.return_value = []
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--json"])
+        assert r.exit_code == 0, r.stdout
+        assert set(json.loads(r.stdout)) == {"todos", "count"}

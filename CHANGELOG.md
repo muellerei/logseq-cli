@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `get-todos --from/--to` now finds a task on every journal it stands in, not
+  only on the page its block lives on. A task carried forward by a
+  `((block-ref))` was invisible to any date range: `--from 2026-09-14 --to
+  2026-09-16` returned nothing on a graph where three tasks stood in exactly
+  those journals. Carrying an open task forward by reference is the ordinary
+  way to work in Logseq — the block exists once, every later occurrence is a
+  reference to it — so the answer was not merely incomplete, it was empty, and
+  an empty result looks plausible.
+
+  The fix reads the `:block/refs` relation, which is a real relation and needs
+  no string matching on the `((uuid))` form. One extra query for the whole
+  command, roughly 0.17s against a graph with 256 tasks. A task stays **one**
+  row: `page` and `uuid` still name the original block, and the days it was
+  carried into are added as `references`. Measured on that graph, a task is
+  referenced a median of 2 times and one of them 33 times, which is why it is
+  an array and why it is capped.
+
+  `--refs-limit` (default 10) caps the list per task and the remainder is
+  reported as `references_withheld`, the same bargain `get-backlinks --limit`
+  and `find-block --limit` already make — one heavily carried task must not
+  decide the size of the output, and trimming must not hide that a task has
+  been carried for months. The default is 10 rather than the 3 used by
+  `get-backlinks` because an entry here is a date, not a block of text, and
+  because the measured distribution breaks there: a cap of 3 trims 12 of 58
+  carried tasks, a cap of 10 trims 4. `--refs-limit 0` keeps all of them.
+  `--no-follow-refs` restores the old reading, for callers who want to know
+  where blocks live rather than where they appear, and skips the read rather
+  than fetching what it will not use.
+
+  This is a **breaking** change in the sense that matters: a range query can
+  now return more tasks than before, up to 58 more on the measured graph.
+  Nothing was removed, and `page`/`uuid` are unchanged.
+
+  A reference on a page carrying no `journal-day` falls out of a range, the
+  same rule the origin page has followed since 0.11.0 — 44 of 248 reference
+  occurrences sit on ordinary pages, and letting them through would have
+  reopened the silent gap that decision closed. See [#15](https://github.com/muellerei/logseq-cli/issues/15).
+
 - A test now holds the README's command tables to the command registry. The
   twenty missing options below were not the defect — they were the symptom. The
   defect is that a table is a hand-maintained view of something derivable, and
@@ -49,6 +87,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right and drifted further with every release. Replaced with a statement that
   does not go stale and names the consequence instead of a count — a figure
   maintained by hand is the same defect this project documents elsewhere.
+
+### Added
+
+- `examples/carried-over-todos.sh` lists the tasks standing in the last N days,
+  longest-carried first, and says for each how many journals it has been taken
+  along and how many of those fall inside the window. That reading only became
+  possible with the block-ref work above: before it, a task's date was the day
+  it was first written down, so "how long have I been moving this?" had no
+  answer in the payload.
+
+  Uses `--refs-limit 0` for the count, which lifts the per-task cap without
+  widening the window — occurrences before the range stay in
+  `references_withheld`, and the sum of both is what makes the total a
+  duration rather than a visible fraction.
+
+### Fixed
+
+- `examples/weekly-todos.sh` counted `data.get('tasks', [])`, a key
+  `get-todos --json` has never emitted — the payload has carried `todos` since
+  the initial import. The `.get` default swallowed it: the script reported
+  "Total: 0 open tasks" against any graph and printed an empty per-page
+  breakdown under it, which reads as a quiet week rather than as a broken
+  example. It now reads `data['todos']`, so a future rename fails loudly
+  instead of counting zero.
+
+  Two tests hold both halves — the example may only read keys the payload
+  carries, and the payload keeps carrying them. Found while checking the
+  block-ref work above for consistency against the rest of the repo, not by
+  running the example, which is the part worth noting: an example nobody runs
+  is documentation that can disagree with its source.
 
 ## [0.12.0] - 2026-09-15
 

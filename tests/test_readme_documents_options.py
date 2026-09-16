@@ -107,3 +107,33 @@ class TestSectionCountersMatchTheRegistry:
             if name not in self.ALIASES and f"`{name}" not in text
         ]
         assert not missing, f"commands with no README row: {missing}"
+
+
+class TestShippedExamplesAreListed:
+    """The README's example list is a view of the examples directory.
+
+    A hand-maintained list of files drifts the moment someone adds one — the
+    same defect this file already guards for the command tables. Deriving the
+    expectation from the directory means a new script is either listed or the
+    suite says so.
+    """
+
+    def _example_names(self):
+        import pathlib
+        return {p.name for p in (pathlib.Path(__file__).parent.parent
+                                 / "examples").glob("*.sh")}
+
+    def _listed_names(self):
+        import re
+        return set(re.findall(r"^- `([a-z0-9-]+\.sh)`", _readme_text(), re.M))
+
+    def test_every_example_is_listed(self):
+        missing = self._example_names() - self._listed_names()
+        assert not missing, (
+            f"these scripts exist but the README never names them: {sorted(missing)}")
+
+    def test_no_listed_example_is_missing(self):
+        """The other direction: a removed script must leave the list too."""
+        stale = self._listed_names() - self._example_names()
+        assert not stale, (
+            f"the README lists scripts that are not in examples/: {sorted(stale)}")

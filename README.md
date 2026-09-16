@@ -238,7 +238,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by the journal page it sits on — when it was written down. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
+| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 lifts the cap) and `references_withheld` counts what was left out — with a range that includes occurrences outside it, so lifting the cap does not make the count zero. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
 | `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
@@ -337,6 +337,14 @@ logseq-cli get-page --page "Project Alpha" --with-ids
 logseq-cli get-todos --status TODO
 #   TODO [Project Alpha] Finish the tag support UI
 #   DOING [2026-04-22, wednesday] Prepare the 1:1
+
+# 3b. A task carried forward by ((block-ref)) is found on the day it stands,
+# not only on the journal it was first written down in.
+logseq-cli get-todos --from 2026-04-20 --to 2026-04-22
+#   TODO [2026-03-04, wednesday] Write the migration guide
+#       also on: 2026-04-22, wednesday; 2026-04-20, monday (+9 more)
+# The task is one row: [page] is where the block lives, "also on" where it
+# appears. --no-follow-refs reports only the former.
 
 # 4. insert-block --tree: batch-insert a hierarchy in one call
 logseq-cli insert-block --child-of "$UUID" --tree "### Meeting
@@ -494,6 +502,39 @@ complete and is not. `get-page` was silent about this until the count was added
 there too; the same page read through two commands had given two different
 answers about whether it was whole.
 
+### A task is where it stands, not only where it was written
+
+A todo block exists once. Carrying it forward into later journals is done with
+a `((block-ref))`, and that reference is not a copy — it is the same block in a
+second place, which is why checking off the reference checks off the original.
+A tool that finds tasks through `:block/page` alone therefore sees only the day
+a task was first written down, and a query for this week returns nothing about
+the tasks that actually stood in it. The failure is quiet: an empty task list
+looks like an empty week.
+
+Logseq's own `(between ...)` filter reads the same way, which is how the
+problem arrives in the forum rather than in a bug tracker — *"the tasks are not
+in the journal pages and the between query only looks at the journal page
+dates"*
+([discuss.logseq.com](https://discuss.logseq.com/t/creating-a-query-for-overdue-tasks/12408)).
+The advanced-query answer given there reaches for `:block/refs`, one block
+reference at a time.
+
+So `get-todos` follows that relation by default rather than behind a flag: a
+default that answers incompletely is worse than one that costs a read, because
+the caller has no way to tell the two apart. The task stays one row — `page`
+and `uuid` keep naming the original block, `references` names the days it was
+carried into. `--refs-limit` caps that list and `references_withheld` counts
+the rest, because a task carried 33 times must not decide the size of the
+output, and `--no-follow-refs` restores the older reading for callers who want
+to know where blocks live rather than where they appear.
+
+`references_withheld` counts two things a range query leaves out: occurrences
+beyond the cap, and occurrences outside the range itself. Lifting the cap with
+`--refs-limit 0` therefore does not drive the count to zero — a task carried
+since March still reports the days before the queried week. That is the reading
+a range query wants, because the alternative is a task that looks new.
+
 ### Failure has one exit code, and no resume
 
 A command exits `0` when it did what it said, and non-zero when it did not.
@@ -571,6 +612,7 @@ Date formatting is locale-independent — weekday and month names are always Eng
 See `examples/` directory:
 
 - `backup-graph.sh` - Export all pages as a JSON backup
+- `carried-over-todos.sh` - Tasks standing in the last N days, longest-carried first (uses `references` to show how long each has been taken along)
 - `daily-todos.sh` - Daily TODO overview (suitable for cronjob)
 - `export-all-pages.sh` - Export all pages as individual JSON files
 - `export-page.sh` - Export a page as Logseq-compatible markdown
