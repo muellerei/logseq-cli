@@ -4957,7 +4957,7 @@ Note:
 """)
 @click.option("--output", "out_path", default=None,
               help="Where to write (default: the first config search path)")
-@click.option("--days", default=120, show_default=True,
+@click.option("--days", default=120, show_default=True, type=int,
               help="How many of the most recent journals to look at (1 or greater)")
 @click.option("--force", is_flag=True, help="Overwrite an existing config file")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Print what would be written")

@@ -77,10 +77,21 @@ logseq-cli/
   zero nothing here has a meaning, and an accepted nonsense value does not fail
   loudly — it slices from the wrong end or moves a cutoff into the future and
   answers a different question than the one asked. What `0` means differs per
-  option (no cap, none at all, today only, or invalid) and belongs in its
-  `--help` text, because that is where the caller looks. `tests/test_numeric_option_bounds.py`
-  derives the list from the command registry, so a new option is covered by it
-  the moment it exists.
+  option — it lifts the cap for `get-backlinks --limit` and `get-todos
+  --refs-limit` and is refused everywhere else — and that belongs in the
+  option's `--help` text, because that is where the caller looks. Decide it by
+  running the command, not by analogy with a neighbouring option:
+  `analyze-graph --days 0` reads as "today" and actually puts the cutoff at
+  this moment, which can only ever match a page edited in the future.
+  `tests/test_numeric_option_bounds.py` derives the list from the command
+  registry, so a new option is covered the moment it exists.
+- **A rejected value is reported with `fail()`, not `click.BadParameter`.**
+  Every command here speaks `--json`, and `fail()` writes an error *object* on
+  stderr under that flag, where Click writes a usage dump that no caller can
+  parse. This applies to what a command checks itself; the shared parsers in
+  `helpers.py` (dates, tree JSON, `--content-file`) still raise `BadParameter`,
+  so an unparseable `--from` exits 2 while a reversed range exits 1. That is a
+  known inconsistency, not a pattern to copy.
 - **German + English.** `smart-query` keywords support both languages.
 
 ## Reporting Issues
