@@ -21,7 +21,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from logseq_cli.cli import _project_pattern, _word_pattern, cli
+from logseq_cli.cli import cli
+from logseq_cli.commands.analysis import _project_pattern, _word_pattern
 from tests.conftest import split_runner
 from tests.test_datalog_quoting import QueryRecorder
 
