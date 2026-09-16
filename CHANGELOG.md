@@ -5,6 +5,29 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `get-backlinks --with-context --limit` accepted a negative value and answered
+  with less data and a count larger than the page held. Three linking blocks
+  came back as two, with `... 4 more not shown`, exit code 0, in both output
+  formats. The cap is applied as a slice and the withheld count was derived
+  from the cap, so one bad value broke both halves at once: `blocks[:-1]` drops
+  the *last* block instead of capping, and `len(blocks) - (-1)` exceeds what
+  exists. `0` is valid here and means "keep all", which is what made the wrong
+  input reachable rather than exotic — a caller who knows that reaches for `-1`
+  as "all the more so", and `examples/carried-over-todos.sh` relies on the same
+  meaning for `--refs-limit`. The boundary is therefore `< 0`, not `< 1`.
+
+  Two layers, because the guard alone would leave the count derived from a
+  number the caller supplies: the option now rejects a negative value before
+  any page is read, and `withheld` is counted against the blocks actually kept.
+  `get-journal-range` has computed its `omitted` that way all along. Tested at
+  the boundary from both sides, in both formats and in batch mode, and the
+  second layer is tested where it lives — on the extractor itself, since the
+  guard otherwise hides it. See [#17](https://github.com/muellerei/logseq-cli/issues/17).
+
 ## [0.13.0] - 2026-09-16
 
 ### Changed
