@@ -132,7 +132,7 @@ def _word_pattern(words) -> "re.Pattern[str]":
     return re.compile("|".join(parts), re.IGNORECASE)
 
 
-_BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
+BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
 # A text replacement must skip property lines: rewriting an id:: line breaks
 # every ((block-ref)) to that block, irreversibly. Regex shared via helpers.
@@ -167,7 +167,7 @@ def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
     return f"(({uuid}))"
 
 
-def _resolve_refs_in_blocks(api, blocks: list, dead: list = None) -> None:
+def resolve_refs_in_blocks(api, blocks: list, dead: list = None) -> None:
     """Recursively resolve ((uuid)) references in block content, in-place.
 
     ``dead`` collects the uuids whose target could not be read, in first-seen
@@ -176,12 +176,12 @@ def _resolve_refs_in_blocks(api, blocks: list, dead: list = None) -> None:
     for block in blocks:
         content = block.get("content", "")
         if content and "((" in content:
-            block["content"] = _BLOCK_REF_RE.sub(
+            block["content"] = BLOCK_REF_RE.sub(
                 lambda m: _resolve_single_ref(api, m.group(1), dead), content
             )
         children = block.get("children", [])
         if children:
-            _resolve_refs_in_blocks(api, children, dead)
+            resolve_refs_in_blocks(api, children, dead)
 
 
 def _swap_todo_marker(content: str, new_status: str) -> str:
@@ -193,7 +193,7 @@ def _swap_todo_marker(content: str, new_status: str) -> str:
     return f"{new_status} {content}"
 
 
-def _resolve_version() -> str:
+def resolve_version() -> str:
     """Single source of truth for the CLI version.
 
     Reads pyproject.toml when running from a source checkout (the authoritative
@@ -216,7 +216,7 @@ def _resolve_version() -> str:
 
 
 @click.group()
-@click.version_option(version=_resolve_version(), prog_name="logseq-cli")
+@click.version_option(version=resolve_version(), prog_name="logseq-cli")
 @click.option("--host", default=None, help="Logseq API host (default: 127.0.0.1)")
 @click.option("--port", default=None, help="Logseq API port (default: 12315)")
 @click.option("--token", default=None, help="Logseq API Bearer token")
@@ -260,7 +260,7 @@ def get_all_pages(ctx, as_json):
             click.echo(name)
 
 
-def _extract_backlink_names(refs) -> list:
+def extract_backlink_names(refs) -> list:
     """Extract sorted page names from getPageLinkedReferences response.
 
     The native API returns a list of [page_dict, [block, ...]] pairs.
@@ -284,7 +284,7 @@ def _extract_backlink_context(refs, limit: int) -> list:
 
     ``getPageLinkedReferences`` already answers ``[page, [block, ...]]`` pairs,
     so the blocks arrive with the same call that yields the names — no second
-    read. ``_extract_backlink_names`` keeps only the name; this keeps both.
+    read. ``extract_backlink_names`` keeps only the name; this keeps both.
 
     ``limit`` caps the blocks kept per page and the remainder is reported as
     ``withheld``, the same bargain the other reads make: a page mentioned fifty
@@ -310,7 +310,7 @@ def _extract_backlink_context(refs, limit: int) -> list:
             content = (block.get("content") or "").strip()
             # A properties block is the linking page's own metadata; it holds no
             # mention and would read as context that is not there.
-            if not content or _is_properties_block(content):
+            if not content or is_properties_block(content):
                 continue
             blocks.append({"uuid": block.get("uuid", ""), "content": content})
         kept = blocks[:limit] if limit else blocks
@@ -324,13 +324,13 @@ def _extract_backlink_context(refs, limit: int) -> list:
     return sorted(entries, key=lambda e: e["page"])
 
 
-def _is_properties_block(content: str) -> bool:
+def is_properties_block(content: str) -> bool:
     """Check if block content is a Logseq properties block (key:: value lines)."""
     lines = content.strip().split("\n")
     return all(re.match(r"^[\w-]+::", line) for line in lines if line.strip())
 
 
-def _blocks_to_markdown(blocks, indent=0):
+def blocks_to_markdown(blocks, indent=0):
     """Convert block tree to Logseq-compatible markdown.
 
     Properties blocks (top-level, all lines match 'key:: value') are rendered
@@ -341,23 +341,23 @@ def _blocks_to_markdown(blocks, indent=0):
     for block in blocks:
         content = block.get("content", "")
         if content:
-            if indent == 0 and _is_properties_block(content):
+            if indent == 0 and is_properties_block(content):
                 # Properties block: no bullet prefix, matches Logseq file format
                 lines.append(content)
             else:
                 lines.append(f"{prefix}- {content}")
         children = block.get("children", [])
         if children:
-            lines.append(_blocks_to_markdown(children, indent + 1))
+            lines.append(blocks_to_markdown(children, indent + 1))
     return "\n".join(lines)
 
 
-def _blocks_with_ids(blocks, indent=0):
+def blocks_with_ids(blocks, indent=0):
     """Render block tree as ``<uuid>\\t<indent-tabs>\\t<content>`` lines.
 
     Allows downstream tools to extract a block UUID without parsing JSON.
     Indentation is encoded as a run of tab characters whose length matches
-    the depth (matching ``_blocks_to_markdown``).
+    the depth (matching ``blocks_to_markdown``).
     """
     lines = []
     indent_str = "\t" * indent
@@ -368,11 +368,11 @@ def _blocks_with_ids(blocks, indent=0):
             lines.append(f"{uuid}\t{indent_str}\t{content}")
         children = block.get("children", [])
         if children:
-            lines.append(_blocks_with_ids(children, indent + 1))
+            lines.append(blocks_with_ids(children, indent + 1))
     return "\n".join(lines)
 
 
-def _extract_section(blocks, heading_text):
+def extract_section(blocks, heading_text):
     """Return the block matching heading_text (with its children), searched recursively.
 
     Uses :func:`normalize_heading` so renderer macros (e.g. ``{{renderer :todomaster}}``)
@@ -385,7 +385,7 @@ def _extract_section(blocks, heading_text):
             return [block]
         children = block.get("children", [])
         if children:
-            result = _extract_section(children, heading_text)
+            result = extract_section(children, heading_text)
             if result:
                 return result
     return []
@@ -433,15 +433,15 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
         else:
             try:
                 refs = api.get_page_linked_references(page_name)
-                backlinks = _extract_backlink_names(refs)
+                backlinks = extract_backlink_names(refs)
             except Exception:
                 backlinks = find_backlinks(api, page_name)
         if heading and blocks:
-            blocks = _extract_section(blocks, heading)
+            blocks = extract_section(blocks, heading)
             if not blocks:
                 click.echo(f"Warning: heading '{heading}' not found in '{page_name}'", err=True)
         if resolve_refs and blocks:
-            _resolve_refs_in_blocks(api, blocks, dead_refs)
+            resolve_refs_in_blocks(api, blocks, dead_refs)
         return {"page": page_name, "blocks": blocks, "backlinks": backlinks}
 
     results = [_fetch_one(p) for p in page]
@@ -457,7 +457,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
                 result["dead_refs"] = in_this
 
     if not resolve_refs:
-        total_refs = sum(_count_unresolved_refs(r.get("blocks") or []) for r in results)
+        total_refs = sum(count_unresolved_refs(r.get("blocks") or []) for r in results)
         if total_refs > 0:
             click.echo(
                 f"⚠️  {total_refs} unresolved block-ref(s) in output — "
@@ -486,9 +486,9 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
             placeholder = "(page does not exist)" if absent else "(empty page)"
             if with_ids:
                 click.echo(f"=== {p} ===\n")
-                click.echo(_blocks_with_ids(blocks) if blocks else placeholder)
+                click.echo(blocks_with_ids(blocks) if blocks else placeholder)
             elif output_format == "markdown":
-                click.echo(_blocks_to_markdown(blocks) if blocks else placeholder)
+                click.echo(blocks_to_markdown(blocks) if blocks else placeholder)
             else:
                 click.echo(f"=== {p} ===\n")
                 click.echo(process_blocks(blocks) if blocks else placeholder)
@@ -756,7 +756,7 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
                 return []
             if with_context:
                 return _extract_backlink_context(refs, limit)
-            return _extract_backlink_names(refs)
+            return extract_backlink_names(refs)
         except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
             return find_backlinks(api, page_name)
@@ -877,16 +877,16 @@ def get_journal_summary(ctx, date_range, no_content, as_json):
                 click.echo(f"  {topic}: {count}")
 
 
-def _count_unresolved_refs(blocks) -> int:
+def count_unresolved_refs(blocks) -> int:
     """Recursively count ((uuid)) patterns in block content."""
     count = 0
     for block in blocks:
         content = block.get("content", "")
         if content and "((" in content:
-            count += len(_BLOCK_REF_RE.findall(content))
+            count += len(BLOCK_REF_RE.findall(content))
         children = block.get("children", [])
         if children:
-            count += _count_unresolved_refs(children)
+            count += count_unresolved_refs(children)
     return count
 
 
@@ -984,9 +984,9 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
         try:
             blocks = api.get_page_blocks_tree(page_name)
             if heading and blocks:
-                blocks = _extract_section(blocks, heading)
+                blocks = extract_section(blocks, heading)
             if resolve_refs and blocks:
-                _resolve_refs_in_blocks(api, blocks)
+                resolve_refs_in_blocks(api, blocks)
             return {
                 "date": d.strftime("%Y-%m-%d"),
                 "page": page_name,
@@ -1024,7 +1024,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
         )
 
     if not resolve_refs:
-        total_refs = sum(_count_unresolved_refs(e.get("blocks", [])) for e in entries)
+        total_refs = sum(count_unresolved_refs(e.get("blocks", [])) for e in entries)
         if total_refs > 0:
             click.echo(
                 f"⚠️  {total_refs} unresolved block-ref(s) in output — "
@@ -1042,7 +1042,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
                 if err:
                     click.echo(f"!! ERROR: {err}\n")
                 elif entry["blocks"]:
-                    click.echo(_blocks_to_markdown(entry["blocks"]))
+                    click.echo(blocks_to_markdown(entry["blocks"]))
                 else:
                     click.echo("(empty)\n")
             else:
@@ -4014,7 +4014,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     # --follow-refs: if block content is just a ((uuid)) reference, update the referenced block
     if follow_refs:
         stripped = old_content.strip()
-        ref_match = _BLOCK_REF_RE.fullmatch(stripped)
+        ref_match = BLOCK_REF_RE.fullmatch(stripped)
         if ref_match:
             ref_uuid = ref_match.group(1)
             ref_block = api.get_block(ref_uuid, include_children=False)
@@ -4346,7 +4346,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
         referencing = None
         try:
             refs = api.get_page_linked_references(page)
-            referencing = _extract_backlink_names(refs) if refs else []
+            referencing = extract_backlink_names(refs) if refs else []
         except Exception as e:
             click.echo(f"Warning: could not read backlinks ({e}); "
                        f"reference count unknown", err=True)
@@ -4746,7 +4746,7 @@ def get_page_stats(ctx, page, as_json):
     # Inbound links via native API
     try:
         refs = api.get_page_linked_references(page)
-        inbound = _extract_backlink_names(refs)
+        inbound = extract_backlink_names(refs)
     except Exception:
         inbound = []
 
@@ -5259,7 +5259,7 @@ def doctor(ctx, as_json):
     result = {
         "healthy": healthy,
         "endpoint": api.base_url,
-        "version": _resolve_version(),
+        "version": resolve_version(),
         "checks": checks,
     }
     if graph:
