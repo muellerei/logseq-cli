@@ -41,7 +41,7 @@ def api(monkeypatch):
 def listener(monkeypatch):
     """Control whether the port appears open."""
     def set_state(open_):
-        monkeypatch.setattr("logseq_cli.cli._port_has_listener",
+        monkeypatch.setattr("logseq_cli.commands.meta._port_has_listener",
                             lambda *a, **k: open_)
     return set_state
 
@@ -49,7 +49,7 @@ def listener(monkeypatch):
 @pytest.fixture
 def process(monkeypatch):
     def set_state(running):
-        monkeypatch.setattr("logseq_cli.cli._logseq_process_running",
+        monkeypatch.setattr("logseq_cli.commands.meta._logseq_process_running",
                             lambda: running)
     return set_state
 
@@ -165,7 +165,7 @@ class TestRuntimeChecks:
 
     def test_missing_package_fails_with_a_remedy(self, api, listener, monkeypatch):
         """A broken install must not look like a healthy one."""
-        import logseq_cli.cli as cli_mod
+        import logseq_cli.commands.meta as cli_mod
 
         real = cli_mod.import_module
 
