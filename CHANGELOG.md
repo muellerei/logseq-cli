@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `get-todos --from/--to` now finds a task on every journal it stands in, not
+  only on the page its block lives on. A task carried forward by a
+  `((block-ref))` was invisible to any date range: `--from 2026-09-14 --to
+  2026-09-16` returned nothing on a graph where three tasks stood in exactly
+  those journals. Carrying an open task forward by reference is the ordinary
+  way to work in Logseq — the block exists once, every later occurrence is a
+  reference to it — so the answer was not merely incomplete, it was empty, and
+  an empty result looks plausible.
+
+  The fix reads the `:block/refs` relation, which is a real relation and needs
+  no string matching on the `((uuid))` form. One extra query for the whole
+  command, roughly 0.17s against a graph with 256 tasks. A task stays **one**
+  row: `page` and `uuid` still name the original block, and the days it was
+  carried into are added as `references`. Measured on that graph, a task is
+  referenced a median of 2 times and one of them 33 times, which is why it is
+  an array and why it is capped.
+
+  `--refs-limit` (default 10) caps the list per task and the remainder is
+  reported as `references_withheld`, the same bargain `get-backlinks --limit`
+  and `find-block --limit` already make — one heavily carried task must not
+  decide the size of the output, and trimming must not hide that a task has
+  been carried for months. The default is 10 rather than the 3 used by
+  `get-backlinks` because an entry here is a date, not a block of text, and
+  because the measured distribution breaks there: a cap of 3 trims 12 of 58
+  carried tasks, a cap of 10 trims 4. `--refs-limit 0` keeps all of them.
+  `--no-follow-refs` restores the old reading, for callers who want to know
+  where blocks live rather than where they appear, and skips the read rather
+  than fetching what it will not use.
+
+  This is a **breaking** change in the sense that matters: a range query can
+  now return more tasks than before, up to 58 more on the measured graph.
+  Nothing was removed, and `page`/`uuid` are unchanged.
+
+  A reference on a page carrying no `journal-day` falls out of a range, the
+  same rule the origin page has followed since 0.11.0 — 44 of 248 reference
+  occurrences sit on ordinary pages, and letting them through would have
+  reopened the silent gap that decision closed. See [#15](https://github.com/muellerei/logseq-cli/issues/15).
+
 - A test now holds the README's command tables to the command registry. The
   twenty missing options below were not the defect — they were the symptom. The
   defect is that a table is a hand-maintained view of something derivable, and

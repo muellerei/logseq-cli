@@ -238,7 +238,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by the journal page it sits on — when it was written down. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
+| `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 keeps all) and the remainder is reported as `references_withheld`. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
 | `get-properties --page NAME [--property KEY]` | Get page properties |
 | `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
@@ -493,6 +493,33 @@ Without the flag both commands count what is left and say so on stderr —
 complete and is not. `get-page` was silent about this until the count was added
 there too; the same page read through two commands had given two different
 answers about whether it was whole.
+
+### A task is where it stands, not only where it was written
+
+A todo block exists once. Carrying it forward into later journals is done with
+a `((block-ref))`, and that reference is not a copy — it is the same block in a
+second place, which is why checking off the reference checks off the original.
+A tool that finds tasks through `:block/page` alone therefore sees only the day
+a task was first written down, and a query for this week returns nothing about
+the tasks that actually stood in it. The failure is quiet: an empty task list
+looks like an empty week.
+
+Logseq's own `(between ...)` filter reads the same way, which is how the
+problem arrives in the forum rather than in a bug tracker — *"the tasks are not
+in the journal pages and the between query only looks at the journal page
+dates"*
+([discuss.logseq.com](https://discuss.logseq.com/t/creating-a-query-for-overdue-tasks/12408)).
+The advanced-query answer given there reaches for `:block/refs`, one block
+reference at a time.
+
+So `get-todos` follows that relation by default rather than behind a flag: a
+default that answers incompletely is worse than one that costs a read, because
+the caller has no way to tell the two apart. The task stays one row — `page`
+and `uuid` keep naming the original block, `references` names the days it was
+carried into. `--refs-limit` caps that list and `references_withheld` counts
+the rest, because a task carried 33 times must not decide the size of the
+output, and `--no-follow-refs` restores the older reading for callers who want
+to know where blocks live rather than where they appear.
 
 ### Failure has one exit code, and no resume
 
