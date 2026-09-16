@@ -338,6 +338,14 @@ logseq-cli get-todos --status TODO
 #   TODO [Project Alpha] Finish the tag support UI
 #   DOING [2026-04-22, wednesday] Prepare the 1:1
 
+# 3b. A task carried forward by ((block-ref)) is found on the day it stands,
+# not only on the journal it was first written down in.
+logseq-cli get-todos --from 2026-04-20 --to 2026-04-22
+#   TODO [2026-03-04, wednesday] Write the migration guide
+#       also on: 2026-04-22, wednesday; 2026-04-20, monday (+9 more)
+# The task is one row: [page] is where the block lives, "also on" where it
+# appears. --no-follow-refs reports only the former.
+
 # 4. insert-block --tree: batch-insert a hierarchy in one call
 logseq-cli insert-block --child-of "$UUID" --tree "### Meeting
 	- Agenda
