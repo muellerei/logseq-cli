@@ -41,7 +41,7 @@ class TestReplaceTextSparesProperties:
         uuid = "abcdef12-3456-7890-abcd-ef1234567890"
         content = f"DONE Service updaten 6e10 fixen\nid:: {uuid}"
         api = _api(content)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "replace-text", "--page", "P", "--find", "6e10", "--replace", "XXXX"])
         assert r.exit_code == 0, r.output
@@ -55,7 +55,7 @@ class TestReplaceTextSparesProperties:
                    "id:: abcdef12-3456-7890-abcd-ef1234567890\n"
                    "=> Service via alt route")
         api = _api(content)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "replace-text", "--page", "P", "--find", "Service", "--replace", "Host"])
         assert r.exit_code == 0, r.output
@@ -68,7 +68,7 @@ class TestReplaceTextSparesProperties:
     def test_soft_property_line_is_not_replaced(self):
         content = "TODO Task A\nprio:: A\ncollapsed:: true"
         api = _api(content)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "replace-text", "--page", "P", "--find", "A", "--replace", "Z"])
         assert r.exit_code == 0, r.output
@@ -79,7 +79,7 @@ class TestReplaceTextSparesProperties:
     def test_plain_text_block_still_replaced(self):
         content = "old here"
         api = _api(content)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 0, r.output

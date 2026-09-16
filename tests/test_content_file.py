@@ -75,7 +75,7 @@ def api(monkeypatch):
     mock = fake_api([f"u{i}" for i in range(1, 40)])
     mock.graph.children["head"] = [
         {"uuid": "fl", "content": "### [[Carol]]", "children": []}]
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     mock.get_page.return_value = {"name": "journal"}
     mock.get_page_blocks_tree.return_value = [
@@ -527,7 +527,7 @@ class TestContentFromStdin:
         api.get_page_blocks_tree.return_value = []
         api.append_block_in_page.return_value = {"uuid": "u1"}
         from unittest.mock import patch
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = CliRunner().invoke(
                 cli, ["add-journal-block", "--content-file", "-", "--dry-run"],
                 input="piped entry\n")

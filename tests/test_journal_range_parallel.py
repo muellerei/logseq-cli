@@ -43,7 +43,7 @@ class TestJournalRangeParallel:
         api.get_page_blocks_tree.side_effect = slow_blocks
 
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "2026-04-20",
@@ -63,7 +63,7 @@ class TestJournalRangeParallel:
             {"content": "x", "uuid": "u1", "children": []}
         ]
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "2026-04-20",
@@ -89,7 +89,7 @@ class TestJournalRangeParallel:
         api.get_page_blocks_tree.side_effect = maybe_fail
 
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "2026-04-20",
@@ -114,7 +114,7 @@ class TestJournalRangeParallel:
         api.get_page_blocks_tree.return_value = []
 
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "2026-04-20",
@@ -131,7 +131,7 @@ class TestJournalRangeParallel:
         api.get_all_pages.return_value = _make_journal_pages(dates)
         api.get_page_blocks_tree.return_value = []
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "2026-04-10",
@@ -151,7 +151,7 @@ class TestJournalRangeParallel:
         api.get_all_pages.return_value = _make_journal_pages(dates)
         api.get_page_blocks_tree.return_value = []
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "yesterday",
@@ -164,7 +164,7 @@ class TestJournalRangeParallel:
 
     def test_keyword_invalid_date_rejected(self):
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=MagicMock()):
+        with patch("logseq_cli.group.LogseqAPI", return_value=MagicMock()):
             result = runner.invoke(cli, [
                 "get-journal-range",
                 "--from", "tomorrowww",

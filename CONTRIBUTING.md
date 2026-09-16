@@ -23,19 +23,35 @@ Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled
 ```
 logseq-cli/
 ├── logseq_cli/
-│   ├── api.py       # HTTP API client (thin wrapper around Logseq's API)
-│   ├── datalog.py   # EDN/datalog query building (value quoting, keywords)
-│   ├── helpers.py   # Date parsing, block processing, content formatting
-│   └── cli.py       # Click CLI with all commands
-├── tests/           # pytest suite (no fixtures beyond tests/conftest.py)
-├── examples/        # Shell scripts for common workflows
-├── AGENTS.md        # AI agent reference
-└── pyproject.toml   # Package config
+│   ├── api.py        # HTTP API client (thin wrapper around Logseq's API)
+│   ├── config.py     # Config file discovery, loading and lookup
+│   ├── datalog.py    # EDN/datalog query building (value quoting, keywords)
+│   ├── helpers.py    # Date parsing, block processing, content formatting
+│   ├── group.py      # The click group: global options, API client
+│   ├── output.py     # Results on stdout, failures on stderr, --json
+│   ├── render.py     # Blocks to text, and resolving block references
+│   ├── commands/     # One module per group of commands
+│   │   ├── pages.py        # create/get/search/rename/delete a page
+│   │   ├── blocks.py       # read a block, find blocks
+│   │   ├── edit.py         # write, move, copy and remove blocks
+│   │   ├── journal.py      # journal entries and ranges
+│   │   ├── todos.py        # TODO markers and their references
+│   │   ├── properties.py   # page and block properties
+│   │   ├── analysis.py     # graph-wide analysis and suggestions
+│   │   ├── query.py        # smart-query
+│   │   └── meta.py         # init and doctor
+│   └── cli.py        # Entry point: imports every command module
+├── tests/            # pytest suite (no fixtures beyond tests/conftest.py)
+├── examples/         # Shell scripts for common workflows
+├── AGENTS.md         # AI agent reference
+└── pyproject.toml    # Package config
 ```
 
 ## Making Changes
 
-1. **Read the code first.** `cli.py` is the main file — over five thousand lines, which is more than one file should carry and is being split. Each command is a self-contained function decorated with `@cli.command()`.
+1. **Read the code first.** Commands live in `logseq_cli/commands/`, one module per group — the tree above says which. Each command is a self-contained function decorated with `@cli.command()`, and it reaches the group through `from logseq_cli.group import cli`.
+
+   A new module has to be added to the import list in `cli.py`, or its commands simply do not exist. `tests/test_command_registry.py` holds every Command Name and fails by name when one goes missing; `docs/adr/0001-explicit-command-registration.md` records why that list is written out rather than discovered by scanning.
 
 2. **Follow existing patterns.** New commands should:
    - Use `@click.option("--page", "--name", ...)` for page parameters (dual alias)

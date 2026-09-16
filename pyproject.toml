@@ -29,4 +29,4 @@ Issues = "https://github.com/muellerei/logseq-cli/issues"
 logseq-cli = "logseq_cli.cli:cli"
 
 [tool.setuptools]
-packages = ["logseq_cli"]
+packages = ["logseq_cli", "logseq_cli.commands"]

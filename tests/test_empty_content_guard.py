@@ -58,7 +58,7 @@ class TestWriteCommandsRejectBlank:
     @pytest.mark.parametrize("value", BLANK)
     def test_insert_block(self, monkeypatch, value):
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "insert-block", "--child-of", BLOCK, "--content", value]
         )
@@ -70,7 +70,7 @@ class TestWriteCommandsRejectBlank:
     @pytest.mark.parametrize("value", BLANK)
     def test_update_block_does_not_erase(self, monkeypatch, value):
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "update-block", "--id", BLOCK, "--content", value]
         )
@@ -81,7 +81,7 @@ class TestWriteCommandsRejectBlank:
     @pytest.mark.parametrize("value", BLANK)
     def test_add_journal_block(self, monkeypatch, value):
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "add-journal-block", "--content", value]
         )
@@ -91,7 +91,7 @@ class TestWriteCommandsRejectBlank:
     @pytest.mark.parametrize("value", BLANK)
     def test_add_journal_content(self, monkeypatch, value):
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "add-journal-content", "--content", value]
         )
@@ -103,7 +103,7 @@ class TestWriteCommandsRejectBlank:
         # only some substitutions fail. One blank value must fail the call
         # rather than write the good ones and a blank alongside them.
         api = fake_api(["u1", "u2"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "add-journal-block",
                   "--content", "real content", "--content", ""]
@@ -116,7 +116,7 @@ class TestWriteCommandsRejectBlank:
         # --dry-run reports the plan; a plan to write a blank block is not one
         # worth previewing.
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "insert-block", "--child-of", BLOCK,
                   "--content", value, "--dry-run"]
@@ -130,7 +130,7 @@ class TestRealContentStillWrites:
 
     def test_insert_block_writes(self, monkeypatch):
         api = fake_api(["u1"])
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "insert-block", "--child-of", BLOCK,
                   "--content", "**09:00** a real entry"]
@@ -142,7 +142,7 @@ class TestRealContentStillWrites:
         api = fake_api(["u1"])
         api.get_block.side_effect = None
         api.get_block.return_value = {"uuid": BLOCK, "content": "alt", "properties": {}}
-        monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kw: api)
+        monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
             cli, ["--token", "t", "update-block", "--id", BLOCK, "--content", "neu"]
         )

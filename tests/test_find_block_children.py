@@ -12,7 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli, FIND_BLOCK_CHILDREN_LIMIT
+from logseq_cli.cli import cli
+from logseq_cli.commands.blocks import FIND_BLOCK_CHILDREN_LIMIT
 
 
 def _api(matches, children_by_uuid=None):
@@ -43,7 +44,7 @@ KIDS = [
 class TestWithChildren:
     def test_children_are_printed_indented(self):
         api = _api([HIT], {"u-1": KIDS})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "14:22", "--with-children"])
         assert r.exit_code == 0, r.output
@@ -58,7 +59,7 @@ class TestWithChildren:
 
     def test_without_flag_no_extra_read_and_no_children(self):
         api = _api([HIT], {"u-1": KIDS})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, ["find-block", "--content", "14:22"])
         assert r.exit_code == 0, r.output
         assert "**Implementation:**" not in r.output
@@ -68,7 +69,7 @@ class TestWithChildren:
         """The 80-char preview would cut the head of a subtree in half."""
         long_hit = dict(HIT, content="X" * 200)
         api = _api([long_hit], {"u-1": []})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "X", "--with-children"])
         assert "X" * 200 in r.output
@@ -76,14 +77,14 @@ class TestWithChildren:
     def test_preview_still_truncates_without_the_flag(self):
         long_hit = dict(HIT, content="X" * 200)
         api = _api([long_hit])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, ["find-block", "--content", "X"])
         assert "X" * 200 not in r.output
         assert "X" * 80 in r.output
 
     def test_json_output_carries_children(self):
         api = _api([HIT], {"u-1": KIDS})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "14:22", "--with-children", "--json"])
         assert r.exit_code == 0, r.output
@@ -94,7 +95,7 @@ class TestWithChildren:
         n = FIND_BLOCK_CHILDREN_LIMIT + 7
         hits = [dict(HIT, uuid=f"u-{i}") for i in range(n)]
         api = _api(hits, {f"u-{i}": [] for i in range(n)})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "x", "--with-children"])
         assert r.exit_code == 0, r.output
@@ -104,7 +105,7 @@ class TestWithChildren:
     def test_first_limits_before_expanding(self):
         hits = [dict(HIT, uuid=f"u-{i}") for i in range(5)]
         api = _api(hits, {f"u-{i}": KIDS for i in range(5)})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "x", "--first", "--with-children"])
         assert r.exit_code == 0, r.output
@@ -112,7 +113,7 @@ class TestWithChildren:
 
     def test_match_without_uuid_does_not_crash(self):
         api = _api([{"content": "no uuid here"}])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "no uuid", "--with-children"])
         assert r.exit_code == 0, r.output

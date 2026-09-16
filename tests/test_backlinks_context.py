@@ -1,7 +1,7 @@
 """get-backlinks --with-context: which block does the linking, not just which page.
 
 The linking blocks already arrive in the API response — getPageLinkedReferences
-answers ``[page, [block, ...]]`` pairs — and ``_extract_backlink_names`` drops
+answers ``[page, [block, ...]]`` pairs — and ``extract_backlink_names`` drops
 everything but the name. A caller that wants to know *why* a page links back has
 to fetch and search each page again, which is the read the response had already
 paid for.
@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from logseq_cli.cli import _extract_backlink_context, cli
+from logseq_cli.cli import cli
+from logseq_cli.commands.pages import _extract_backlink_context
 from tests.conftest import split_runner
 
 
@@ -34,7 +35,7 @@ def _api(refs_by_page):
 
 
 def _run(args, api):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return CliRunner().invoke(cli, args)
 
 
@@ -127,7 +128,7 @@ class TestLimitRejectsNegativeValues:
     def test_the_refusal_goes_to_stderr_and_stdout_stays_empty(self):
         """stdout is payload; a caller piping it into a parser gets nothing else."""
         api = _api({"Alice": [("Journal", ["a [[Alice]]"])]})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(cli, ["get-backlinks", "--name", "Alice",
                                                  "--with-context", "--limit", "-1"])
         assert result.exit_code == 1

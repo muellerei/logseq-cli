@@ -83,7 +83,7 @@ def api(monkeypatch):
     which a bare MagicMock cannot answer meaningfully.
     """
     mock = fake_api([f"u{i}" for i in range(1, 40)])
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     mock.get_page.return_value = {"name": "journal"}
     mock.get_page_blocks_tree.return_value = [

@@ -27,7 +27,7 @@ class TestGetPageResolveRefs:
         ]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-page", "--name", "Foo", "--no-backlinks"])
         assert result.exit_code == 0, result.output
         assert "((11111111-2222-3333-4444-555555555555))" in result.output
@@ -44,7 +44,7 @@ class TestGetPageResolveRefs:
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks", "--resolve-refs"]
             )
@@ -67,7 +67,7 @@ class TestGetPageResolveRefs:
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks", "--resolve-refs"]
             )
@@ -87,7 +87,7 @@ class TestGetPageWithIds:
         ]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-page", "--name", "Foo", "--no-backlinks"])
         assert result.exit_code == 0, result.output
         assert "uuid-aaa" not in result.output
@@ -102,7 +102,7 @@ class TestGetPageWithIds:
         ]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks", "--with-ids"]
             )
@@ -125,7 +125,7 @@ class TestGetPageWithIds:
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks",
                       "--with-ids", "--resolve-refs"]
@@ -154,7 +154,7 @@ class TestGetPageHeading:
         ]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "Journal", "--heading", "## Tasks"]
             )
@@ -171,7 +171,7 @@ class TestGetPageHeading:
         ]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "X", "--heading", "## Meeting"]
             )
@@ -182,7 +182,7 @@ class TestGetPageHeading:
         blocks = [{"content": "## Other", "uuid": "h", "children": []}]
         api = _api_with_blocks(blocks)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-page", "--name", "X", "--heading", "## Tasks"]
             )
@@ -205,7 +205,7 @@ class TestGetPageUnresolvedRefWarning:
     def test_warns_on_stderr_when_flag_is_missing(self):
         blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
         api = _api_with_blocks(blocks)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks"])
         assert result.exit_code == 0, result.output
@@ -218,7 +218,7 @@ class TestGetPageUnresolvedRefWarning:
             "children": [{"content": f"child (({self.UUID}))", "uuid": "b2", "children": []}],
         }]
         api = _api_with_blocks(blocks)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks"])
         assert result.exit_code == 0, result.output
@@ -228,7 +228,7 @@ class TestGetPageUnresolvedRefWarning:
         blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
         ref = {"content": "the target", "page": {"originalName": "Src"}}
         api = _api_with_blocks(blocks, ref_block=ref)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks", "--resolve-refs"])
         assert result.exit_code == 0, result.output
@@ -237,7 +237,7 @@ class TestGetPageUnresolvedRefWarning:
     def test_silent_when_page_has_no_refs(self):
         blocks = [{"content": "plain text", "uuid": "b1", "children": []}]
         api = _api_with_blocks(blocks)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks"])
         assert result.exit_code == 0, result.output
@@ -248,7 +248,7 @@ class TestGetPageUnresolvedRefWarning:
         import json
         blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
         api = _api_with_blocks(blocks)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(
                 cli, ["get-page", "--name", "Foo", "--no-backlinks", "--json"])
         assert result.exit_code == 0, result.output
