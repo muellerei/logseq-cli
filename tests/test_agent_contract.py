@@ -114,3 +114,34 @@ class TestQueryErrorsMeetTheContract:
         assert r.stdout == ""
         payload = json.loads(r.stderr)
         assert payload["reason"] == "datalog_query_failed"
+
+
+class TestShippedExamplesReadTheRealPayload:
+    """An example that mis-reads the payload teaches the mistake it makes.
+
+    `examples/weekly-todos.sh` read `data.get('tasks', [])` from the day of the
+    initial import, while `get-todos --json` has always answered `{"todos": …}`.
+    The default swallowed it: the script printed "Total: 0 open tasks" against
+    any graph, which reads as an empty week rather than as a broken script.
+    """
+
+    def test_every_example_reads_a_key_the_cli_emits(self):
+        import pathlib
+        import re
+
+        payload_keys = {"todos", "count", "repeating_excluded"}
+        script = (pathlib.Path(__file__).parent.parent
+                  / "examples" / "weekly-todos.sh").read_text()
+        read_keys = set(re.findall(r"data(?:\.get\(|\[)['\"](\w+)['\"]", script))
+        assert read_keys, "no payload access found — did the script change shape?"
+        assert read_keys <= payload_keys, (
+            f"the script reads keys get-todos never emits: {read_keys - payload_keys}")
+
+    def test_get_todos_json_still_uses_those_keys(self):
+        """Pins the other half: the example is only right while this holds."""
+        api = MagicMock()
+        api.datascript_query.return_value = []
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--json"])
+        assert r.exit_code == 0, r.stdout
+        assert set(json.loads(r.stdout)) == {"todos", "count"}

@@ -88,6 +88,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not go stale and names the consequence instead of a count — a figure
   maintained by hand is the same defect this project documents elsewhere.
 
+### Fixed
+
+- `examples/weekly-todos.sh` counted `data.get('tasks', [])`, a key
+  `get-todos --json` has never emitted — the payload has carried `todos` since
+  the initial import. The `.get` default swallowed it: the script reported
+  "Total: 0 open tasks" against any graph and printed an empty per-page
+  breakdown under it, which reads as a quiet week rather than as a broken
+  example. It now reads `data['todos']`, so a future rename fails loudly
+  instead of counting zero.
+
+  Two tests hold both halves — the example may only read keys the payload
+  carries, and the payload keeps carrying them. Found while checking the
+  block-ref work above for consistency against the rest of the repo, not by
+  running the example, which is the part worth noting: an example nobody runs
+  is documentation that can disagree with its source.
+
 ## [0.12.0] - 2026-09-15
 
 ### Fixed
