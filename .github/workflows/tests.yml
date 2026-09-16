@@ -19,3 +19,31 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: python -m pytest -q
+
+  wheel:
+    # pip install -e links the source tree, so an editable install cannot see a
+    # subpackage missing from `packages` in pyproject.toml. The built artefact
+    # can: this compares the wheel against the source tree rather than looking
+    # for logseq_cli/commands by name, so it keeps working when another
+    # subpackage is added.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Both flags are load-bearing, and both were measured rather than
+      # assumed. Without --no-cache-dir pip serves a cached build of an earlier
+      # commit, and the check then passes on a wheel it never inspected. A
+      # stale logseq_cli.egg-info does the same thing: setuptools reuses its
+      # SOURCES.txt, so a wheel built after `packages` was narrowed still
+      # contains the subpackage. CI starts from a clean checkout, so the rm is
+      # a no-op there and a safeguard for anyone running this locally.
+      - run: rm -rf dist build *.egg-info
+      - run: pip wheel . -w dist --no-deps --no-cache-dir
+      - run: >
+          python -c "import pathlib,zipfile,glob;
+          src={str(p) for p in pathlib.Path('logseq_cli').rglob('*.py')};
+          whl={n for n in zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist() if n.endswith('.py')};
+          missing=src-whl;
+          assert not missing, sorted(missing)"
