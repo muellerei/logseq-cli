@@ -95,8 +95,8 @@ class TestJournalRangeTailLimit:
         result = CliRunner().invoke(cli, [
             "get-journal-range", "--from", "2026-08-01", "--to", "2026-08-10",
             flag, "0"])
-        assert result.exit_code != 0
-        assert ">= 1" in result.output
+        assert result.exit_code == 1
+        assert "1 or greater" in result.output
 
 
 class TestJournalRangeHeading:

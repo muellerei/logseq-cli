@@ -44,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is where the other guards already sat. Found by a test asserting that a
   refusal costs no API call — not by reading the code.
 
+- `get-journal-range` refused a bad `--tail`/`--limit`/`--from` through Click,
+  which exits 2 with a usage dump on stderr. Every other command uses `fail()`,
+  which exits 1 and, under `--json`, writes an error object — the whole point
+  of that helper being that a caller parsing stderr as JSON is never handed
+  prose instead. This command speaks `--json`, so an agent asking for a
+  structured answer got an unparseable one. It now refuses the same way as the
+  rest. Found by an independent review of the commits above, not by the sweep,
+  which asserted only a non-zero exit and so covered the difference up; the
+  sweep now checks the exit code and the JSON shape of the refusal.
+
 ### Changed
 
 - Every numeric option now states its lower bound in `--help`, including what
