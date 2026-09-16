@@ -15,7 +15,8 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli, _format_property_value
+from logseq_cli.cli import cli
+from logseq_cli.commands.properties import _format_property_value
 
 
 def _api(rows):
