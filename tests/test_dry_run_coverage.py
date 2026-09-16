@@ -9,6 +9,9 @@ be overwritten, the pages whose ``[[links]]`` a rename would rewrite.
 Validation must survive the preview too: a --dry-run that swallows "block not
 found" or "ambiguous selector" would report a write that could never succeed.
 """
+import ast
+import functools
+import importlib
 import json
 import pathlib
 from unittest.mock import MagicMock, patch
@@ -547,25 +550,48 @@ class TestEveryWriteHasADryRun:
     )
 
     @staticmethod
-    def _command_bodies():
+    @functools.lru_cache(maxsize=None)
+    def _module_functions(module_name):
+        """{function name: source text} for one module, parsed rather than scanned."""
+        module = importlib.import_module(module_name)
+        source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        return {
+            node.name: ast.get_source_segment(source, node)
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+    @classmethod
+    def _command_bodies(cls):
         """Map each command function name to its source text.
 
-        Read from the module file rather than via ``inspect``: every command is
-        wrapped by ``handle_connection_error``, and ``functools.wraps`` copies
-        enough metadata that ``getsource`` hands back the wrapper for all of
-        them. Splitting the file on top-level ``def`` keeps this independent of
-        the decorator stack.
-        """
-        import re
-        import logseq_cli.cli as cli_module
+        Parsed rather than scanned, and per module rather than per file.
+        ``inspect.getsource`` is no use here: it hands back the wrapper that
+        ``handle_connection_error`` returns.
 
-        source = pathlib.Path(cli_module.__file__).read_text(encoding="utf-8")
+        The previous version split one file on top-level ``def``, which put the
+        decorator lines of the next function at the end of the previous one --
+        73 bodies carry foreign trailing text that way. Today that changes
+        nothing (both scans find the same 18 writers), but it only holds while
+        the neighbours stay put. Spec 001 moves every command into one of nine
+        modules, which reorders all of them.
+
+        ``func.__module__`` after unwrapping names the file that defines the
+        command, which is why this survives the move -- and why
+        ``handle_connection_error`` has to build its wrapper with
+        ``functools.wraps``: a hand-built wrapper reports the decorator's own
+        module instead, and the scan would find nothing.
+        """
+        from logseq_cli.cli import cli as root
+
         bodies = {}
-        starts = [(m.start(), m.group(1))
-                  for m in re.finditer(r"^def ([a-z_][a-z0-9_]*)\(", source, re.M)]
-        for index, (offset, name) in enumerate(starts):
-            end = starts[index + 1][0] if index + 1 < len(starts) else len(source)
-            bodies[name] = source[offset:end]
+        for command in root.commands.values():
+            func = command.callback
+            while hasattr(func, "__wrapped__"):
+                func = func.__wrapped__
+            bodies[func.__name__] = cls._module_functions(func.__module__).get(
+                func.__name__, "")
         return bodies
 
     def _writing_commands(self):
@@ -582,15 +608,35 @@ class TestEveryWriteHasADryRun:
                 writing[name] = command
         return writing
 
+    # Every Command Name whose Command writes, measured 2026-09-16. Literal,
+    # because the thing guarded against is a scan that finds *fewer* commands
+    # than it should, and a sample of five cannot see that — nor can a set
+    # derived from the scan, which would assert that the scan equals itself.
+    _KNOWN_WRITERS = {
+        "add-block-ref", "add-journal-block", "add-journal-content",
+        "add-journal-entry", "add-note-content", "copy-block", "create-page",
+        "delete-block", "delete-page", "insert-block", "remove-block",
+        "remove-property", "rename-page", "replace-text", "set-block-property",
+        "set-property", "set-todo-status", "update-block",
+    }
+
     def test_the_scan_finds_the_known_writers(self):
-        """Guards the guard: a scan that finds nothing would pass silently."""
-        found = self._writing_commands()
-        for expected in ("create-page", "delete-page", "rename-page",
-                         "update-block", "insert-block"):
-            assert expected in found, (
-                f"{expected} writes but the scan missed it — the detection is "
-                f"broken, not the commands. Found: {sorted(found)}"
-            )
+        """Guards the guard: a scan that finds nothing would pass silently.
+
+        Asserted as equality, not containment. Containment catches a scan that
+        shrank, which is the danger, but it lets the inventory itself shrink
+        unnoticed — and a name dropped from the set here is how the scan would
+        be taught to miss a command later. Equality also makes a genuinely new
+        write command fail here, deliberately: it costs one line in this set,
+        next to the README row spec 007 already asks for.
+        """
+        found = set(self._writing_commands())
+        assert found == self._KNOWN_WRITERS, (
+            f"missed by the scan: {sorted(self._KNOWN_WRITERS - found)}; "
+            f"not in the known set: {sorted(found - self._KNOWN_WRITERS)}. "
+            f"A command in the first list means the detection is broken, not "
+            f"the commands."
+        )
 
     def test_every_writing_command_offers_dry_run(self):
         missing = []
