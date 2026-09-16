@@ -33,7 +33,7 @@ def api(monkeypatch):
     mock.host, mock.port = "127.0.0.1", "12315"
     mock.base_url = "http://127.0.0.1:12315/api"
     mock.token = "tok"
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     return mock
 
 

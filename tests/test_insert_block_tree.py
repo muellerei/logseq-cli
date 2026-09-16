@@ -138,7 +138,7 @@ class TestInsertBlockCLITreeFlag:
     def test_tree_under_child_of_returns_uuids(self):
         api = _make_api_with_uuid_sequence(["u1", "u2", "u3"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "parent-uuid",
@@ -156,7 +156,7 @@ class TestInsertBlockCLITreeFlag:
             {"content": "alpha", "children": [{"content": "beta"}]},
         ])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "parent",
@@ -170,7 +170,7 @@ class TestInsertBlockCLITreeFlag:
     def test_tree_with_page_top_level(self):
         api = _make_api_with_uuid_sequence(["p1", "p2"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--page", "MyPage",
@@ -185,7 +185,7 @@ class TestInsertBlockCLITreeFlag:
     def test_tree_only_root_block(self):
         api = _make_api_with_uuid_sequence(["solo"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "p",
@@ -199,7 +199,7 @@ class TestInsertBlockCLITreeFlag:
     def test_tree_empty_input_is_error(self):
         api = _make_api_with_uuid_sequence([])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "p",
@@ -211,7 +211,7 @@ class TestInsertBlockCLITreeFlag:
     def test_tree_plain_text_output_lists_uuids(self):
         api = _make_api_with_uuid_sequence(["u1", "u2"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "parent",
@@ -257,7 +257,7 @@ class TestInsertBlockTreeAsSiblings:
     def test_cli_after_tree_returns_uuids(self):
         api = _make_api_with_uuid_sequence(["a1", "a2", "a3"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--after", "anchor-uuid",
@@ -272,7 +272,7 @@ class TestInsertBlockTreeAsSiblings:
     def test_cli_before_tree_works(self):
         api = _make_api_with_uuid_sequence(["b1", "b2"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--before", "anchor-uuid",
@@ -290,7 +290,7 @@ class TestInsertBlockDryRun:
     def test_dry_run_after_tree_counts_without_writing(self):
         api = MagicMock()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--after", "anchor",
@@ -308,7 +308,7 @@ class TestInsertBlockDryRun:
     def test_dry_run_child_of_flat_content(self):
         api = MagicMock()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--child-of", "parent",
@@ -323,7 +323,7 @@ class TestInsertBlockDryRun:
     def test_dry_run_after_hierarchical_content(self):
         api = MagicMock()
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--after", "anchor",
@@ -355,7 +355,7 @@ class TestResponseValidation:
         api = MagicMock()
         api.insert_block.return_value = None  # Logseq returns null for bad anchor
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block",
                 "--after", "00000000-0000-0000-0000-000000000000",
@@ -404,7 +404,7 @@ class TestInsertFirstChild:
     def test_single_content_uses_before_true(self):
         api, calls = self._api_recording(["f1"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent", "--first",
                 "--content", "head block", "--json",
@@ -415,7 +415,7 @@ class TestInsertFirstChild:
     def test_without_first_appends_last(self):
         api, calls = self._api_recording(["l1"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent",
                 "--content", "tail block", "--json",
@@ -427,7 +427,7 @@ class TestInsertFirstChild:
         """Order must be preserved: a, b, c, not reversed by repeated before=True."""
         api, calls = self._api_recording(["u-a", "u-b", "u-c"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent", "--first",
                 "--tree", "- a\n- b\n- c", "--json",
@@ -443,7 +443,7 @@ class TestInsertFirstChild:
     def test_tree_first_nests_children_under_head(self):
         api, calls = self._api_recording(["u-root", "u-kid"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent", "--first",
                 "--tree", "- root\n\t- kid", "--json",
@@ -455,7 +455,7 @@ class TestInsertFirstChild:
     def test_first_without_child_of_is_rejected(self):
         api, _ = self._api_recording(["nope"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--page", "SomePage", "--first",
                 "--content", "x",
@@ -469,7 +469,7 @@ class TestInsertFirstChild:
         api = MagicMock()
         api.insert_block.return_value = None
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent", "--first",
                 "--content", "vanishes",
@@ -480,7 +480,7 @@ class TestInsertFirstChild:
     def test_dry_run_reports_first_child_and_writes_nothing(self):
         api, calls = self._api_recording(["never"])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "insert-block", "--child-of", "parent", "--first",
                 "--content", "planned", "--dry-run",

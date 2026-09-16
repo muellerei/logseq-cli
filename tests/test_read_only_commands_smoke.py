@@ -58,7 +58,7 @@ def test_runs_and_emits_json(command, args, tmp_path):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=api_with_content()):
+         patch("logseq_cli.group.LogseqAPI", return_value=api_with_content()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
     assert result.exit_code == 0, result.stderr or result.stdout
     json.loads(result.stdout)
@@ -70,7 +70,7 @@ def test_survives_an_empty_graph(command, args, tmp_path):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=empty_api()):
+         patch("logseq_cli.group.LogseqAPI", return_value=empty_api()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
     assert result.exception is None or isinstance(result.exception, SystemExit), \
         f"{command} raised {result.exception!r}"
@@ -95,7 +95,7 @@ def run_json(api, tmp_path, *args):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=api):
+         patch("logseq_cli.group.LogseqAPI", return_value=api):
         result = split_runner().invoke(cli, ["--token", "X", *args, "--json"])
     assert result.exit_code == 0, result.stderr or result.stdout
     return json.loads(result.stdout)
@@ -283,7 +283,7 @@ class TestMoodCountsStatementsNotWords:
         api.get_all_pages.return_value = [
             {"originalName": "J", "journalDay": 20260910, "journal?": True}]
         with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-             patch("logseq_cli.cli.LogseqAPI", return_value=api), \
+             patch("logseq_cli.group.LogseqAPI", return_value=api), \
              patch("logseq_cli.cli.get_page_content", return_value=text):
             r = split_runner().invoke(
                 cli, ["--token", "X", "analyze-journal-patterns",

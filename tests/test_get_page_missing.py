@@ -21,7 +21,7 @@ from tests.conftest import split_runner
 @pytest.fixture
 def api(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_page_linked_references.return_value = []
     return mock
 

@@ -31,7 +31,7 @@ def _api(page_count=3, topics=("alpha", "beta", "gamma", "delta")):
 
 def _run(args, api, split=False):
     runner = split_runner() if split else CliRunner()
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return runner.invoke(cli, args)
 
 

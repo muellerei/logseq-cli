@@ -39,7 +39,7 @@ class TestGetTodosPageInline:
         ]
         api = _mock_api_for_todos(rows)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos"])
         assert result.exit_code == 0, result.output
         # Each TODO line should mention its page directly
@@ -57,7 +57,7 @@ class TestGetTodosPageInline:
         ]
         api = _mock_api_for_todos(rows)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         assert result.exit_code == 0, result.output
         data = _json.loads(result.output)
@@ -75,7 +75,7 @@ class TestGetTodosPageInline:
         ]
         api = _mock_api_for_todos(rows)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--page", "Alpha", "--json"])
         assert result.exit_code == 0, result.output
         data = _json.loads(result.output)
@@ -87,7 +87,7 @@ class TestGetTodosPageInline:
         rows = []
         api = _mock_api_for_todos(rows)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             runner.invoke(cli, ["get-todos", "--status", "DOING"])
         # Verify the query string contained DOING. The todo query is the first
         # one; the reference query follows it.
@@ -123,7 +123,7 @@ class TestGetTodosDateRange:
         """A range that predates the graph must not return non-journal tasks."""
         api = _mock_api_for_todos(self._rows())
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "1990-01-01", "--to", "1990-01-02", "--json"]
             )
@@ -134,7 +134,7 @@ class TestGetTodosDateRange:
     def test_range_keeps_journal_task_and_drops_undated_one(self):
         api = _mock_api_for_todos(self._rows())
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-05-01", "--to", "2026-05-31", "--json"]
             )
@@ -150,7 +150,7 @@ class TestGetTodosDateRange:
         """The filter only applies when asked for; the default is unchanged."""
         api = _mock_api_for_todos(self._rows())
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         assert result.exit_code == 0, result.output
         todos = _json.loads(result.output)["todos"]
@@ -160,7 +160,7 @@ class TestGetTodosDateRange:
         """One-sided ranges filter too — the bound is set, so it applies."""
         api = _mock_api_for_todos(self._rows())
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--from", "2026-05-01", "--json"])
         assert result.exit_code == 0, result.output
         contents = [t["content"] for t in _json.loads(result.output)["todos"]]
@@ -193,7 +193,7 @@ class TestGetTodosBlockReferences:
     def test_todo_is_found_through_a_reference(self):
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         assert result.exit_code == 0, result.output
@@ -205,7 +205,7 @@ class TestGetTodosBlockReferences:
         """``page`` and ``uuid`` keep naming where the block lives."""
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         todo = _json.loads(result.output)["todos"][0]
@@ -218,7 +218,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260317 + i) for i in range(3)]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         data = _json.loads(result.output)
@@ -232,7 +232,7 @@ class TestGetTodosBlockReferences:
                 self._ref(20260318, "Mar 18th, 2026")]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         refs_out = _json.loads(result.output)["todos"][0]["references"]
@@ -243,7 +243,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260319)] + [self._ref(20260101 + i) for i in range(5)]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         todo = _json.loads(result.output)["todos"][0]
@@ -253,7 +253,7 @@ class TestGetTodosBlockReferences:
     def test_withheld_is_absent_when_nothing_was_withheld(self):
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         todo = _json.loads(result.output)["todos"][0]
@@ -263,7 +263,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260301 + i) for i in range(5)]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--refs-limit", "2", "--json"])
         todo = _json.loads(result.output)["todos"][0]
         assert len(todo["references"]) == 2, todo["references"]
@@ -273,7 +273,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260301 + i) for i in range(5)]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--refs-limit", "0", "--json"])
         todo = _json.loads(result.output)["todos"][0]
         assert len(todo["references"]) == 5, todo["references"]
@@ -283,7 +283,7 @@ class TestGetTodosBlockReferences:
         """For callers who want where blocks live, not where they appear."""
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--no-follow-refs", "--from", "2026-03-17",
                       "--to", "2026-03-19", "--json"])
@@ -293,7 +293,7 @@ class TestGetTodosBlockReferences:
     def test_no_follow_refs_issues_no_second_query(self):
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             runner.invoke(cli, ["get-todos", "--no-follow-refs", "--json"])
         assert api.datascript_query.call_count == 1, (
             "--no-follow-refs must not pay for a read it does not use")
@@ -308,7 +308,7 @@ class TestGetTodosBlockReferences:
         refs = [({"uuid": "u-carried"}, {"original-name": "Project Alpha"})]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
         data = _json.loads(result.output)
@@ -320,7 +320,7 @@ class TestGetTodosBlockReferences:
         refs = [({"uuid": "u-carried"}, {"original-name": "Project Alpha"})]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         todo = _json.loads(result.output)["todos"][0]
         assert todo["references"] == ["Project Alpha"], todo
@@ -329,7 +329,7 @@ class TestGetTodosBlockReferences:
         """Callers reading todos that are not carried see the payload they saw."""
         api = _mock_api_for_todos([self._ORIGIN], [])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         todo = _json.loads(result.output)["todos"][0]
         assert "references" not in todo, todo
@@ -344,7 +344,7 @@ class TestGetTodosBlockReferences:
         """
         api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319, "Mar 19th, 2026")])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--page", "Mar 4th", "--json"])
         todos = _json.loads(result.output)["todos"]
         assert len(todos) == 1, todos
@@ -356,7 +356,7 @@ class TestGetTodosBlockReferences:
                                           "journal-day": 20260319})]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         uuids = [t["uuid"] for t in _json.loads(result.output)["todos"]]
         assert uuids == ["u-carried"], uuids
@@ -367,7 +367,7 @@ class TestGetTodosBlockReferences:
                 self._ref(20260319, "Mar 19th, 2026")]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         todo = _json.loads(result.output)["todos"][0]
         assert todo["references"] == ["Mar 19th, 2026"], todo
@@ -377,7 +377,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260319, "Mar 19th, 2026")]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19"])
         assert result.exit_code == 0, result.output
@@ -393,7 +393,7 @@ class TestGetTodosBlockReferences:
                 self._ref(20260914, "2026-09-14, Monday")]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos"])
         line = next(l for l in result.output.splitlines() if "also on" in l)
         assert "Wednesday; 2026-09-14" in line, (
@@ -410,7 +410,7 @@ class TestGetTodosBlockReferences:
         refs = [self._ref(20260319)] + [self._ref(20260101 + i) for i in range(3)]
         api = _mock_api_for_todos([self._ORIGIN], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--refs-limit", "0", "--from", "2026-03-17",
                       "--to", "2026-03-19", "--json"])
@@ -436,7 +436,7 @@ class TestGetTodosReferenceEdges:
     def _run(self, args, ref_rows):
         api = _mock_api_for_todos([self._ORIGIN], ref_rows)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             return runner.invoke(cli, ["get-todos", *args, "--json"]), api
 
     def _refs(self, n, start=20260301):
@@ -541,7 +541,7 @@ class TestGetTodosReferenceEdges:
             [({"content": "TODO carried", "marker": "TODO", "uuid": "u-carried"},
               {"original-name": "Mar 18th, 2026", "journal-day": 20260318})], refs)
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(
                 cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19"])
         assert "1 other page" in result.output, result.output
@@ -558,7 +558,7 @@ class TestGetTodosReferenceEdges:
         api.datascript_query.side_effect = lambda q: (
             None if ":block/refs" in q else [self._ORIGIN])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--json"])
         assert result.exit_code == 0, result.output
         todo = _json.loads(result.output)["todos"][0]
@@ -572,7 +572,7 @@ class TestGetTodosReferenceEdges:
             [({"uuid": "u-carried"},
               {"original-name": "Mar 19", "journal-day": 20260319})])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos", "--tag", "urgent", "--json"])
         todos = _json.loads(result.output)["todos"]
         assert len(todos) == 1, todos

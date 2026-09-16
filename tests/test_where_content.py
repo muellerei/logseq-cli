@@ -61,7 +61,7 @@ class TestResolveSingleBlock:
 class TestUpdateBlockWhereContent:
     def test_updates_the_single_match(self):
         api = _api(ONE)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--where-content", "14:22", "--content", "new"])
         assert r.exit_code == 0, r.output
@@ -69,7 +69,7 @@ class TestUpdateBlockWhereContent:
 
     def test_ambiguous_writes_nothing(self):
         api = _api(TWO)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--where-content", "Duplicate", "--content", "new"])
         assert r.exit_code == 1
@@ -77,7 +77,7 @@ class TestUpdateBlockWhereContent:
 
     def test_no_match_writes_nothing(self):
         api = _api([])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--where-content", "nope", "--content", "new"])
         assert r.exit_code == 1
@@ -85,7 +85,7 @@ class TestUpdateBlockWhereContent:
 
     def test_exactly_one_selector(self):
         api = _api(ONE)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             both = CliRunner().invoke(cli, [
                 "update-block", "--id", "u-1", "--where-content", "x", "--content", "n"])
             neither = CliRunner().invoke(cli, ["update-block", "--content", "n"])
@@ -96,7 +96,7 @@ class TestUpdateBlockWhereContent:
 
     def test_dry_run_writes_nothing(self):
         api = _api(ONE)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--where-content", "14:22", "--content", "new",
                 "--dry-run"])
@@ -106,7 +106,7 @@ class TestUpdateBlockWhereContent:
 
     def test_id_path_still_works(self):
         api = _api([])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "update-block", "--id", "u-1", "--content", "new"])
         assert r.exit_code == 0, r.output
@@ -120,7 +120,7 @@ class TestSetTodoStatusAmbiguity:
     def test_two_matching_todos_abort(self):
         api = _api([{"uuid": "u-A", "content": "TODO Report (A)"},
                     {"uuid": "u-B", "content": "TODO Report (B)"}])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "set-todo-status", "--content", "Report", "--page", "X",
                 "--status", "DONE"])
@@ -132,7 +132,7 @@ class TestSetTodoStatusAmbiguity:
         """A TODO plus a prose mention is not ambiguous: the marker decides."""
         api = _api([{"uuid": "u-A", "content": "TODO Write report"},
                     {"uuid": "u-B", "content": "see Write report above"}])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "set-todo-status", "--content", "Report", "--page", "X",
                 "--status", "DONE"])
@@ -145,11 +145,11 @@ class TestInsertBlockQuiet:
     def test_quiet_drops_the_uuid_list_but_keeps_the_confirmation(self):
         from tests.conftest import fake_api
         api = fake_api(["u1", "u2", "u3"])
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             loud = CliRunner().invoke(cli, [
                 "insert-block", "--child-of", "p", "--tree", "- a\n- b\n- c"])
             api2 = fake_api(["u1", "u2", "u3"])
-            with patch("logseq_cli.cli.LogseqAPI", return_value=api2):
+            with patch("logseq_cli.group.LogseqAPI", return_value=api2):
                 quiet = CliRunner().invoke(cli, [
                     "insert-block", "--child-of", "p", "--tree", "- a\n- b\n- c",
                     "--quiet"])

@@ -34,7 +34,7 @@ def _api(refs_by_page):
 
 
 def _run(args, api):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return CliRunner().invoke(cli, args)
 
 
@@ -127,7 +127,7 @@ class TestLimitRejectsNegativeValues:
     def test_the_refusal_goes_to_stderr_and_stdout_stays_empty(self):
         """stdout is payload; a caller piping it into a parser gets nothing else."""
         api = _api({"Alice": [("Journal", ["a [[Alice]]"])]})
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(cli, ["get-backlinks", "--name", "Alice",
                                                  "--with-context", "--limit", "-1"])
         assert result.exit_code == 1

@@ -31,7 +31,7 @@ class TestAddNoteContentUnderHeading:
             {"content": "## Notes", "uuid": "heading-uuid"},
         ])
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -54,7 +54,7 @@ class TestAddNoteContentUnderHeading:
         api.append_block_in_page.return_value = {"uuid": "new-heading"}
         api.insert_block.return_value = {"uuid": "child"}
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",
@@ -81,7 +81,7 @@ class TestAddNoteContentUnderHeading:
             uuids=["parent-uuid", "child-uuid"],
         )
         runner = CliRunner()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "add-note-content",
                 "--page", "Foo",

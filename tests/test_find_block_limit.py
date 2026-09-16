@@ -33,7 +33,7 @@ def _run(args, n_matches=50, split=False):
     api = MagicMock()
     api.datascript_query.return_value = [[b] for b in _blocks(n_matches)]
     runner = split_runner() if split else CliRunner()
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return runner.invoke(cli, ["--token", "T", "find-block"] + args)
 
 

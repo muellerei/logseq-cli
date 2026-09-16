@@ -31,7 +31,7 @@ class TestTransportErrorsAreStructured:
     def test_connection_error_is_json_with_reason(self):
         api = MagicMock()
         api.get_page.side_effect = requests.ConnectionError()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-page", "--name", "X", "--json"])
         assert r.exit_code == 1
         payload = json.loads(r.stderr)
@@ -41,7 +41,7 @@ class TestTransportErrorsAreStructured:
     def test_auth_error_names_the_token(self):
         api = MagicMock()
         api.get_page.side_effect = _http_error(401)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-page", "--name", "X", "--json"])
         assert r.exit_code == 1
         payload = json.loads(r.stderr)
@@ -51,7 +51,7 @@ class TestTransportErrorsAreStructured:
     def test_without_json_the_message_stays_prose(self):
         api = MagicMock()
         api.get_page.side_effect = requests.ConnectionError()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-page", "--name", "X"])
         assert r.exit_code == 1
         assert r.stderr.startswith("Error: Cannot connect")
@@ -61,7 +61,7 @@ class TestTransportErrorsAreStructured:
         """stdout must stay parseable as payload, whatever went wrong."""
         api = MagicMock()
         api.get_page.side_effect = _http_error(500)
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-page", "--name", "X", "--json"])
         assert r.stdout == ""
 
@@ -70,7 +70,7 @@ class TestGetBlockNotFound:
     def test_unknown_uuid_fails_instead_of_printing_null(self):
         api = MagicMock()
         api.get_block.return_value = None
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-block", "--id", "nope", "--json"])
         assert r.exit_code == 1
         assert r.stdout.strip() != "null"
@@ -80,7 +80,7 @@ class TestGetBlockNotFound:
     def test_known_uuid_still_returns_the_block(self):
         api = MagicMock()
         api.get_block.return_value = {"uuid": "u-1", "content": "Text", "children": []}
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-block", "--id", "u-1", "--json"])
         assert r.exit_code == 0, r.output
         assert json.loads(r.stdout)["content"] == "Text"
@@ -88,7 +88,7 @@ class TestGetBlockNotFound:
     def test_text_mode_also_fails(self):
         api = MagicMock()
         api.get_block.return_value = None
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-block", "--id", "nope"])
         assert r.exit_code == 1
         assert "not found" in r.stderr.lower()
@@ -162,7 +162,7 @@ class TestShippedExamplesReadTheRealPayload:
         """Pins the other half: the example is only right while this holds."""
         api = MagicMock()
         api.datascript_query.return_value = []
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-todos", "--json"])
         assert r.exit_code == 0, r.stdout
         assert set(json.loads(r.stdout)) == {"todos", "count"}

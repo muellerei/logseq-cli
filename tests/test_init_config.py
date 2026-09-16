@@ -44,7 +44,7 @@ def graph(recent_headings, old_headings=(), *, recent=120, old=200,
 
 
 def run(api, *args):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return split_runner().invoke(cli, ["--token", "X", "init", *args])
 
 

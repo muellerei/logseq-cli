@@ -24,7 +24,7 @@ def api():
     mock = MagicMock()
     mock.create_page.return_value = {"id": 1, "name": "new page"}
     mock.append_block_in_page.return_value = {"uuid": "u1"}
-    with patch("logseq_cli.cli.LogseqAPI", return_value=mock):
+    with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
 

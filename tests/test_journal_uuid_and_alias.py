@@ -21,7 +21,7 @@ def _japi():
 class TestJournalUuidReturn:
     def test_add_journal_content_returns_uuid(self):
         api = _japi()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "add-journal-content", "--content", "- entry",
                 "--top-level", "--date", "2026-06-04", "--json",
@@ -33,7 +33,7 @@ class TestJournalUuidReturn:
 
     def test_add_journal_block_single_returns_uuid(self):
         api = _japi()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "add-journal-block", "--content", "entry",
                 "--top-level", "--date", "2026-06-04", "--json",
@@ -45,7 +45,7 @@ class TestJournalUuidReturn:
 
     def test_add_journal_block_batch_returns_uuids(self):
         api = _japi()
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "add-journal-block", "--content", "a", "--content", "b",
                 "--top-level", "--date", "2026-06-04", "--json",
@@ -62,7 +62,7 @@ class TestNameAlias:
     def test_find_block_accepts_name(self):
         api = MagicMock()
         api.datascript_query.return_value = []
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "find-block", "--content", "x", "--name", "SomePage", "--json",
             ])
@@ -71,7 +71,7 @@ class TestNameAlias:
     def test_insert_block_accepts_name(self):
         api = MagicMock()
         api.append_block_in_page.return_value = {"uuid": "ib"}
-        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "insert-block", "--name", "SomePage", "--content", "x", "--json",
             ])
