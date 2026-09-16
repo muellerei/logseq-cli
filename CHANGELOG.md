@@ -46,14 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal costs no API call — not by reading the code.
 
 - `get-journal-range` refused a bad `--tail`/`--limit`/`--from` through Click,
-  which exits 2 with a usage dump on stderr. Every other command uses `fail()`,
-  which exits 1 and, under `--json`, writes an error object — the whole point
-  of that helper being that a caller parsing stderr as JSON is never handed
-  prose instead. This command speaks `--json`, so an agent asking for a
+  which exits 2 with a usage dump on stderr, where the checks a command makes
+  itself use `fail()` — exit 1 and, under `--json`, an error object. The whole
+  point of that helper is that a caller parsing stderr as JSON is never handed
+  prose instead, and this command speaks `--json`, so an agent asking for a
   structured answer got an unparseable one. It now refuses the same way as the
   rest. Found by an independent review of the commits above, not by the sweep,
   which asserted only a non-zero exit and so covered the difference up; the
   sweep now checks the exit code and the JSON shape of the refusal.
+
+  Not converted: the shared parsers in `helpers.py`, which raise
+  `BadParameter` across thirteen call sites. An unparseable `--from nonsense`
+  therefore still exits 2 while a reversed `--from`/`--to` exits 1 — the same
+  user error reported two ways. Changing that touches every command that parses
+  a date, a tree or a `--content-file`, which is a separate piece of work with
+  its own blast radius; `CONTRIBUTING.md` names the gap rather than implying it
+  is closed.
 
 ### Changed
 
