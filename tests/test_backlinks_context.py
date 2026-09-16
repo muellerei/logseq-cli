@@ -17,6 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import _extract_backlink_context, cli
+from tests.conftest import split_runner
 
 
 def _api(refs_by_page):
@@ -122,6 +123,16 @@ class TestLimitRejectsNegativeValues:
         assert result.exit_code == 1
         assert "--limit" in result.output
         assert "0 or greater" in result.output
+
+    def test_the_refusal_goes_to_stderr_and_stdout_stays_empty(self):
+        """stdout is payload; a caller piping it into a parser gets nothing else."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]"])]})
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = split_runner().invoke(cli, ["get-backlinks", "--name", "Alice",
+                                                 "--with-context", "--limit", "-1"])
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "0 or greater" in result.stderr
 
     def test_the_error_is_json_when_json_was_asked_for(self):
         """The command speaks JSON, so its refusal has to as well."""

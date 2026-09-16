@@ -686,7 +686,7 @@ Note:
 @click.option("--page", "--name", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
 @click.option("--first", "first_only", is_flag=True, help="Output only the first match")
-@click.option("--limit", "limit", type=int, default=None, help="Print at most N matches; the number withheld is reported on stderr")
+@click.option("--limit", "limit", type=int, default=None, help="Print at most N matches (1 or greater); the number withheld is reported on stderr")
 @click.option("--with-children", "with_children", is_flag=True, help="Print each match with its sub-blocks (one extra API read per match)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -694,12 +694,16 @@ Note:
 def find_block(ctx, content, page, use_regex, first_only, limit, with_children, as_json):
     """Find blocks by content substring or regex."""
     api = ctx.obj["api"]
-    matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
 
+    # Before the query, not after it: the whole result set arrives either way
+    # (measured: 71ms, 473KB for 1382 matches), and a value that will be
+    # refused must not cost that read first.
     if first_only and limit is not None:
         fail("Specify either --first or --limit, not both.", as_json)
     if limit is not None and limit < 1:
         fail("--limit must be 1 or greater.", as_json)
+
+    matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
 
     # A common word matches thousands of blocks, and printing all of them is
     # the unbounded-output failure the journal paths fixed in 0.6.0: the caller
@@ -828,7 +832,7 @@ Examples:
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name to find backlinks for (repeatable for batch: --name A --name B)")
 @click.option("--with-context", is_flag=True, help="Also show the blocks that do the linking, not just the page names. They come with the same API call, so this costs no extra read")
-@click.option("--limit", type=int, default=3, show_default=True, help="With --with-context: blocks kept per linking page; the remainder is reported as withheld. 0 keeps all")
+@click.option("--limit", type=int, default=3, show_default=True, help="With --with-context: blocks kept per linking page; the remainder is reported as withheld. 0 keeps all, negative is rejected")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
@@ -1001,8 +1005,8 @@ Notes:
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
-@click.option("--tail", "tail", default=None, type=int, help="Only the newest N journal days of the range (applied before fetching)")
-@click.option("--limit", "limit", default=None, type=int, help="Only the oldest N journal days of the range (applied before fetching)")
+@click.option("--tail", "tail", default=None, type=int, help="Only the newest N journal days of the range, 1 or greater (applied before fetching)")
+@click.option("--limit", "limit", default=None, type=int, help="Only the oldest N journal days of the range, 1 or greater (applied before fetching)")
 @click.option("--heading", default=None, help="Return only the section under this heading per day (e.g. '## Log')")
 @click.option("--format", "output_format", type=click.Choice(["text", "markdown"]), default="text", help="Output format: text (default) or markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -1152,13 +1156,20 @@ Example:
 Note:
   Requires Logseq running — no filesystem fallback possible.
 """)
-@click.option("--days", default=None, type=int, help="Limit to pages modified in last N days")
+@click.option("--days", default=None, type=int, help="Limit to pages modified in last N days (0 or greater; 0 is today only)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
 def analyze_graph(ctx, days, as_json):
     """Analyze the knowledge graph structure."""
     api = ctx.obj["api"]
+
+    # A window, not a cap: a negative value moves the cutoff into the future,
+    # so "recently updated" silently empties and the report answers a question
+    # nobody asked. 0 is meaningful here - pages touched today.
+    if days is not None and days < 0:
+        fail("--days must be 0 or greater.", as_json)
+
     pages = api.get_all_pages()
 
     # Open tasks only, and only where Logseq puts a marker: at the start of a
@@ -2139,7 +2150,7 @@ Example:
 @click.option("--min-confidence", default=0.3, type=float, help="Minimum confidence score (0-1)")
 @click.option("--min-shared", default=3, type=int, show_default=True,
               help="Minimum shared topics for a pair to count as connected")
-@click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return")
+@click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return (0 or greater; 0 returns none)")
 @click.option("--focus", default=None, help="Focus on specific page/topic")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -2147,6 +2158,12 @@ Example:
 def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus, as_json):
     """Suggest connections between pages based on shared topics."""
     api = ctx.obj["api"]
+
+    # Unlike the caps that read 0 as "no cap", 0 here asks for no suggestions
+    # and is answered with an empty list. Below that there is nothing to mean.
+    if max_suggestions < 0:
+        fail("--max-suggestions must be 0 or greater (0 returns none).", as_json)
+
     pages = api.get_all_pages()
 
     # Build topic index: page -> set of topics
@@ -4921,7 +4938,7 @@ Note:
 @click.option("--output", "out_path", default=None,
               help="Where to write (default: the first config search path)")
 @click.option("--days", default=120, show_default=True,
-              help="How many of the most recent journals to look at")
+              help="How many of the most recent journals to look at (0 or greater)")
 @click.option("--force", is_flag=True, help="Overwrite an existing config file")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Print what would be written")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -4930,6 +4947,12 @@ Note:
 def init_config(ctx, out_path, days, force, dry_run, as_json):
     """Suggest a config file from what your graph actually contains."""
     api = ctx.obj["api"]
+
+    # Sliced off the front of the journals, so a negative value drops the
+    # oldest one instead of limiting the sample: the suggestion would rest on
+    # a quietly different set of journals than the one asked for.
+    if days < 0:
+        fail("--days must be 0 or greater.", as_json)
 
     target = Path(out_path).expanduser() if out_path else config_search_paths()[0]
     if target.exists() and not (force or dry_run):

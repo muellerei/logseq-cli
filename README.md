@@ -198,13 +198,13 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N] [--with-children]` | Find blocks by content. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
-| `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder |
+| `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder; `0` keeps all |
 | `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
-| `analyze-graph [--days N]` | Graph structure analysis |
+| `analyze-graph [--days N]` | Graph structure analysis. `--days N` adds the pages modified in the last N days |
 | `find-knowledge-gaps [--min-refs N] [--include-orphans/--no-include-orphans]` | Missing/underdeveloped/orphaned pages. `--min-refs` (default 2) is how many incoming references a short page needs before it counts as underdeveloped rather than unused |
 | `analyze-journal-patterns [--timeframe RANGE] [--mood/--no-mood] [--topics/--no-topics]` | Journal entry patterns over `--timeframe` (default "last 30 days"). `--no-mood` and `--no-topics` drop those sections |
 | `smart-query --request TEXT [--advanced] [--include-query]` | Datalog queries (natural language, or `--advanced` to pass raw Datalog through). `--include-query` prints the generated query alongside the result |
-| `suggest-connections [--min-confidence N] [--min-shared N] [--max-suggestions N] [--focus PAGE]` | Topic-based connection suggestions. `--min-shared` (default 3) is the real filter — it sets how many topics two pages must share before the pair counts at all; `--min-confidence` (default 0.3) then scores it. `--focus` restricts to one page |
+| `suggest-connections [--min-confidence N] [--min-shared N] [--max-suggestions N] [--focus PAGE]` | Topic-based connection suggestions. `--min-shared` (default 3) is the real filter — it sets how many topics two pages must share before the pair counts at all; `--min-confidence` (default 0.3) then scores it. `--max-suggestions` (default 10) caps the list. `--focus` restricts to one page |
 | `get-page-stats --page NAME` | Page statistics (blocks, words, in/outbound links) |
 
 ### Write (5)
