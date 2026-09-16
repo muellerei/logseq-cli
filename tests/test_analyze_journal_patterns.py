@@ -31,7 +31,7 @@ def run(text, *args, config=None, tmp_path=None):
     env = {"LOGSEQ_CLI_CONFIG": str(f)}
     with patch.dict(os.environ, env, clear=False), \
          patch("logseq_cli.group.LogseqAPI", return_value=api), \
-         patch("logseq_cli.cli.get_page_content", return_value=text):
+         patch("logseq_cli.commands.analysis.get_page_content", return_value=text):
         return split_runner().invoke(
             cli, ["--token", "X", "analyze-journal-patterns",
                   "--timeframe", "last 30 days", "--json", *args])
