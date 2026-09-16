@@ -88,6 +88,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not go stale and names the consequence instead of a count — a figure
   maintained by hand is the same defect this project documents elsewhere.
 
+### Added
+
+- `examples/carried-over-todos.sh` lists the tasks standing in the last N days,
+  longest-carried first, and says for each how many journals it has been taken
+  along and how many of those fall inside the window. That reading only became
+  possible with the block-ref work above: before it, a task's date was the day
+  it was first written down, so "how long have I been moving this?" had no
+  answer in the payload.
+
+  Uses `--refs-limit 0` for the count, which lifts the per-task cap without
+  widening the window — occurrences before the range stay in
+  `references_withheld`, and the sum of both is what makes the total a
+  duration rather than a visible fraction.
+
 ### Fixed
 
 - `examples/weekly-todos.sh` counted `data.get('tasks', [])`, a key

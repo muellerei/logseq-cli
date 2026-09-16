@@ -126,16 +126,37 @@ class TestShippedExamplesReadTheRealPayload:
     """
 
     def test_every_example_reads_a_key_the_cli_emits(self):
+        """Checks every shipped example, not just the one that was wrong.
+
+        Scanning the directory rather than a list means a new example is
+        covered the day it is added, without anyone remembering to extend
+        this test.
+        """
         import pathlib
         import re
 
         payload_keys = {"todos", "count", "repeating_excluded"}
-        script = (pathlib.Path(__file__).parent.parent
-                  / "examples" / "weekly-todos.sh").read_text()
-        read_keys = set(re.findall(r"data(?:\.get\(|\[)['\"](\w+)['\"]", script))
-        assert read_keys, "no payload access found — did the script change shape?"
-        assert read_keys <= payload_keys, (
-            f"the script reads keys get-todos never emits: {read_keys - payload_keys}")
+        examples = sorted((pathlib.Path(__file__).parent.parent
+                           / "examples").glob("*.sh"))
+        assert examples, "no example scripts found"
+
+        checked = []
+        for script_path in examples:
+            script = script_path.read_text()
+            if "get-todos" not in script:
+                continue
+            # Only top-level access counts: Python's data['x'] / data.get('x'),
+            # and jq expressions rooted at the payload. A field read inside a
+            # todo (.content, .page, .references) is a different contract,
+            # held by the get-todos tests.
+            read_keys = set(re.findall(r"data(?:\.get\(|\[)['\"](\w+)['\"]", script))
+            read_keys |= {m for m in re.findall(r"^\s*\.(\w+)", script, re.M)}
+            read_keys |= set(re.findall(r"\(\.(\w+)\s*\|\s*length\)", script))
+            unknown = read_keys - payload_keys
+            assert not unknown, (
+                f"{script_path.name} reads keys get-todos never emits: {unknown}")
+            checked.append(script_path.name)
+        assert checked, "no example exercises get-todos any more"
 
     def test_get_todos_json_still_uses_those_keys(self):
         """Pins the other half: the example is only right while this holds."""
