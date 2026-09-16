@@ -1156,7 +1156,7 @@ Example:
 Note:
   Requires Logseq running — no filesystem fallback possible.
 """)
-@click.option("--days", default=None, type=int, help="Limit to pages modified in last N days (0 or greater; 0 is today only)")
+@click.option("--days", default=None, type=int, help="Limit to pages modified in last N days (1 or greater)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
@@ -1166,9 +1166,10 @@ def analyze_graph(ctx, days, as_json):
 
     # A window, not a cap: a negative value moves the cutoff into the future,
     # so "recently updated" silently empties and the report answers a question
-    # nobody asked. 0 is meaningful here - pages touched today.
-    if days is not None and days < 0:
-        fail("--days must be 0 or greater.", as_json)
+    # nobody asked. 0 puts the cutoff at this moment and is refused for the
+    # same reason - it can only ever report pages edited in the future.
+    if days is not None and days < 1:
+        fail("--days must be 1 or greater.", as_json)
 
     pages = api.get_all_pages()
 
@@ -2150,7 +2151,7 @@ Example:
 @click.option("--min-confidence", default=0.3, type=float, help="Minimum confidence score (0-1)")
 @click.option("--min-shared", default=3, type=int, show_default=True,
               help="Minimum shared topics for a pair to count as connected")
-@click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return (0 or greater; 0 returns none)")
+@click.option("--max-suggestions", default=10, type=int, help="Maximum suggestions to return (1 or greater); the remainder is reported as withheld")
 @click.option("--focus", default=None, help="Focus on specific page/topic")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -2159,10 +2160,11 @@ def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus,
     """Suggest connections between pages based on shared topics."""
     api = ctx.obj["api"]
 
-    # Unlike the caps that read 0 as "no cap", 0 here asks for no suggestions
-    # and is answered with an empty list. Below that there is nothing to mean.
-    if max_suggestions < 0:
-        fail("--max-suggestions must be 0 or greater (0 returns none).", as_json)
+    # 0 is refused rather than answered with an empty list: the empty result is
+    # reported as "no connections found above confidence threshold", which
+    # blames the graph for what the flag did.
+    if max_suggestions < 1:
+        fail("--max-suggestions must be 1 or greater.", as_json)
 
     pages = api.get_all_pages()
 
@@ -2234,14 +2236,21 @@ def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus,
     # more shared topics is the better suggestion of the two.
     suggestions.sort(key=lambda s: (s["confidence"], len(s["shared_topics"])),
                      reverse=True)
+    # Counted before the cap: "found" is a statement about the graph, and
+    # counting the survivors would report three pairs as one whenever the cap
+    # bites. What the cap left out is named rather than dropped in silence.
+    total_found = len(suggestions)
     suggestions = suggestions[:max_suggestions]
+    withheld = total_found - len(suggestions)
 
     result = {
         "suggestions": suggestions,
-        "total_found": len(suggestions),
+        "total_found": total_found,
         "min_confidence": min_confidence,
         "min_shared_topics": min_shared,
     }
+    if withheld:
+        result["withheld"] = withheld
 
     if as_json:
         output(result, True)
@@ -2255,6 +2264,14 @@ def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus,
                 click.echo(f"    Confidence: {s['confidence']:.1%}")
                 click.echo(f"    Shared: {', '.join(s['shared_topics'][:5])}")
                 click.echo()
+            # Never truncate silently: the same promise the journal reads make.
+            if withheld:
+                click.echo(
+                    f"Note: showing {len(suggestions)} of {total_found} "
+                    f"suggestion(s); {withheld} omitted. Raise --max-suggestions "
+                    "to see more.",
+                    err=True,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -4938,7 +4955,7 @@ Note:
 @click.option("--output", "out_path", default=None,
               help="Where to write (default: the first config search path)")
 @click.option("--days", default=120, show_default=True,
-              help="How many of the most recent journals to look at (0 or greater)")
+              help="How many of the most recent journals to look at (1 or greater)")
 @click.option("--force", is_flag=True, help="Overwrite an existing config file")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Print what would be written")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
@@ -4950,9 +4967,12 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
 
     # Sliced off the front of the journals, so a negative value drops the
     # oldest one instead of limiting the sample: the suggestion would rest on
-    # a quietly different set of journals than the one asked for.
-    if days < 0:
-        fail("--days must be 0 or greater.", as_json)
+    # a quietly different set of journals than the one asked for. 0 is refused
+    # rather than allowed, because looking at no journals still writes a config
+    # - one built on no evidence, under the message "No journals found - is the
+    # right graph open?", which blames the graph for what the flag did.
+    if days < 1:
+        fail("--days must be 1 or greater.", as_json)
 
     target = Path(out_path).expanduser() if out_path else config_search_paths()[0]
     if target.exists() and not (force or dry_run):

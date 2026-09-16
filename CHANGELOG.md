@@ -49,10 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every numeric option now states its lower bound in `--help`, including what
   `0` means there, because it differs and the difference was written down
   nowhere. `0` lifts the cap for `get-backlinks --limit` and `get-todos
-  --refs-limit`; it means "none at all" for `suggest-connections
-  --max-suggestions`, "today only" for the two `--days` windows, and is refused
-  by `find-block --limit` and `get-journal-range --tail/--limit`, where zero
-  matches is not an answer anyone asks for. `find-knowledge-gaps --min-refs` and
+  --refs-limit`. Everywhere else it is refused, and three of those refusals
+  were decided by measuring rather than by assuming: `analyze-graph --days 0`
+  puts the cutoff at this moment and can only report pages edited in the
+  future; `init --days 0` still writes a config, built on no journals and
+  announced as "No journals found — is the right graph open?", which blames the
+  graph for what the flag did; `suggest-connections --max-suggestions 0`
+  returned an empty list under the same kind of misleading message. `find-block
+  --limit` and `get-journal-range --tail/--limit` refuse zero as before. `find-knowledge-gaps --min-refs` and
   `suggest-connections --min-shared` are thresholds rather than caps and keep
   taking any value.
 
