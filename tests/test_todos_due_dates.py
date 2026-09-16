@@ -51,7 +51,7 @@ def _api(rows):
 
 
 def _run(args, rows):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=_api(rows)):
+    with patch("logseq_cli.group.LogseqAPI", return_value=_api(rows)):
         return split_runner().invoke(cli, args)
 
 

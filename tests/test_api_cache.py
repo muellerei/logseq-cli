@@ -135,9 +135,6 @@ class TestCacheableSetMatchesReality:
         from logseq_cli.api import _CACHEABLE_METHODS
 
         src = Path(__file__).resolve().parent.parent / "logseq_cli"
-        code = "\n".join(
-            f.read_text(encoding="utf-8") for f in src.glob("*.py") if f.name != "api.py"
-        )
         api_src = (src / "api.py").read_text(encoding="utf-8")
 
         for method in _CACHEABLE_METHODS:

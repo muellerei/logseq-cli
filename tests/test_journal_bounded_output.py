@@ -27,7 +27,7 @@ def _journal_pages(days):
 @pytest.fixture
 def api(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_all_pages.return_value = _journal_pages(range(1, 11))  # 1..10 Aug
     mock.get_page_blocks_tree.return_value = [
         {"uuid": "h", "content": "## Log",
@@ -119,7 +119,7 @@ class TestJournalRangeHeading:
 
 class TestJournalSummaryNoContent:
     def test_no_content_drops_bodies_but_keeps_length(self, api, monkeypatch):
-        monkeypatch.setattr("logseq_cli.cli.get_page_content",
+        monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
                             lambda api_, name: "x" * 500 + " [[Alice]]")
         result = CliRunner().invoke(cli, [
             "get-journal-summary", "--range", "this year", "--no-content", "--json"])
@@ -131,7 +131,7 @@ class TestJournalSummaryNoContent:
             assert entry["topics"] == ["Alice"]
 
     def test_default_still_includes_content(self, api, monkeypatch):
-        monkeypatch.setattr("logseq_cli.cli.get_page_content",
+        monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
                             lambda api_, name: "voller text")
         result = CliRunner().invoke(cli, [
             "get-journal-summary", "--range", "this year", "--json"])

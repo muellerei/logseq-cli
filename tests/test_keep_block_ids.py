@@ -116,7 +116,7 @@ class TestBatchPath:
 # ---------- the command ----------------------------------------------------
 
 def _run(args, api):
-    with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
         return CliRunner().invoke(cli, ["--token", "T"] + args)
 
 

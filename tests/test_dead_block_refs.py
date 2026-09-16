@@ -41,7 +41,7 @@ def api():
         return None  # deleted block: Logseq answers null
 
     mock.get_block.side_effect = get_block
-    with patch("logseq_cli.cli.LogseqAPI", return_value=mock):
+    with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
 

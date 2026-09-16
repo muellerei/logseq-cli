@@ -8,7 +8,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli, _resolve_version
+from logseq_cli.cli import cli
+from logseq_cli.group import resolve_version
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
@@ -22,7 +23,7 @@ def _pyproject_version():
 
 
 def test_resolve_version_matches_pyproject():
-    assert _resolve_version() == _pyproject_version()
+    assert resolve_version() == _pyproject_version()
 
 
 def test_cli_version_flag_reports_pyproject_version():
@@ -32,4 +33,4 @@ def test_cli_version_flag_reports_pyproject_version():
 
 
 def test_version_looks_like_semver():
-    assert re.match(r"^\d+\.\d+\.\d+", _resolve_version())
+    assert re.match(r"^\d+\.\d+\.\d+", resolve_version())

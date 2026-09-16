@@ -58,7 +58,7 @@ def test_runs_and_emits_json(command, args, tmp_path):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=api_with_content()):
+         patch("logseq_cli.group.LogseqAPI", return_value=api_with_content()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
     assert result.exit_code == 0, result.stderr or result.stdout
     json.loads(result.stdout)
@@ -70,7 +70,7 @@ def test_survives_an_empty_graph(command, args, tmp_path):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=empty_api()):
+         patch("logseq_cli.group.LogseqAPI", return_value=empty_api()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
     assert result.exception is None or isinstance(result.exception, SystemExit), \
         f"{command} raised {result.exception!r}"
@@ -95,7 +95,7 @@ def run_json(api, tmp_path, *args):
     cfg = tmp_path / "c.toml"
     cfg.write_text("", encoding="utf-8")
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-         patch("logseq_cli.cli.LogseqAPI", return_value=api):
+         patch("logseq_cli.group.LogseqAPI", return_value=api):
         result = split_runner().invoke(cli, ["--token", "X", *args, "--json"])
     assert result.exit_code == 0, result.stderr or result.stdout
     return json.loads(result.stdout)
@@ -224,23 +224,23 @@ class TestFindKnowledgeGapsIgnoresArtefacts:
 
     def test_prose_fragments_dragged_in_by_brackets_are_ignored(self):
         """"#Active)" and "3b82f6)" come from parentheses in a sentence."""
-        from logseq_cli.cli import _is_incidental_page
+        from logseq_cli.commands.analysis import _is_incidental_page
         for name in ("3b82f6)", "508-workaround)", "Active)"):
             assert _is_incidental_page(name), name
 
     def test_a_name_with_balanced_brackets_is_kept(self):
-        from logseq_cli.cli import _is_incidental_page
+        from logseq_cli.commands.analysis import _is_incidental_page
         assert not _is_incidental_page("Projekt (Phase 1)")
 
     def test_a_ticket_number_that_took_the_next_word_is_ignored(self):
         """"#272-Designentscheidung" in prose becomes a page of that name."""
-        from logseq_cli.cli import _is_incidental_page
+        from logseq_cli.commands.analysis import _is_incidental_page
         assert _is_incidental_page("272-Designentscheidung")
         assert _is_incidental_page("149-Rekursionsrisiko")
 
     def test_a_real_term_starting_with_a_digit_is_kept(self):
         """Three digits or more, so "2-Faktor-Auth" is not caught by it."""
-        from logseq_cli.cli import _is_incidental_page
+        from logseq_cli.commands.analysis import _is_incidental_page
         assert not _is_incidental_page("2-Faktor-Auth")
         assert not _is_incidental_page("4-Level-Struktur")
 
@@ -283,8 +283,8 @@ class TestMoodCountsStatementsNotWords:
         api.get_all_pages.return_value = [
             {"originalName": "J", "journalDay": 20260910, "journal?": True}]
         with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
-             patch("logseq_cli.cli.LogseqAPI", return_value=api), \
-             patch("logseq_cli.cli.get_page_content", return_value=text):
+             patch("logseq_cli.group.LogseqAPI", return_value=api), \
+             patch("logseq_cli.commands.analysis.get_page_content", return_value=text):
             r = split_runner().invoke(
                 cli, ["--token", "X", "analyze-journal-patterns",
                       "--timeframe", "last 30 days", "--json"])

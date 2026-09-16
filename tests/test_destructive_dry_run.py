@@ -30,7 +30,7 @@ def _assert_no_mutation(api):
 def api(monkeypatch):
     """A MagicMock LogseqAPI injected into the CLI context."""
     mock = MagicMock()
-    monkeypatch.setattr("logseq_cli.cli.LogseqAPI", lambda **kwargs: mock)
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     return mock
 
 

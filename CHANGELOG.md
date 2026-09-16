@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The build now ships `logseq_cli.commands`. `pyproject.toml` lists packages
+  explicitly, which was right while the package was flat and became wrong the
+  moment it had a subpackage: setuptools does not infer one from an explicit
+  list. No release was ever affected — the subpackage and the list entry landed
+  in the same commit — but the failure mode is worth naming, because it is
+  invisible to the tests. `pip install -e .` links the source tree, so an
+  editable install imports the subpackage regardless; what a user would have
+  installed is a CLI that starts and has no commands.
+
 - `get-backlinks --with-context --limit` accepted a negative value and answered
   with less data and a count larger than the page held. Three linking blocks
   came back as two, with `... 4 more not shown`, exit code 0, in both output
@@ -77,6 +86,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is closed.
 
 ### Changed
+
+- The commands moved out of `cli.py` into `logseq_cli/commands/`, one module per
+  group of commands, with the click group in `group.py`, the result and error
+  helpers in `output.py` and the block rendering in `render.py`. `cli.py` is now
+  the entry point that imports them: 5390 lines to 33.
+
+  Nothing about using the tool changes. The console entry point is unchanged,
+  every command keeps its name, its options, its defaults and its help text —
+  the per-command `--help` output of all 38 command names was captured before
+  the first commit and diffed against after every one of them, and it never
+  differed. The commands themselves were moved as text, in one commit per
+  module, with the suite green at each.
+
+  Two changes are not pure moves and are called out because they are the ones
+  that could behave differently. Nine helpers that are read from more than one
+  module lost their leading underscore, in a commit where nothing else happens.
+  And `handle_connection_error` now builds its wrapper with `functools.wraps`
+  instead of copying two attributes by hand, so a callback still names the
+  module it came from — without that, the scan that holds "under `--dry-run`
+  nothing mutating goes out" across 18 commands would have found nothing at
+  all and said so by passing.
 
 - Every numeric option now states its lower bound in `--help`, including what
   `0` means there, because it differs and the difference was written down
