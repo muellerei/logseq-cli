@@ -62,10 +62,40 @@ logseq-cli/
    logseq-cli your-new-command ...
    ```
 
-4. **Update documentation.** If you add or change a command:
-   - Update `README.md` (command tables and usage examples)
-   - Update `AGENTS.md` (if it affects common workflows)
-   - Add an entry under `## [Unreleased]` in `CHANGELOG.md`
+   **Tests must be able to fail.**
+
+   A test that confirms the fix instead of catching the bug is worth nothing
+   and looks like safety. Before trusting one, remove the fix and check that
+   the test goes red.
+
+   This is not theory. A test meant to prove that `search-pages` also matches
+   on `originalName` searched for `"Alpha"` — which, after `.lower()`, is
+   present in `name` too. It passed, and it tested nothing; only removing the
+   `originalName` branch exposed it. The fixture now uses `Q&A / Support`,
+   whose ampersand does not survive into the slugged `name`.
+
+   Tests that write to a live graph use throwaway pages with a recognisable
+   prefix — `zz-probe-<timestamp>` — and delete them afterwards.
+
+4. **A change is not done when the tests pass.** A new flag ships when it
+   appears in:
+   - `--help` — the option's own text, and the command epilog if the behaviour
+     is not obvious from the flag name
+   - the command table in `README.md`
+   - `AGENTS.md`, if it affects a common workflow
+   - `CHANGELOG.md` under `## [Unreleased]`
+
+   Both flags added in 0.10.0 went out without the README row and the
+   `AGENTS.md` entry, and were caught the same evening. Twenty further options
+   had never been listed at all. `tests/test_readme_documents_options.py` now
+   holds the command table against the registry, which covers the README row
+   and nothing else on this list.
+
+   Relative links and anchors across the Markdown files, after any of those:
+
+   ```bash
+   python3 scripts/check-links.py .
+   ```
 
 ## Design Principles
 
@@ -93,6 +123,9 @@ logseq-cli/
   so an unparseable `--from` exits 2 while a reversed range exits 1. That is a
   known inconsistency, not a pattern to copy.
 - **German + English.** `smart-query` keywords support both languages.
+- **References name symbols, not line numbers.** A comment pointing at
+  `helpers.py:855` outlived its meaning within two commits; the function name
+  would not have.
 
 ## Reporting Issues
 

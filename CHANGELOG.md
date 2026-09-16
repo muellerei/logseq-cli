@@ -86,6 +86,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directions: an exemption for an option that no longer exists fails the suite
   rather than silently covering a future option that inherits the name.
 
+- `CONTRIBUTING.md` says how work here is actually done, in the three places
+  where following the old wording would not have prevented the mistakes that
+  were made: a test has to be shown to fail before it is trusted, since one
+  meant to prove `search-pages` matches on `originalName` searched for a string
+  that `.lower()` also finds in `name` and so tested nothing; write tests
+  against a live graph use `zz-probe-<timestamp>` pages and delete them; and
+  "update documentation" is now a four-item checklist including `--help`,
+  because both flags in 0.10.0 went out without their README row and `AGENTS.md`
+  entry. References name symbols rather than line numbers — a comment pointing
+  at `helpers.py:855` outlived its meaning within two commits.
+
+  `scripts/check-links.py` checks relative links and heading anchors across the
+  Markdown files. The anchor rule is the part that is easy to get wrong: GitHub
+  drops punctuation before turning spaces into hyphens, so an em dash in a
+  heading leaves both its spaces behind and the anchor takes two hyphens. It
+  skips generated and gitignored trees, after an earlier version read them and
+  reported a broken link no contributor could have seen.
+
 ## [0.13.0] - 2026-09-16
 
 ### Changed
