@@ -12,7 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli, FIND_BLOCK_CHILDREN_LIMIT
+from logseq_cli.cli import cli
+from logseq_cli.commands.blocks import FIND_BLOCK_CHILDREN_LIMIT
 
 
 def _api(matches, children_by_uuid=None):
