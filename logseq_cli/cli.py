@@ -1,4 +1,5 @@
 import datetime
+import functools
 import json
 import os
 import re
@@ -87,7 +88,15 @@ def handle_connection_error(func):
 
     ``as_json`` is read from the wrapped command's kwargs; Click passes every
     option by name, so it is there whenever the command declares the flag.
+
+    ``functools.wraps`` carries ``__module__`` and ``__wrapped__`` across, not
+    only the name and the docstring. ``tests/test_dry_run_coverage.py`` unwraps
+    each callback and parses the module that ``__module__`` names; a wrapper
+    built by hand reports the module that defines *this* decorator instead, so
+    once the commands live elsewhere the scan would look in the wrong file and
+    find no writing command at all.
     """
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         as_json = bool(kwargs.get("as_json"))
         try:
@@ -139,8 +148,6 @@ def handle_connection_error(func):
                 as_json=as_json,
                 reason="invalid_property_key",
             )
-    wrapper.__name__ = func.__name__
-    wrapper.__doc__ = func.__doc__
     return wrapper
 
 
