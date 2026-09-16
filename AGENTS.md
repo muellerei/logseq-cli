@@ -112,6 +112,9 @@ logseq-cli get-todos --page "Project Alpha"
 # Filter by tag
 logseq-cli get-todos --tag urgent
 
+# Tasks standing in a date range, including ones carried forward by ((block-ref))
+logseq-cli get-todos --from 2026-09-14 --to 2026-09-16 --json
+
 # Mark as done
 logseq-cli set-todo-status --id UUID --status DONE
 
@@ -259,7 +262,7 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `get-block` | Resolve block references `((uuid))` |
 | `search-pages` | Find pages by name |
 | `smart-query` | Natural language or Datalog queries |
-| `get-todos` | List and filter tasks |
+| `get-todos` | List and filter tasks; a task carried forward by `((block-ref))` is found on the day it stands and stays one row |
 | `get-backlinks` | Find pages linking to a page |
 | `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in a tree |
 | `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree |

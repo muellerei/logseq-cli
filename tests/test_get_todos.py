@@ -8,13 +8,22 @@ from click.testing import CliRunner
 from logseq_cli.cli import cli
 
 
-def _mock_api_for_todos(todo_rows):
+def _mock_api_for_todos(todo_rows, ref_rows=None):
     """Build a mocked API that returns datascript_query rows for get-todos.
 
-    Each row in ``todo_rows`` is (block_dict, page_dict) per the get-todos query.
+    ``get-todos`` issues two queries: the todos themselves, then — unless
+    ``--no-follow-refs`` is given — the blocks that reference them. The mock
+    answers them in that order.
+
+    Each row in ``todo_rows`` is (block_dict, page_dict) per the todo query.
+    Each row in ``ref_rows`` is (block_dict, page_dict) per the reference
+    query, where block_dict identifies the *referenced* todo by uuid and
+    page_dict is the page the reference sits on.
     """
     api = MagicMock()
-    api.datascript_query.return_value = todo_rows
+    api.datascript_query.side_effect = lambda q: (
+        ref_rows or [] if ":block/refs" in q else todo_rows
+    )
     return api
 
 
@@ -80,8 +89,9 @@ class TestGetTodosPageInline:
         runner = CliRunner()
         with patch("logseq_cli.cli.LogseqAPI", return_value=api):
             runner.invoke(cli, ["get-todos", "--status", "DOING"])
-        # Verify the query string contained DOING
-        query = api.datascript_query.call_args[0][0]
+        # Verify the query string contained DOING. The todo query is the first
+        # one; the reference query follows it.
+        query = api.datascript_query.call_args_list[0][0][0]
         assert "DOING" in query
 
 
@@ -157,3 +167,413 @@ class TestGetTodosDateRange:
         assert not any("plain page" in c for c in contents), (
             f"task without a journal date passed a one-sided range: {contents!r}"
         )
+
+
+class TestGetTodosBlockReferences:
+    """A todo carried forward by ``((uuid))`` must be found on the day it stands.
+
+    The defect this guards: ``get-todos`` located a task only through the page
+    its block lives on. Carrying an open task forward by reference is the
+    ordinary way to work in Logseq — the block exists once, every later
+    occurrence is a reference to it — so a date range over those later days
+    returned nothing at all, with no sign that anything had been left out.
+    """
+
+    # The origin block sits outside every range used below, so a todo that
+    # shows up in one can only have been found through its references.
+    _ORIGIN = ({"content": "TODO write the migration guide", "marker": "TODO",
+                "uuid": "u-carried"},
+               {"original-name": "Mar 4th, 2026", "name": "mar 4th, 2026",
+                "journal-day": 20260304})
+
+    def _ref(self, day, name=None):
+        return ({"uuid": "u-carried"},
+                {"original-name": name or f"journal {day}", "journal-day": day})
+
+    def test_todo_is_found_through_a_reference(self):
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        assert result.exit_code == 0, result.output
+        todos = _json.loads(result.output)["todos"]
+        assert len(todos) == 1, f"todo carried into the range was not found: {todos!r}"
+        assert todos[0]["uuid"] == "u-carried"
+
+    def test_origin_fields_are_unchanged(self):
+        """``page`` and ``uuid`` keep naming where the block lives."""
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["page"] == "Mar 4th, 2026", (
+            f"page must stay the origin, got {todo['page']!r}")
+        assert todo["uuid"] == "u-carried"
+
+    def test_many_references_yield_one_row(self):
+        """A todo referenced N times is one task, not N tasks."""
+        refs = [self._ref(20260317 + i) for i in range(3)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        data = _json.loads(result.output)
+        assert data["count"] == 1, f"references were not deduplicated: {data!r}"
+        assert len(data["todos"][0]["references"]) == 3
+
+    def test_references_are_sorted_newest_first(self):
+        """Datalog guarantees no order, so the sort has to be explicit."""
+        refs = [self._ref(20260317, "Mar 17th, 2026"),
+                self._ref(20260319, "Mar 19th, 2026"),
+                self._ref(20260318, "Mar 18th, 2026")]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        refs_out = _json.loads(result.output)["todos"][0]["references"]
+        assert refs_out == ["Mar 19th, 2026", "Mar 18th, 2026", "Mar 17th, 2026"], refs_out
+
+    def test_occurrences_outside_the_range_are_counted_not_listed(self):
+        """Trimming must not hide that a todo has been carried for months."""
+        refs = [self._ref(20260319)] + [self._ref(20260101 + i) for i in range(5)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 1, todo["references"]
+        assert todo["references_withheld"] == 5, todo
+
+    def test_withheld_is_absent_when_nothing_was_withheld(self):
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert "references_withheld" not in todo, todo
+
+    def test_refs_limit_caps_the_list_and_counts_the_rest(self):
+        refs = [self._ref(20260301 + i) for i in range(5)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--refs-limit", "2", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 2, todo["references"]
+        assert todo["references_withheld"] == 3, todo
+
+    def test_refs_limit_zero_keeps_all(self):
+        refs = [self._ref(20260301 + i) for i in range(5)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--refs-limit", "0", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 5, todo["references"]
+        assert "references_withheld" not in todo, todo
+
+    def test_no_follow_refs_restores_the_old_reading(self):
+        """For callers who want where blocks live, not where they appear."""
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--no-follow-refs", "--from", "2026-03-17",
+                      "--to", "2026-03-19", "--json"])
+        data = _json.loads(result.output)
+        assert data["todos"] == [], f"--no-follow-refs still resolved refs: {data!r}"
+
+    def test_no_follow_refs_issues_no_second_query(self):
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319)])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            runner.invoke(cli, ["get-todos", "--no-follow-refs", "--json"])
+        assert api.datascript_query.call_count == 1, (
+            "--no-follow-refs must not pay for a read it does not use")
+
+    def test_references_on_non_journal_pages_fall_out_of_a_range(self):
+        """Same rule as the origin page: no journal-day, no place in the range.
+
+        44 of 248 reference occurrences in the measured graph sit on ordinary
+        pages. Letting them count would reopen the silent gap this command
+        already closed for origin pages.
+        """
+        refs = [({"uuid": "u-carried"}, {"original-name": "Project Alpha"})]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19", "--json"])
+        data = _json.loads(result.output)
+        assert data["todos"] == [], (
+            f"a reference on a page with no journal-day entered a range: {data!r}")
+
+    def test_non_journal_reference_is_listed_without_a_range(self):
+        """Without a range there is nothing to fall outside of."""
+        refs = [({"uuid": "u-carried"}, {"original-name": "Project Alpha"})]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Project Alpha"], todo
+
+    def test_a_todo_without_references_has_no_references_field(self):
+        """Callers reading todos that are not carried see the payload they saw."""
+        api = _mock_api_for_todos([self._ORIGIN], [])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert "references" not in todo, todo
+        assert "references_withheld" not in todo, todo
+
+    def test_page_filter_matches_the_origin_not_the_reference(self):
+        """--page selects which todos appear; references still count graph-wide.
+
+        The alternative — restricting references to the queried page — would
+        make the field mean something different per call, and would mean
+        nothing at all for --tag, which is not a page.
+        """
+        api = _mock_api_for_todos([self._ORIGIN], [self._ref(20260319, "Mar 19th, 2026")])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--page", "Mar 4th", "--json"])
+        todos = _json.loads(result.output)["todos"]
+        assert len(todos) == 1, todos
+        assert todos[0]["references"] == ["Mar 19th, 2026"], todos[0]
+
+    def test_a_reference_alone_does_not_invent_a_todo(self):
+        """Only blocks the todo query returned may appear; refs add no rows."""
+        refs = [({"uuid": "u-unknown"}, {"original-name": "Mar 19th, 2026",
+                                          "journal-day": 20260319})]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        uuids = [t["uuid"] for t in _json.loads(result.output)["todos"]]
+        assert uuids == ["u-carried"], uuids
+
+    def test_duplicate_reference_dates_are_collapsed(self):
+        """Two references on one day are one occurrence of that day."""
+        refs = [self._ref(20260319, "Mar 19th, 2026"),
+                self._ref(20260319, "Mar 19th, 2026")]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Mar 19th, 2026"], todo
+
+    def test_plain_text_names_the_occurrences(self):
+        """The defect was invisible in plain text too, not only in JSON."""
+        refs = [self._ref(20260319, "Mar 19th, 2026")]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19"])
+        assert result.exit_code == 0, result.output
+        assert "Mar 19th, 2026" in result.output, result.output
+
+    def test_plain_text_separates_occurrences_unambiguously(self):
+        """Journal names hold a comma, so the list must not be comma-separated.
+
+        A real journal page is named "2026-09-16, Wednesday". Joined with ", "
+        two of them read as four entries.
+        """
+        refs = [self._ref(20260916, "2026-09-16, Wednesday"),
+                self._ref(20260914, "2026-09-14, Monday")]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos"])
+        line = next(l for l in result.output.splitlines() if "also on" in l)
+        assert "Wednesday; 2026-09-14" in line, (
+            f"occurrences are not separably delimited: {line!r}")
+
+    def test_lifting_the_cap_does_not_zero_the_withheld_count(self):
+        """--refs-limit 0 lifts the cap; it does not widen the range.
+
+        The two are easy to conflate, because "0 keeps all" reads as though the
+        cap were the only reason an occurrence goes uncounted. It is not: with a
+        range set, occurrences outside it are withheld too, and that is the
+        point — a task carried since March must not look new.
+        """
+        refs = [self._ref(20260319)] + [self._ref(20260101 + i) for i in range(3)]
+        api = _mock_api_for_todos([self._ORIGIN], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--refs-limit", "0", "--from", "2026-03-17",
+                      "--to", "2026-03-19", "--json"])
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 1, todo["references"]
+        assert todo["references_withheld"] == 3, (
+            f"--refs-limit 0 must not smuggle out-of-range occurrences in: {todo!r}")
+
+
+class TestGetTodosReferenceEdges:
+    """Boundaries of the reference machinery.
+
+    Every case here was run against the implementation before being written
+    down, and each was then checked by breaking the branch it covers and
+    confirming this test is the one that fails. Cases whose plausible
+    mutations turned out behaviour-equivalent were dropped rather than kept
+    as decoration.
+    """
+
+    _ORIGIN = ({"content": "TODO carried", "marker": "TODO", "uuid": "u-carried"},
+               {"original-name": "Mar 4th, 2026", "journal-day": 20260304})
+
+    def _run(self, args, ref_rows):
+        api = _mock_api_for_todos([self._ORIGIN], ref_rows)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            return runner.invoke(cli, ["get-todos", *args, "--json"]), api
+
+    def _refs(self, n, start=20260301):
+        return [({"uuid": "u-carried"},
+                 {"original-name": f"day {start + i}", "journal-day": start + i})
+                for i in range(n)]
+
+    def test_exactly_at_the_limit_withholds_nothing(self):
+        """The cap is a maximum, not a threshold: 5 kept under a limit of 5."""
+        result, _ = self._run(["--refs-limit", "5"], self._refs(5))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 5, todo["references"]
+        assert "references_withheld" not in todo, todo
+
+    def test_the_default_limit_is_ten_and_holds_exactly_ten(self):
+        """Pins the documented default, at the boundary where off-by-one shows.
+
+        Ten is not inherited from `get-backlinks --limit` (3) — an entry here
+        is a date, not a block of text, and the measured distribution of a
+        live graph breaks at ten: a cap of 3 trims 12 of 58 carried tasks,
+        a cap of 10 trims 4.
+        """
+        result, _ = self._run([], self._refs(10))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 10, todo["references"]
+        assert "references_withheld" not in todo, todo
+
+    def test_the_default_limit_withholds_the_eleventh(self):
+        result, _ = self._run([], self._refs(11))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 10, todo["references"]
+        assert todo["references_withheld"] == 1, todo
+
+    def test_a_limit_of_one_keeps_the_newest(self):
+        result, _ = self._run(["--refs-limit", "1"], self._refs(3))
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["day 20260303"], todo
+        assert todo["references_withheld"] == 2, todo
+
+    def test_a_negative_limit_is_refused(self):
+        """Silently treating -1 as 'keep all' would invert what was asked for."""
+        result, _ = self._run(["--refs-limit", "-1"], self._refs(2))
+        assert "--refs-limit" in result.output, result.output
+        assert "0 or greater" in result.output, result.output
+
+    def test_the_marker_filter_reaches_the_reference_query(self):
+        """Otherwise a DOING query would collect references to TODO blocks.
+
+        Nothing in the output would look wrong — the extra occurrences would
+        simply attach to tasks the filter was meant to exclude.
+        """
+        _, api = self._run(["--status", "DOING"], [])
+        ref_query = next(c[0][0] for c in api.datascript_query.call_args_list
+                         if ":block/refs" in c[0][0])
+        assert "DOING" in ref_query, ref_query
+        assert "TODO" not in ref_query, ref_query
+
+    def test_dated_occurrences_sort_ahead_of_undated_ones(self):
+        """Without a range both kinds are listed, in a fixed order.
+
+        Datalog returns rows unordered, so an unstated order would make the
+        field differ between two identical calls.
+        """
+        refs = [({"uuid": "u-carried"}, {"original-name": "Zzz Page"}),
+                ({"uuid": "u-carried"},
+                 {"original-name": "Mar 19", "journal-day": 20260319}),
+                ({"uuid": "u-carried"}, {"original-name": "Aaa Page"})]
+        result, _ = self._run([], refs)
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Mar 19", "Aaa Page", "Zzz Page"], todo
+
+    def test_a_row_the_query_could_not_fill_is_skipped(self):
+        """A pull answers None, not {}, for an entity with none of the pulled
+        attributes — observed on a live graph, on reference pages with no name.
+        """
+        refs = [({"uuid": "u-carried"}, None),
+                (None, {"original-name": "Mar 19", "journal-day": 20260319}),
+                ({"uuid": "u-carried"},
+                 {"original-name": "Mar 19", "journal-day": 20260319})]
+        result, _ = self._run([], refs)
+        assert result.exit_code == 0, result.output
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Mar 19"], todo
+
+    def test_a_page_carrying_only_name_is_still_named(self):
+        """original-name is absent on pages that were never given one."""
+        refs = [({"uuid": "u-carried"},
+                 {"name": "mar 19", "journal-day": 20260319})]
+        result, _ = self._run([], refs)
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["mar 19"], todo
+
+    def test_plain_text_reports_a_count_when_no_date_survives(self):
+        """Every occurrence fell outside the range, so only the number is left.
+
+        Printing nothing would let the task read as though it had not been
+        touched since the day it was written.
+        """
+        refs = [({"uuid": "u-carried"},
+                 {"original-name": "Jan 1", "journal-day": 20260101})]
+        api = _mock_api_for_todos(
+            [({"content": "TODO carried", "marker": "TODO", "uuid": "u-carried"},
+              {"original-name": "Mar 18th, 2026", "journal-day": 20260318})], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19"])
+        assert "1 other page" in result.output, result.output
+
+    def test_a_null_reference_result_does_not_kill_the_command(self):
+        """The API hands back whatever the body decoded to, `null` included.
+
+        `LogseqAPI.call` returns `resp.json()` and only screens dicts carrying
+        an "error" key, so a `null` body reaches the caller as None. Without
+        the guard the command dies on `TypeError: 'NoneType' is not iterable`
+        while the todo query itself succeeded.
+        """
+        api = MagicMock()
+        api.datascript_query.side_effect = lambda q: (
+            None if ":block/refs" in q else [self._ORIGIN])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        assert result.exit_code == 0, result.output
+        todo = _json.loads(result.output)["todos"][0]
+        assert "references" not in todo, todo
+
+    def test_tag_filter_and_references_coexist(self):
+        """--tag selects tasks by content; occurrences still count graph-wide."""
+        api = _mock_api_for_todos(
+            [({"content": "TODO carried #urgent", "marker": "TODO", "uuid": "u-carried"},
+              {"original-name": "Mar 4th, 2026", "journal-day": 20260304})],
+            [({"uuid": "u-carried"},
+              {"original-name": "Mar 19", "journal-day": 20260319})])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--tag", "urgent", "--json"])
+        todos = _json.loads(result.output)["todos"]
+        assert len(todos) == 1, todos
+        assert todos[0]["references"] == ["Mar 19"], todos[0]

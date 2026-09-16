@@ -12,7 +12,7 @@ echo "=== Count ==="
 logseq-cli get-todos --status TODO --status DOING --json "$@" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-tasks = data.get('tasks', [])
+tasks = data['todos']
 print(f'Total: {len(tasks)} open tasks')
 pages = {}
 for t in tasks:

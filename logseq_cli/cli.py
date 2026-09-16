@@ -3606,6 +3606,99 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         click.echo(f"  uuid: {new_uuid}")
 
 
+def _fetch_todo_references(api, markers_str: str) -> dict:
+    """Map each referenced todo's uuid to the pages its references sit on.
+
+    In Logseq a block reference is not a copy, it is the same block appearing in
+    a second place: checking off a reference checks off the original. Carrying an
+    open task forward by ``((uuid))`` is therefore the ordinary way to keep it
+    alive, and the later journals hold references rather than blocks of their
+    own. ``:block/refs`` is a real relation, so this needs no string matching on
+    the ``((uuid))`` form.
+
+    Answers ``{uuid: [(journal_day_or_None, page_name), ...]}``, unordered and
+    with duplicates intact — the caller decides what a date range keeps and how
+    the rest is counted, which it cannot do once entries are dropped here.
+    """
+    query = (
+        '[:find (pull ?src [:block/uuid]) '
+        '(pull ?refp [:block/original-name :block/name :block/journal-day]) '
+        ':where [?src :block/marker ?m] '
+        f'[(contains? #{{{markers_str}}} ?m)] '
+        '[?ref :block/refs ?src] '
+        '[?ref :block/page ?refp]]'
+    )
+    occurrences = {}
+    for row in api.datascript_query(query) or []:
+        if not (isinstance(row, (list, tuple)) and len(row) >= 2):
+            continue
+        src, refp = row[0], row[1]
+        # A pull answers None, not {}, for an entity carrying none of the
+        # requested attributes — seen on a live graph, and it is the reference
+        # pages without a name that hit this.
+        if not isinstance(src, dict) or not isinstance(refp, dict):
+            continue
+        uuid = src.get("uuid")
+        name = refp.get("original-name") or refp.get("name", "")
+        if not uuid or not name:
+            continue
+        jd = refp.get("journal-day") or refp.get("journalDay")
+        occurrences.setdefault(uuid, []).append((jd, name))
+    return occurrences
+
+
+def _place_references(occurrences, date_start, date_end, limit: int):
+    """Pick the occurrences to report and count the ones left out.
+
+    Answers ``(names, withheld)``. ``names`` is sorted newest first, because
+    Datalog guarantees no result order and because the most recent occurrence is
+    the one a caller reaches for first — the origin is already in ``page``.
+
+    Two things fall out rather than being listed. An occurrence outside a given
+    range is not an answer to the question asked; and an occurrence on a page
+    with no ``journal-day`` cannot be shown to fall inside a range at all, the
+    same rule the origin page already follows. Both are counted in ``withheld``
+    instead of vanishing: that a task has been carried for months is worth
+    knowing even when the dates themselves are not asked for.
+    """
+    dated, undated = [], []
+    for jd, name in occurrences:
+        if jd is None:
+            undated.append(name)
+            continue
+        try:
+            dated.append((journal_day_to_date(jd), name))
+        except (ValueError, TypeError):
+            # An unparseable journal-day places an occurrence no better than a
+            # missing one does.
+            undated.append(name)
+
+    if date_start or date_end:
+        in_range, out_of_range = [], len(undated)
+        for d, name in dated:
+            dt = datetime.datetime.combine(d, datetime.time())
+            if (date_start and dt < date_start) or (date_end and dt > date_end):
+                out_of_range += 1
+            else:
+                in_range.append((d, name))
+        kept = [name for _, name in sorted(in_range, key=lambda e: e[0], reverse=True)]
+        withheld = out_of_range
+    else:
+        kept = [name for _, name in sorted(dated, key=lambda e: e[0], reverse=True)]
+        kept += sorted(undated)
+        withheld = 0
+
+    # Two references written on the same day are one occurrence of that day:
+    # the field names where a task stood, not how often it was typed.
+    deduped = list(dict.fromkeys(kept))
+    withheld += len(kept) - len(deduped)
+
+    if limit and len(deduped) > limit:
+        withheld += len(deduped) - limit
+        deduped = deduped[:limit]
+    return deduped, withheld
+
+
 # ---------------------------------------------------------------------------
 # 21. get-todos
 # ---------------------------------------------------------------------------
@@ -3616,28 +3709,39 @@ Examples:
   logseq-cli --token TOKEN get-todos --from 2026-05-01 --to 2026-05-31 --include-done
 Notes:
   --status repeatable. Default: TODO, DOING, NOW, LATER (no DONE).
-  Returns ORIGINAL blocks only — TODO Block-Refs ((uuid)) inside journals are NOT listed.
+  A task carried forward by a block-ref ((uuid)) is found on the day it stands,
+  and reported once: "page" and "uuid" stay the original block, "references"
+  names the other pages it appears on. Following refs costs one extra query for
+  the whole command, not one per task. --no-follow-refs restores the old reading.
   Plain-text output: "MARKER [Page] preview" — page name inline, no grouping needed.
 """)
 @click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
 @click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
-@click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal page a task sits on, so tasks on ordinary pages are excluded whenever a range is given.")
+@click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal pages a task stands on — the one its block lives on and the ones it was carried into by ((block-ref)) — so tasks found only on ordinary pages are excluded whenever a range is given.")
 @click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
 @click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. Repeating tasks are excluded and reported — Logseq stores their first occurrence, not the next")
 @click.option("--due-to", "due_to", default=None, help="Only tasks due on or before this date. Same rule as --due-from")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
+@click.option("--refs-limit", "refs_limit", type=int, default=10, show_default=True,
+              help="Occurrences kept per task in 'references'; 0 lifts the cap. references_withheld counts everything left out, which with --from/--to also includes occurrences outside the range and on pages with no journal-day — so 0 does not make it zero")
+@click.option("--no-follow-refs", "no_follow_refs", is_flag=True,
+              help="Do not resolve block-refs: report only where task blocks live, not where they appear. Saves one read")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, include_done, as_json):
+def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, include_done,
+              refs_limit, no_follow_refs, as_json):
     """List all TODOs/tasks in the graph."""
     api = ctx.obj["api"]
 
     markers = set(s.upper() for s in status)
     if include_done:
         markers.add("DONE")
+
+    if refs_limit < 0:
+        fail("--refs-limit must be 0 or greater (0 lifts the cap).", as_json)
 
     markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (
@@ -3648,6 +3752,11 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
         '[?b :block/page ?p]]'
     )
     results = api.datascript_query(query)
+
+    # One extra read for the whole command, not one per task: the relation is
+    # queried in bulk and joined below. --no-follow-refs skips it entirely
+    # rather than fetching what it will not use.
+    occurrences = {} if no_follow_refs else _fetch_todo_references(api, markers_str)
 
     todos = []
     for block_data, page_data in results:
@@ -3727,22 +3836,48 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
         tag_pattern = re.compile(rf"#\b{re.escape(tag)}\b", re.IGNORECASE)
         todos = [t for t in todos if tag_pattern.search(t["content"])]
 
-    # Filter by date range. A task whose page carries no journal-day cannot be
-    # shown to fall inside the range, so it falls out of it. Letting it pass
-    # instead made the filter apply to the journal subset only and stay silent
-    # about the rest: a range predating the graph still returned every task on
-    # an ordinary page, and no caller could tell which part had been filtered.
+    # Resolve block references. A task carried forward by ((uuid)) stands on the
+    # later day as much as on the day it was written, so its occurrences are
+    # attached here — before the date filter, which reads them.
+    date_start = (
+        datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
+        if from_date else None
+    )
+    date_end = (
+        datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
+        if to_date else None
+    )
+    for t in todos:
+        refs = occurrences.get(t["uuid"])
+        if not refs:
+            continue
+        names, withheld = _place_references(refs, date_start, date_end, refs_limit)
+        # A task with no occurrence left to report carries no field: a caller
+        # reading tasks that are not carried forward sees the payload it saw
+        # before this command learned to follow references.
+        if names:
+            t["references"] = names
+        if withheld:
+            t["references_withheld"] = withheld
+
+    # Filter by date range. A task counts as inside the range if the journal
+    # page it sits on is, or if it appears inside it through a reference —
+    # checking off a reference checks off the original, so both are the same
+    # task standing on that day.
+    #
+    # A page carrying no journal-day cannot be shown to fall inside the range,
+    # so it falls out of it, and the same rule governs reference pages: 44 of
+    # 248 reference occurrences measured on a live graph sit on ordinary pages.
+    # Letting either pass made the filter apply to the journal subset only and
+    # stay silent about the rest: a range predating the graph still returned
+    # every task on an ordinary page, and no caller could tell which part had
+    # been filtered.
     if from_date or to_date:
-        date_start = (
-            datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
-            if from_date else None
-        )
-        date_end = (
-            datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
-            if to_date else None
-        )
         filtered = []
         for t in todos:
+            if t.get("references"):
+                filtered.append(t)
+                continue
             jd = t.get("_journal_day")
             if jd is None:
                 continue
@@ -3832,6 +3967,19 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
             for t in todos:
                 preview = t["content"][:100] + ("..." if len(t["content"]) > 100 else "")
                 click.echo(f"  {t['marker']} [{t['page']}] {preview}")
+                # Named here too, not only in JSON: the gap this closes was
+                # just as invisible in plain text, and "[Mar 4th]" alone still
+                # reads as though the task had not been touched since.
+                refs = t.get("references")
+                if refs:
+                    withheld = t.get("references_withheld")
+                    more = f" (+{withheld} more)" if withheld else ""
+                    # Semicolons, not commas: a journal page is named
+                    # "2026-09-16, Wednesday", so a comma-separated list of
+                    # them reads as twice as many entries as it holds.
+                    click.echo(f"      also on: {'; '.join(refs)}{more}")
+                elif t.get("references_withheld"):
+                    click.echo(f"      also on {t['references_withheld']} other page(s)")
 
 
 # ---------------------------------------------------------------------------
