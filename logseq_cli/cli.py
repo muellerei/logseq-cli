@@ -3740,7 +3740,7 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
         markers.add("DONE")
 
     if refs_limit < 0:
-        fail("--refs-limit must be 0 or greater (0 keeps all).", as_json)
+        fail("--refs-limit must be 0 or greater (0 lifts the cap).", as_json)
 
     markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (

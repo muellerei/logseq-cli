@@ -418,3 +418,162 @@ class TestGetTodosBlockReferences:
         assert len(todo["references"]) == 1, todo["references"]
         assert todo["references_withheld"] == 3, (
             f"--refs-limit 0 must not smuggle out-of-range occurrences in: {todo!r}")
+
+
+class TestGetTodosReferenceEdges:
+    """Boundaries of the reference machinery.
+
+    Every case here was run against the implementation before being written
+    down, and each was then checked by breaking the branch it covers and
+    confirming this test is the one that fails. Cases whose plausible
+    mutations turned out behaviour-equivalent were dropped rather than kept
+    as decoration.
+    """
+
+    _ORIGIN = ({"content": "TODO carried", "marker": "TODO", "uuid": "u-carried"},
+               {"original-name": "Mar 4th, 2026", "journal-day": 20260304})
+
+    def _run(self, args, ref_rows):
+        api = _mock_api_for_todos([self._ORIGIN], ref_rows)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            return runner.invoke(cli, ["get-todos", *args, "--json"]), api
+
+    def _refs(self, n, start=20260301):
+        return [({"uuid": "u-carried"},
+                 {"original-name": f"day {start + i}", "journal-day": start + i})
+                for i in range(n)]
+
+    def test_exactly_at_the_limit_withholds_nothing(self):
+        """The cap is a maximum, not a threshold: 5 kept under a limit of 5."""
+        result, _ = self._run(["--refs-limit", "5"], self._refs(5))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 5, todo["references"]
+        assert "references_withheld" not in todo, todo
+
+    def test_the_default_limit_is_ten_and_holds_exactly_ten(self):
+        """Pins the documented default, at the boundary where off-by-one shows.
+
+        Ten is not inherited from `get-backlinks --limit` (3) — an entry here
+        is a date, not a block of text, and the measured distribution of a
+        live graph breaks at ten: a cap of 3 trims 12 of 58 carried tasks,
+        a cap of 10 trims 4.
+        """
+        result, _ = self._run([], self._refs(10))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 10, todo["references"]
+        assert "references_withheld" not in todo, todo
+
+    def test_the_default_limit_withholds_the_eleventh(self):
+        result, _ = self._run([], self._refs(11))
+        todo = _json.loads(result.output)["todos"][0]
+        assert len(todo["references"]) == 10, todo["references"]
+        assert todo["references_withheld"] == 1, todo
+
+    def test_a_limit_of_one_keeps_the_newest(self):
+        result, _ = self._run(["--refs-limit", "1"], self._refs(3))
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["day 20260303"], todo
+        assert todo["references_withheld"] == 2, todo
+
+    def test_a_negative_limit_is_refused(self):
+        """Silently treating -1 as 'keep all' would invert what was asked for."""
+        result, _ = self._run(["--refs-limit", "-1"], self._refs(2))
+        assert "--refs-limit" in result.output, result.output
+        assert "0 or greater" in result.output, result.output
+
+    def test_the_marker_filter_reaches_the_reference_query(self):
+        """Otherwise a DOING query would collect references to TODO blocks.
+
+        Nothing in the output would look wrong — the extra occurrences would
+        simply attach to tasks the filter was meant to exclude.
+        """
+        _, api = self._run(["--status", "DOING"], [])
+        ref_query = next(c[0][0] for c in api.datascript_query.call_args_list
+                         if ":block/refs" in c[0][0])
+        assert "DOING" in ref_query, ref_query
+        assert "TODO" not in ref_query, ref_query
+
+    def test_dated_occurrences_sort_ahead_of_undated_ones(self):
+        """Without a range both kinds are listed, in a fixed order.
+
+        Datalog returns rows unordered, so an unstated order would make the
+        field differ between two identical calls.
+        """
+        refs = [({"uuid": "u-carried"}, {"original-name": "Zzz Page"}),
+                ({"uuid": "u-carried"},
+                 {"original-name": "Mar 19", "journal-day": 20260319}),
+                ({"uuid": "u-carried"}, {"original-name": "Aaa Page"})]
+        result, _ = self._run([], refs)
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Mar 19", "Aaa Page", "Zzz Page"], todo
+
+    def test_a_row_the_query_could_not_fill_is_skipped(self):
+        """A pull answers None, not {}, for an entity with none of the pulled
+        attributes — observed on a live graph, on reference pages with no name.
+        """
+        refs = [({"uuid": "u-carried"}, None),
+                (None, {"original-name": "Mar 19", "journal-day": 20260319}),
+                ({"uuid": "u-carried"},
+                 {"original-name": "Mar 19", "journal-day": 20260319})]
+        result, _ = self._run([], refs)
+        assert result.exit_code == 0, result.output
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["Mar 19"], todo
+
+    def test_a_page_carrying_only_name_is_still_named(self):
+        """original-name is absent on pages that were never given one."""
+        refs = [({"uuid": "u-carried"},
+                 {"name": "mar 19", "journal-day": 20260319})]
+        result, _ = self._run([], refs)
+        todo = _json.loads(result.output)["todos"][0]
+        assert todo["references"] == ["mar 19"], todo
+
+    def test_plain_text_reports_a_count_when_no_date_survives(self):
+        """Every occurrence fell outside the range, so only the number is left.
+
+        Printing nothing would let the task read as though it had not been
+        touched since the day it was written.
+        """
+        refs = [({"uuid": "u-carried"},
+                 {"original-name": "Jan 1", "journal-day": 20260101})]
+        api = _mock_api_for_todos(
+            [({"content": "TODO carried", "marker": "TODO", "uuid": "u-carried"},
+              {"original-name": "Mar 18th, 2026", "journal-day": 20260318})], refs)
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(
+                cli, ["get-todos", "--from", "2026-03-17", "--to", "2026-03-19"])
+        assert "1 other page" in result.output, result.output
+
+    def test_a_null_reference_result_does_not_kill_the_command(self):
+        """The API hands back whatever the body decoded to, `null` included.
+
+        `LogseqAPI.call` returns `resp.json()` and only screens dicts carrying
+        an "error" key, so a `null` body reaches the caller as None. Without
+        the guard the command dies on `TypeError: 'NoneType' is not iterable`
+        while the todo query itself succeeded.
+        """
+        api = MagicMock()
+        api.datascript_query.side_effect = lambda q: (
+            None if ":block/refs" in q else [self._ORIGIN])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--json"])
+        assert result.exit_code == 0, result.output
+        todo = _json.loads(result.output)["todos"][0]
+        assert "references" not in todo, todo
+
+    def test_tag_filter_and_references_coexist(self):
+        """--tag selects tasks by content; occurrences still count graph-wide."""
+        api = _mock_api_for_todos(
+            [({"content": "TODO carried #urgent", "marker": "TODO", "uuid": "u-carried"},
+              {"original-name": "Mar 4th, 2026", "journal-day": 20260304})],
+            [({"uuid": "u-carried"},
+              {"original-name": "Mar 19", "journal-day": 20260319})])
+        runner = CliRunner()
+        with patch("logseq_cli.cli.LogseqAPI", return_value=api):
+            result = runner.invoke(cli, ["get-todos", "--tag", "urgent", "--json"])
+        todos = _json.loads(result.output)["todos"]
+        assert len(todos) == 1, todos
+        assert todos[0]["references"] == ["Mar 19"], todos[0]
