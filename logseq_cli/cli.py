@@ -409,8 +409,11 @@ def _extract_backlink_context(refs, limit: int) -> list:
             blocks.append({"uuid": block.get("uuid", ""), "content": content})
         kept = blocks[:limit] if limit else blocks
         item = {"page": name, "blocks": kept}
-        if limit and len(blocks) > limit:
-            item["withheld"] = len(blocks) - limit
+        # Counted against what was kept, not against ``limit``: the caller
+        # supplies that number, and deriving the count from it is what let a
+        # negative value report more withheld than the page ever held.
+        if len(kept) < len(blocks):
+            item["withheld"] = len(blocks) - len(kept)
         entries.append(item)
     return sorted(entries, key=lambda e: e["page"])
 
@@ -832,6 +835,9 @@ Examples:
 def get_backlinks(ctx, page, with_context, limit, as_json):
     """Find pages that link to the given page(s) (uses native Logseq API). Pass --name multiple times for batch."""
     api = ctx.obj["api"]
+
+    if limit < 0:
+        fail("--limit must be 0 or greater (0 keeps all).", as_json)
 
     def _fetch_one(page_name):
         try:

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from logseq_cli.cli import cli
+from logseq_cli.cli import _extract_backlink_context, cli
 
 
 def _api(refs_by_page):
@@ -100,3 +100,133 @@ class TestWithoutContextIsUnchanged:
         result = _run(["get-backlinks", "--name", "Alice"], api)
         assert "at noon" not in result.output
         assert "<- Journal" in result.output
+
+
+class TestLimitRejectsNegativeValues:
+    """`--limit -1` used to answer with less data and a count larger than the page held.
+
+    The cap is applied as a slice and the withheld count was derived from the
+    cap, so a negative value broke both halves at once: ``blocks[:-1]`` drops
+    the *last* block instead of capping, and ``len(blocks) - (-1)`` exceeds
+    what exists. Three blocks came back as two, with "4 more not shown".
+
+    ``0`` is a valid value here and means "keep all", which is what makes the
+    wrong input reachable: a caller who knows that reaches for ``-1`` as "all
+    the more so". So the boundary is ``< 0``, not ``< 1``.
+    """
+
+    def test_negative_limit_is_rejected(self):
+        api = _api({"Alice": [("Journal", ["a [[Alice]]", "b [[Alice]]", "c [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "-1"], api)
+        assert result.exit_code == 1
+        assert "--limit" in result.output
+        assert "0 or greater" in result.output
+
+    def test_the_error_is_json_when_json_was_asked_for(self):
+        """The command speaks JSON, so its refusal has to as well."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "-1", "--json"], api)
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert "--limit" in payload["error"]
+
+    def test_zero_still_keeps_every_block(self):
+        """The documented meaning of 0 survives the guard."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]", "b [[Alice]]", "c [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "0", "--json"], api)
+        assert result.exit_code == 0
+        entry = json.loads(result.output)["backlinks"][0]
+        assert len(entry["blocks"]) == 3
+        assert "withheld" not in entry
+
+    def test_one_is_accepted_and_caps(self):
+        """The value just above the boundary is ordinary, not an edge case."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]", "b [[Alice]]", "c [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "1", "--json"], api)
+        assert result.exit_code == 0
+        entry = json.loads(result.output)["backlinks"][0]
+        assert len(entry["blocks"]) == 1
+        assert entry["withheld"] == 2
+
+    def test_no_page_is_read_before_the_input_is_refused(self):
+        """A bad value must not cost an API call."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]"])]})
+        _run(["get-backlinks", "--name", "Alice", "--with-context",
+              "--limit", "-1"], api)
+        api.get_page_linked_references.assert_not_called()
+
+    def test_the_guard_also_covers_batch_mode(self):
+        """--name is repeatable; the check belongs before the loop, not inside it."""
+        api = _api({"Alice": [("Journal", ["a [[Alice]]"])],
+                    "Bob": [("Journal", ["b [[Bob]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--name", "Bob",
+                       "--with-context", "--limit", "-2"], api)
+        assert result.exit_code == 1
+        api.get_page_linked_references.assert_not_called()
+
+
+class TestWithheldCannotExceedWhatExists:
+    """The count is derived from what was kept, not from what was requested.
+
+    The guard alone would close the reported defect, but it leaves the count
+    computed against `limit` — a number the caller supplies. Deriving it from
+    the kept blocks instead makes the two halves of the output unable to
+    disagree, whatever value reaches the function. `get-journal-range` has
+    computed its `omitted` this way all along.
+    """
+
+    def test_withheld_plus_shown_equals_what_the_page_held(self):
+        api = _api({"Alice": [("Journal", [f"m{i} [[Alice]]" for i in range(9)])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "4", "--json"], api)
+        entry = json.loads(result.output)["backlinks"][0]
+        assert len(entry["blocks"]) + entry["withheld"] == 9
+
+    def test_properties_blocks_are_not_counted_as_withheld(self):
+        """They were never candidates, so they cannot be "left out" either."""
+        api = _api({"Alice": [("Journal", ["tags:: people", "a [[Alice]]",
+                                           "b [[Alice]]", "c [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "2", "--json"], api)
+        entry = json.loads(result.output)["backlinks"][0]
+        assert len(entry["blocks"]) == 2
+        assert entry["withheld"] == 1
+
+    def test_a_limit_above_the_block_count_withholds_nothing(self):
+        api = _api({"Alice": [("Journal", ["a [[Alice]]", "b [[Alice]]"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                       "--limit", "50", "--json"], api)
+        entry = json.loads(result.output)["backlinks"][0]
+        assert "withheld" not in entry
+
+    def test_the_count_holds_even_if_a_negative_value_reaches_the_function(self):
+        """The second layer, tested where it actually is.
+
+        The CLI guard stops negative values today, so every test above passes
+        with the count still derived from ``limit``. This one calls the
+        extractor directly: it is the only place the defence is visible, and
+        without it the fix would be a guard with an untested claim behind it.
+        """
+        refs = [[{"originalName": "Journal"},
+                 [{"uuid": f"u{i}", "content": f"m{i}"} for i in range(3)]]]
+        for limit in (-1, -2, -3):
+            entry = _extract_backlink_context(refs, limit)[0]
+            shown, withheld = len(entry["blocks"]), entry.get("withheld", 0)
+            assert shown + withheld == 3, (
+                f"--limit {limit}: {shown} shown + {withheld} withheld "
+                "does not add up to the 3 blocks the page held"
+            )
+
+    def test_the_plain_text_note_matches_the_json_count(self):
+        """Both formats report the same truncation or the pair is a lie."""
+        api = _api({"Alice": [("Journal", [f"m{i} [[Alice]]" for i in range(9)])]})
+        plain = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                      "--limit", "4"], api)
+        as_json = _run(["get-backlinks", "--name", "Alice", "--with-context",
+                        "--limit", "4", "--json"], api)
+        withheld = json.loads(as_json.output)["backlinks"][0]["withheld"]
+        assert f"... {withheld} more not shown" in plain.output
