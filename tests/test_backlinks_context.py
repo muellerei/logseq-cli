@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from logseq_cli.cli import _extract_backlink_context, cli
+from logseq_cli.cli import cli
+from logseq_cli.commands.pages import _extract_backlink_context
 from tests.conftest import split_runner
 
 
