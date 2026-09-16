@@ -97,6 +97,17 @@ class TestTheScanItself:
             )
 
     def test_enough_options_are_bounded_to_make_the_sweep_meaningful(self):
+        """Deliberately no headroom: the number is today's count, and a drop
+        below it means the type detection stopped matching rather than that an
+        option was removed on purpose. Raising it when an option is added is
+        the point — a sweep over three of eight options would still pass every
+        test below.
+
+        ``init --days`` is why this matters: its type is declared rather than
+        inferred from the default, because Click infers ``INT`` from ``120``
+        and a later change to ``default=None`` would drop the option out of
+        this scan without failing anything.
+        """
         assert len(_bounded_options()) >= 8, (
             f"only {len(_bounded_options())} bounded options found; the type "
             "detection probably stopped matching"
