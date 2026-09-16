@@ -16,8 +16,14 @@ The minimum differs per option and that is deliberate, not an oversight:
   --refs-limit``, so their boundary is ``< 0``.
 - ``0`` is meaningless for ``find-block --limit`` and ``get-journal-range
   --tail/--limit`` — no caller wants zero matches — so theirs is ``< 1``.
-- ``0`` asks for nothing at all from ``suggest-connections --max-suggestions``,
-  and means "today only" for the two ``--days`` windows.
+- ``suggest-connections --max-suggestions 0`` returned an empty list announced
+  as "No connections found above confidence threshold", blaming the graph for
+  what the flag did: refused as well.
+- ``analyze-graph --days 0`` puts the cutoff at this moment, so it can only
+  report pages edited in the future: refused, measured rather than assumed.
+- ``init --days`` is a sample size, so ``0`` is refused there too: looking at no
+  journals still writes a config, built on no evidence and announced as "No
+  journals found", which blames the graph for what the flag did.
 
 What they share is the floor: below zero no numeric option here has a meaning.
 That is the part this file pins, for every such option the registry knows,
@@ -152,9 +158,6 @@ class TestTheDocumentedMeaningOfZeroSurvives:
     @pytest.mark.parametrize("command,flag", [
         ("get-backlinks", "--limit"),
         ("get-todos", "--refs-limit"),
-        ("suggest-connections", "--max-suggestions"),
-        ("analyze-graph", "--days"),
-        ("init", "--days"),
     ])
     def test_zero_is_accepted(self, command, flag):
         result, _ = _run([command, flag, "0"] + REQUIRED_ARGS.get(command, []))
@@ -165,6 +168,9 @@ class TestTheDocumentedMeaningOfZeroSurvives:
     @pytest.mark.parametrize("command,flag", [
         ("find-block", "--limit"),
         ("get-journal-range", "--tail"),
+        ("init", "--days"),
+        ("analyze-graph", "--days"),
+        ("suggest-connections", "--max-suggestions"),
     ])
     def test_zero_is_refused_where_it_has_no_meaning(self, command, flag):
         result, _ = _run([command, flag, "0"] + REQUIRED_ARGS.get(command, []))
