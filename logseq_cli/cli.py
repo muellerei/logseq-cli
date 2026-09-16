@@ -3711,7 +3711,8 @@ Notes:
   --status repeatable. Default: TODO, DOING, NOW, LATER (no DONE).
   A task carried forward by a block-ref ((uuid)) is found on the day it stands,
   and reported once: "page" and "uuid" stay the original block, "references"
-  names the other pages it appears on. --no-follow-refs restores the old reading.
+  names the other pages it appears on. Following refs costs one extra query for
+  the whole command, not one per task. --no-follow-refs restores the old reading.
   Plain-text output: "MARKER [Page] preview" — page name inline, no grouping needed.
 """)
 @click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
