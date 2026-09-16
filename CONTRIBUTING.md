@@ -68,11 +68,14 @@ logseq-cli/
    and looks like safety. Before trusting one, remove the fix and check that
    the test goes red.
 
-   This is not theory. A test meant to prove that `search-pages` also matches
-   on `originalName` searched for `"Alpha"` — which, after `.lower()`, is
-   present in `name` too. It passed, and it tested nothing; only removing the
-   `originalName` branch exposed it. The fixture now uses `Q&A / Support`,
-   whose ampersand does not survive into the slugged `name`.
+   This is not theory. The test proving that `search-pages` also matches on
+   `originalName` first searched for `"Alpha"` — which, after `.lower()`, is
+   present in `name` too. It passed while testing nothing, and only removing
+   the `originalName` branch showed that: the query still matched. It searches
+   for `Q&A / Support` instead, whose ampersand does not survive into the
+   slugged `name`, and that one does go red when the branch is removed. The
+   fixture never reached a commit in its broken state, which is the point —
+   the mutation is what catches this, not review.
 
    Tests that write to a live graph use throwaway pages with a recognisable
    prefix — `zz-probe-<timestamp>` — and delete them afterwards.
