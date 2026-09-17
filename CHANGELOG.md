@@ -87,6 +87,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and
+  `logseq.Editor.replaceText`. Neither has a wrapper and neither was ever sent:
+  all 19 `call()` invocations pass a literal method name, so no input could
+  reach them. They date from the initial import and described a tool that does
+  not exist.
+
+  The entries are the smaller half. The find is the check that was missing:
+  `_CACHEABLE_METHODS` has been held to its call sites since the read cache
+  shipped, and the mutating list had no counterpart, which is why two entries
+  survived there for the life of the project. Both lists are now bound to the
+  wrappers that send them, in both directions.
+
+  No behaviour changes for any command. A method in neither list is read from
+  the network every time and leaves the cache untouched, and these two were in
+  no code path to begin with.
+
 - The commands moved out of `cli.py` into `logseq_cli/commands/`, one module per
   group of commands, with the click group in `group.py`, the result and error
   helpers in `output.py` and the block rendering in `render.py`. `cli.py` is now

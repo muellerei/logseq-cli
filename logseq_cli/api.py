@@ -33,8 +33,6 @@ _MUTATING_METHODS = frozenset({
     "logseq.Editor.removeBlock",
     "logseq.Editor.upsertBlockProperty",
     "logseq.Editor.removeBlockProperty",
-    "logseq.Editor.setBlockProperty",
-    "logseq.Editor.replaceText",
     "logseq.Editor.insertBatchBlock",
     "logseq.Editor.moveBlock",
 })
