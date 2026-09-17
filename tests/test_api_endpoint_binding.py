@@ -96,6 +96,33 @@ def test_endpoint_is_classified_for_the_cache(wrapper):
     )
 
 
+def test_every_mutating_method_has_a_wrapper():
+    """The other direction: no entry without a call site.
+
+    test_api_cache.py holds _CACHEABLE_METHODS to this and the mutating list
+    had no counterpart, which is how two entries survived that were never
+    sent -- setBlockProperty and replaceText, dating from the initial import.
+    The find was not the entries but the missing check: an inventory nobody
+    verifies describes what the tool once did, not what it does.
+    """
+    unused = sorted(_MUTATING_METHODS - set(WRAPPERS.values()))
+    assert not unused, (
+        f"listed as mutating but no wrapper sends them: {unused}"
+    )
+
+
+def test_every_cacheable_method_has_a_wrapper():
+    """Same guard for the read list, bound to wrappers rather than to text.
+
+    test_api_cache.py asserts the name appears somewhere in api.py; that stays
+    true for an entry whose wrapper was deleted. This binds it to a call site.
+    """
+    unused = sorted(_CACHEABLE_METHODS - set(WRAPPERS.values()))
+    assert not unused, (
+        f"listed as cacheable but no wrapper sends them: {unused}"
+    )
+
+
 def test_cache_invalidation_covers_every_mutating_wrapper():
     """Every wrapper classified as mutating must clear the cache when called.
 
