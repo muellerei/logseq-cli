@@ -66,7 +66,7 @@ class TestOrdinaryNamesAreNotJournals:
     """The other direction: a plain page must not be filed as a journal."""
 
     @pytest.mark.parametrize("name", [
-        "Projekt-Plan",
+        "Weekly Review",
         "meeting notes",
         "2025",                    # a year alone is not a date
         "mar 2025",                # no day
@@ -92,7 +92,7 @@ class TestCreatePageSetsTheFlag:
         assert kwargs_or_args[1] == {"journal?": True}
 
     def test_ordinary_name_gets_no_property(self, api):
-        result = split_runner().invoke(cli, ["create-page", "--name", "Projekt-Plan"])
+        result = split_runner().invoke(cli, ["create-page", "--name", "Weekly Review"])
         assert result.exit_code == 0, result.output
         assert api.create_page.call_args[0][1] is None
 
