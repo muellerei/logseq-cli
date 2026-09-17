@@ -28,15 +28,16 @@ from tests.conftest import split_runner
 # Names that are legal Logseq page titles and also regex syntax. Each one is a
 # different way the unescaped pattern goes wrong: a quantifier with nothing to
 # repeat, an optional character, a group, an alternation, a wildcard.
+# One name per way an unescaped pattern breaks. Measured, not guessed: each of
+# these finds nothing without escaping, and each fails for a different reason.
+# Names whose metacharacters happen to still match ("a|b", "Notes.") are not
+# listed here -- widening is a separate claim, asserted once below.
 METACHARACTER_NAMES = [
-    "C++",
-    "What is this?",
-    "Report (2025)",
-    "a|b",
-    "Notes.",
-    "Budget [2025]",
-    "50% capacity",
-    "foo*bar",
+    "C++",             # + quantifies the character before it
+    "What is this?",   # ? makes it optional
+    "Report (2025)",   # () opens a group
+    "Budget [2025]",   # [] opens a character class
+    "foo*bar",         # * quantifies
 ]
 
 
