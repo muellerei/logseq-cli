@@ -541,13 +541,44 @@ class TestEveryWriteHasADryRun:
     apart the way a hand-kept inventory would.
     """
 
-    # The wrappers in api.py that mutate the graph, by the name the CLI calls.
-    _MUTATING_CALLS = (
-        "create_page", "delete_page", "rename_page",
-        "append_block_in_page", "insert_block", "insert_batch_block",
-        "update_block", "remove_block", "move_block", "replace_text",
-        "upsert_block_property", "remove_block_property",
-    )
+    @staticmethod
+    @functools.lru_cache(maxsize=None)
+    def _mutating_calls():
+        """The wrappers in api.py that mutate the graph, by the name the CLI calls.
+
+        Derived from ``_MUTATING_METHODS`` rather than listed here. A list kept
+        by hand drifts, which is the very mistake this class was written to
+        stop one layer up -- and it had already happened: the previous tuple
+        carried ``replace_text``, for which no wrapper exists. Harmless in that
+        direction, but a missing entry would silently excuse a write command
+        from needing ``--dry-run``.
+        """
+        import ast
+        import pathlib
+
+        from logseq_cli.api import _MUTATING_METHODS
+
+        source = pathlib.Path(
+            pathlib.Path(__file__).resolve().parent.parent
+            / "logseq_cli" / "api.py"
+        ).read_text(encoding="utf-8")
+        cls_node = next(
+            node for node in ast.parse(source).body
+            if isinstance(node, ast.ClassDef) and node.name == "LogseqAPI"
+        )
+        names = []
+        for node in cls_node.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if any(
+                isinstance(sub, ast.Constant)
+                and isinstance(sub.value, str)
+                and sub.value in _MUTATING_METHODS
+                for sub in ast.walk(node)
+            ):
+                names.append(node.name)
+        assert names, "no mutating wrapper found in api.py -- reader is broken"
+        return tuple(names)
 
     @staticmethod
     @functools.lru_cache(maxsize=None)
@@ -604,7 +635,7 @@ class TestEveryWriteHasADryRun:
             while hasattr(func, "__wrapped__"):
                 func = func.__wrapped__
             source = bodies.get(func.__name__, "")
-            if any(f"api.{call}(" in source for call in self._MUTATING_CALLS):
+            if any(f"api.{call}(" in source for call in self._mutating_calls()):
                 writing[name] = command
         return writing
 
