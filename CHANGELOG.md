@@ -127,6 +127,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `fail()`, on stderr, like the other refusals in these commands. Found while
   fixing the entry above: the new key check went through the same branch.
 
+- `update-block` rewrote the properties of the block it edited. `due-date::`
+  came back as `duedate::`, `created_at::` as both `created-at::` and
+  `createdat::`, `zip:: 01234` as `zip:: 1234`, and `tags:: [[Alpha]], beta` as
+  `tags:: [[Alpha]], [[beta]]`. Exit code 0, nothing on stderr. It was the most
+  frequent write in the usage this was found in.
+
+  The 0.8.0 entry that introduced carrying properties through the write calls
+  the round trip lossless. It was measured with `owner:: [[Bob]]`, a key with no
+  separator and a value that parses back to itself, and holds only for such
+  properties. The cause is the plugin API: `getBlock` hands out property keys
+  camel-cased (`dueDate`), and the parsed value rather than the text. Written
+  back, Logseq lower-cases the key and prints the parsed value. The camel-cased
+  form cannot be turned back into the stored one, because `createdAt` may have
+  been `created-at`, `created_at` or `createdat`.
+
+  Properties are now read with a datascript pull, which returns the keys as the
+  database stores them and the original text of each value, and `update-block`
+  carries that text through. Measured against Logseq 0.10.15 before and after:
+  `due-date`, `01234` and `beta` stay as written. The one change left is
+  Logseq's own: `created_at` is stored as `created-at` and written that way.
+  A markdown heading is no longer turned into a `heading:: 2` line when its
+  text is replaced: that value came from the `##`, which the new content
+  either repeats or deliberately drops.
+
+  The same map fed four readers, which now use the pull as well.
+  `set-property --dry-run`, `set-block-property --dry-run` and
+  `remove-property --dry-run` compared a key against camel-cased keys and
+  reported "(not set)" for a key that was set. `get-properties` listed keys no
+  file contains: its output, plain and `--json`, now names `due-date` where it
+  said `dueDate`. So do `update-block`'s `properties` field under `--json` and
+  its `keeps:` line under `--dry-run`. See [#29](https://github.com/muellerei/logseq-cli/issues/29).
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and

@@ -165,3 +165,42 @@ def fake_api(uuids, *, fail_after=None):
     api.get_block.side_effect = graph.get_block
     api.graph = graph
     return api
+
+
+def answer_property_pulls(api):
+    """Answer ``stored_properties``' datascript pull from the mocked blocks.
+
+    Commands read property keys through a pull (see helpers.stored_properties),
+    while most tests describe a block the way the API returns it, with a
+    ``properties`` map. This lets such a test keep describing the block once:
+    the pull for a uuid answers with the properties of whichever mocked page or
+    block carries that uuid. tests/test_stored_property_keys.py, which is about
+    the difference between the two, does not use this: it models the API's
+    camel-cased map and the stored keys separately.
+    """
+    import re
+    from unittest.mock import DEFAULT
+
+    def candidates():
+        for source in (api.get_block, api.get_page):
+            value = source.return_value
+            if isinstance(value, dict):
+                yield value
+        tree = api.get_page_blocks_tree.return_value
+        if isinstance(tree, list):
+            yield from (b for b in tree if isinstance(b, dict))
+
+    def query(q):
+        if ":block/properties-text-values" not in q:
+            return DEFAULT  # any other query answers as the test configured it
+        m = re.search(r'#uuid "([^"]+)"', q)
+        for entity in candidates():
+            if m and entity.get("uuid") == m.group(1):
+                values = entity.get("properties") or {}
+                texts = entity.get("propertiesTextValues") or {
+                    k: v if isinstance(v, str) else str(v) for k, v in values.items()}
+                return [[{"properties": values, "properties-text-values": texts}]]
+        return [[None]]
+
+    api.datascript_query.side_effect = query
+    return api
