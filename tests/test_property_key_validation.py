@@ -167,13 +167,23 @@ class TestEveryWritePath:
         assert [c.args[1] for c in api.upsert_block_property.call_args_list] == ["a-b"]
         assert "stored as" not in r.stderr
 
-    @pytest.mark.parametrize("path", [_set_property, _set_block_property],
-                             ids=lambda p: p.__name__.strip("_"))
+    @pytest.mark.parametrize("path", PATHS, ids=lambda p: p.__name__.strip("_"))
     def test_json_refusal_is_parseable_on_stderr(self, path):
+        # stdout is payload only (AGENTS.md); an error object there would be
+        # parsed as data by a caller that checks the exit code afterwards
         r = _run(path("type Project") + ["--json"], _api())
         assert r.exit_code == 1
         assert r.stdout == ""
         assert "Invalid property key" in json.loads(r.stderr)["error"]
+
+    @pytest.mark.parametrize("path", [_add_note_content, _insert_block],
+                             ids=lambda p: p.__name__.strip("_"))
+    def test_malformed_pair_is_refused_on_stderr_too(self, path):
+        args = [a if not a.endswith("=x") else "nopair" for a in path("k")] + ["--json"]
+        r = _run(args, _api())
+        assert r.exit_code == 1
+        assert r.stdout == ""
+        assert "expected KEY=VALUE" in json.loads(r.stderr)["error"]
 
     def test_confirmation_names_the_stored_key(self):
         r = _run(_set_property("Mixed"), _api())

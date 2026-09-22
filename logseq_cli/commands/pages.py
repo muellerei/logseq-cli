@@ -402,11 +402,7 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
     try:
         check_property_pairs(properties)
     except ValueError as e:
-        if as_json:
-            output({"error": str(e)}, True)
-        else:
-            click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        fail(str(e), as_json=as_json)
 
     # Check if page exists
     existing = None

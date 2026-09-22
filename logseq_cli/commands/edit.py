@@ -325,11 +325,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     try:
         check_property_pairs(properties)
     except ValueError as e:
-        if as_json:
-            output({"error": str(e)}, True)
-        else:
-            click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        fail(str(e), as_json=as_json)
 
     if tree_input is not None:
         if content is not None:

@@ -121,6 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one until the next re-index.
   See [#21](https://github.com/muellerei/logseq-cli/issues/21).
 
+- `add-note-content` and `insert-block` printed a refused `--property` to
+  stdout under `--json`, where only payload belongs. A caller parsing stdout
+  got an error object in place of the result it expected. Both now report
+  through `fail()`, on stderr, like the other refusals in these commands. Found while
+  fixing the entry above: the new key check went through the same branch.
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and
