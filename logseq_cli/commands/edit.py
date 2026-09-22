@@ -6,12 +6,13 @@ import click
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
+    BlockIdError,
     MultilineContentError,
     PROPERTY_LINE_RE,
+    append_in_page,
     apply_block_properties,
-    block_id_property,
+    check_block_ids,
     check_property_pairs,
-    collect_block_ids,
     contains_hierarchical_content,
     count_blocks,
     find_heading,
@@ -22,7 +23,7 @@ from logseq_cli.helpers import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_formatted_content_with_uuids,
-    invalid_block_ids,
+    insert_options,
     move_block_verified,
     parse_date_keyword,
     parse_hierarchical_content,
@@ -33,7 +34,9 @@ from logseq_cli.helpers import (
     require_insert,
     resolve_single_block,
     stored_properties,
+    tree_without_block_ids,
     uuid_fields,
+    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -297,9 +300,10 @@ Notes:
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
   --first puts the block at the HEAD of the child list instead of appending it
   last; it only applies together with --child-of.
-  id:: lines in a tree are dropped unless --keep-ids is given, and the command
-  says so. Use --keep-ids when moving or restoring an outline; do NOT use it
-  when copying one whose original still exists, or two blocks share a uuid.
+  id:: lines (in --tree or --content) are dropped unless --keep-ids is given,
+  and the command says so. Use --keep-ids when moving or restoring an outline.
+  It refuses, before writing anything, an id a block still has (the copy
+  case: drop --keep-ids) and one that survives only as a ((ref)) target.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -311,7 +315,7 @@ Notes:
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
-@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the tree instead of letting Logseq mint new ones. For moving or restoring an outline; do NOT use when copying one that still exists, as two blocks would share a uuid")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--quiet", is_flag=True, help="With --tree: print only the confirmation line, not one uuid line per block")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
@@ -344,30 +348,15 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             click.echo("Tree input is empty.", err=True)
             sys.exit(1)
 
-        # An id:: in the tree names a UUID the block is meant to keep. Logseq
-        # only honours it when the write asks for it, so without --keep-ids
-        # those ids are dropped and every ((uuid)) pointing at them dangles.
-        # That used to happen silently; it is now either refused or announced.
-        tree_ids = collect_block_ids(tree)
-        if keep_ids:
-            bad = invalid_block_ids(tree)
-            if bad:
-                msg = (f"{len(bad)} id:: value(s) are not valid UUIDs and cannot become "
-                       f"block ids: {', '.join(bad[:3])}"
-                       f"{' ...' if len(bad) > 3 else ''}. Nothing was written.")
-                if as_json:
-                    output({"error": msg, "invalid_ids": bad}, True)
-                else:
-                    click.echo(f"Error: {msg}", err=True)
-                sys.exit(1)
-        elif tree_ids:
-            click.echo(
-                f"Note: {len(tree_ids)} id:: propert(ies) in the tree will be dropped; "
-                "Logseq mints new UUIDs and any ((uuid)) pointing at the old ones "
-                "will dangle. Pass --keep-ids to preserve them (only when the "
-                "source outline is gone, or two blocks would share a uuid).",
-                err=True,
-            )
+        # An id:: in the tree names a UUID the block is meant to keep; the
+        # contract (announce, or check and keep) lives in check_block_ids.
+        try:
+            note = check_block_ids(api, tree, keep_ids)
+        except BlockIdError as e:
+            fail(str(e), as_json=as_json, **{e.field: e.ids})
+        if note:
+            click.echo(note, err=True)
+            tree = tree_without_block_ids(tree)
 
         # Resolve target + position first (no writes), so --dry-run can report
         # the plan and bail before touching the graph.
@@ -388,15 +377,6 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
         elif page and top_level:
             position = f"top-level of '{page}'"
-            if keep_ids and any(block_id_property(b.get("content", "")) for b in tree):
-                # appendBlockInPage takes no options, so the roots cannot keep
-                # their ids here. Saying so beats a flag that half works.
-                click.echo(
-                    "Note: --keep-ids cannot preserve ids on top-level blocks "
-                    "(the page-append API takes no uuid); their children keep theirs. "
-                    "Insert relative to a block (--child-of/--after/--before) to keep all of them.",
-                    err=True,
-                )
             do_insert = lambda: insert_block_tree_at_page_top(api, tree, page, keep_ids=keep_ids)
         else:
             click.echo(
@@ -461,6 +441,17 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     position = ""
     new_uuid = None
     hierarchical = contains_hierarchical_content(content)
+    tree = (parse_hierarchical_content(content) if hierarchical
+            else [{"content": content, "children": []}])
+    try:
+        note = check_block_ids(api, tree, keep_ids)
+    except BlockIdError as e:
+        fail(str(e), as_json=as_json, **{e.field: e.ids})
+    if note:
+        click.echo(note, err=True)
+        content = without_block_ids(content)
+        tree = (parse_hierarchical_content(content) if hierarchical
+                else [{"content": content, "children": []}])
 
     if dry_run:
         planned = count_blocks(parse_hierarchical_content(content)) if hierarchical else 1
@@ -476,53 +467,50 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     if page:
         if hierarchical:
-            tree = parse_hierarchical_content(content)
-            uuids = insert_formatted_content_with_uuids(api, page, content)
+            uuids = insert_formatted_content_with_uuids(api, page, content, keep_ids=keep_ids)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"end of '{page}' ({len(uuids)} block(s))"
         else:
-            result = api.append_block_in_page(page, content)
+            result = append_in_page(api, page, content, keep_ids)
             new_uuid = require_insert(result, f"a block in '{page}'")
             position = f"end of '{page}'"
     elif after:
         clean_id = after.strip().replace("((", "").replace("))", "")
         if hierarchical:
-            tree = parse_hierarchical_content(content)
-            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False)
+            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"after {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = api.insert_block(clean_id, content, {"sibling": True, "before": False})
+            result = api.insert_block(clean_id, content, insert_options(content, keep_ids, sibling=True, before=False))
             new_uuid = require_insert(result, f"a block after {clean_id[:8]}...")
             position = f"after {clean_id[:8]}..."
     elif before:
         clean_id = before.strip().replace("((", "").replace("))", "")
         if hierarchical:
-            tree = parse_hierarchical_content(content)
-            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True)
+            uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"before {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = api.insert_block(clean_id, content, {"sibling": True, "before": True})
+            result = api.insert_block(clean_id, content, insert_options(content, keep_ids, sibling=True, before=True))
             new_uuid = require_insert(result, f"a block before {clean_id[:8]}...")
             position = f"before {clean_id[:8]}..."
     elif child_of:
         clean_id = child_of.strip().replace("((", "").replace("))", "")
         where = "first child" if as_first else "child"
         if hierarchical:
-            tree = parse_hierarchical_content(content)
             if as_first:
-                uuids = insert_block_tree_as_first_children(api, tree, clean_id)
+                uuids = insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
-                uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True)
+                uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            opts = {"sibling": False, "before": True} if as_first else {"sibling": False}
+            opts = (insert_options(content, keep_ids, sibling=False, before=True) if as_first
+                    else insert_options(content, keep_ids, sibling=False))
             result = api.insert_block(clean_id, content, opts)
             new_uuid = require_insert(result, f"a {where} of {clean_id[:8]}...")
             position = f"{where} of {clean_id[:8]}..."
