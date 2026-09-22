@@ -15,12 +15,12 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import answer_property_pulls, split_runner
 
 
 @pytest.fixture
 def api(monkeypatch):
-    mock = MagicMock()
+    mock = answer_property_pulls(MagicMock())
     monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_page_linked_references.return_value = []
     return mock
@@ -45,7 +45,7 @@ class TestGetPageMissing:
 
     def test_populated_page_exits_0(self, api):
         api.get_page.return_value = {"name": "x", "originalName": "X"}
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "content": "hello"}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "hello"}]
         result = CliRunner().invoke(cli, ["get-page", "--name", "X"])
         assert result.exit_code == 0
         assert "hello" in result.output
@@ -66,7 +66,7 @@ class TestGetPageMissing:
     def test_json_omits_exists_flag_for_present_page(self, api):
         """Existing pages keep their previous JSON shape (no noise added)."""
         api.get_page.return_value = {"name": "x", "originalName": "X"}
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "content": "hi"}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "hi"}]
         result = CliRunner().invoke(cli, ["get-page", "--name", "X", "--json"])
         assert result.exit_code == 0
         payload = json.loads(result.stdout)
@@ -78,7 +78,7 @@ class TestGetPageMissing:
             return None if name == "Missing" else {"name": name, "originalName": name}
 
         def blocks(name):
-            return None if name == "Missing" else [{"uuid": "b1", "content": "content of " + name}]
+            return None if name == "Missing" else [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "content of " + name}]
 
         api.get_page.side_effect = get_page
         api.get_page_blocks_tree.side_effect = blocks
@@ -92,19 +92,24 @@ class TestGetPageMissing:
 class TestDeleteBlockAlias:
     def test_delete_block_alias_is_registered(self, api):
         """`delete-block` is the most common wrong guess; it must work."""
-        api.get_block.return_value = {"uuid": "u1", "content": "x"}
-        result = CliRunner().invoke(cli, ["delete-block", "--id", "u1", "--dry-run"])
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "x"}
+        result = CliRunner().invoke(cli, ["delete-block", "--id", "00000000-0000-4000-8000-0000000000a1", "--dry-run"])
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
 
     def test_alias_and_canonical_share_behaviour(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "x"}
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "x"}
         runner = CliRunner()
-        via_alias = runner.invoke(cli, ["delete-block", "--id", "u1", "--dry-run", "--json"])
+        via_alias = runner.invoke(cli, ["delete-block", "--id", "00000000-0000-4000-8000-0000000000a1", "--dry-run", "--json"])
         api.reset_mock()
-        api.get_block.return_value = {"uuid": "u1", "content": "x"}
-        via_canonical = runner.invoke(cli, ["remove-block", "--id", "u1", "--dry-run", "--json"])
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "x"}
+        via_canonical = runner.invoke(cli, ["remove-block", "--id", "00000000-0000-4000-8000-0000000000a1", "--dry-run", "--json"])
         assert json.loads(via_alias.stdout) == json.loads(via_canonical.stdout)
+
+
+PAGE_UUID = "00000000-0000-4000-8000-0000000000f0"
+FIRST_UUID = "00000000-0000-4000-8000-0000000000f1"
+BODY_UUID = "00000000-0000-4000-8000-0000000000f2"
 
 
 class TestGetPropertiesFallback:
@@ -118,11 +123,11 @@ class TestGetPropertiesFallback:
     """
 
     def test_falls_back_to_first_block(self, api):
-        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "p", "content": "type:: Person\nstatus:: Active",
+            {"uuid": FIRST_UUID, "content": "type:: Person\nstatus:: Active",
              "properties": {"type": "Person", "status": "Active"}},
-            {"uuid": "b", "content": "Body", "properties": {}},
+            {"uuid": BODY_UUID, "content": "Body", "properties": {}},
         ]
         result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
         assert result.exit_code == 0
@@ -130,9 +135,9 @@ class TestGetPropertiesFallback:
         assert payload["properties"] == {"type": "Person", "status": "Active"}
 
     def test_single_property_via_fallback(self, api):
-        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "p", "content": "type:: Person", "properties": {"type": "Person"}}]
+            {"uuid": FIRST_UUID, "content": "type:: Person", "properties": {"type": "Person"}}]
         result = CliRunner().invoke(cli, ["get-properties", "--name", "X",
                                           "--property", "type"])
         assert result.exit_code == 0
@@ -140,7 +145,7 @@ class TestGetPropertiesFallback:
 
     def test_page_level_properties_still_win(self, api):
         """When the page object carries them, no extra block fetch is needed."""
-        api.get_page.return_value = {"name": "x", "originalName": "X",
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X",
                                      "properties": {"type": "Project"}}
         result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
         payload = json.loads(result.stdout)
@@ -148,9 +153,9 @@ class TestGetPropertiesFallback:
         api.get_page_blocks_tree.assert_not_called()
 
     def test_genuinely_empty_page_reports_none(self, api):
-        api.get_page.return_value = {"name": "x", "originalName": "X", "properties": {}}
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b", "content": "nur Text", "properties": {}}]
+            {"uuid": BODY_UUID, "content": "nur Text", "properties": {}}]
         result = CliRunner().invoke(cli, ["get-properties", "--name", "X"])
         assert result.exit_code == 0
         assert "No properties" in result.output

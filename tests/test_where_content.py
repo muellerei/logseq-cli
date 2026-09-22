@@ -24,18 +24,18 @@ import click
 def _api(matches, block=None):
     api = MagicMock()
     api.datascript_query.return_value = [[m] for m in matches]
-    api.get_block.return_value = block or {"uuid": "u-1", "content": "old"}
+    api.get_block.return_value = block or {"uuid": "00000000-0000-4000-8000-0000000000a2", "content": "old"}
     return api
 
 
-ONE = [{"uuid": "u-1", "content": "**14:22** Entry"}]
-TWO = [{"uuid": "u-1", "content": "Duplicate A"},
+ONE = [{"uuid": "00000000-0000-4000-8000-0000000000a2", "content": "**14:22** Entry"}]
+TWO = [{"uuid": "00000000-0000-4000-8000-0000000000a2", "content": "Duplicate A"},
        {"uuid": "u-2", "content": "Duplicate B"}]
 
 
 class TestResolveSingleBlock:
     def test_single_match_returns_uuid(self):
-        assert resolve_single_block(_api(ONE), "14:22") == "u-1"
+        assert resolve_single_block(_api(ONE), "14:22") == "00000000-0000-4000-8000-0000000000a2"
 
     def test_no_match_aborts(self):
         with pytest.raises(click.ClickException) as exc:
@@ -49,7 +49,7 @@ class TestResolveSingleBlock:
         msg = str(exc.value)
         assert "2 blocks match" in msg
         assert "refusing to guess" in msg
-        assert "u-1" in msg and "u-2" in msg
+        assert "00000000-0000-4000-8000-0000000000a2" in msg and "u-2" in msg
 
     def test_long_ambiguity_is_truncated_but_counted(self):
         many = [{"uuid": f"u-{i}", "content": f"Treffer {i}"} for i in range(14)]
@@ -65,7 +65,7 @@ class TestUpdateBlockWhereContent:
             r = CliRunner().invoke(cli, [
                 "update-block", "--where-content", "14:22", "--content", "new"])
         assert r.exit_code == 0, r.output
-        api.update_block.assert_called_once_with("u-1", "new", properties=None)
+        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a2", "new", properties=None)
 
     def test_ambiguous_writes_nothing(self):
         api = _api(TWO)
@@ -87,7 +87,7 @@ class TestUpdateBlockWhereContent:
         api = _api(ONE)
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             both = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--where-content", "x", "--content", "n"])
+                "update-block", "--id", "00000000-0000-4000-8000-0000000000a2", "--where-content", "x", "--content", "n"])
             neither = CliRunner().invoke(cli, ["update-block", "--content", "n"])
         for r in (both, neither):
             assert r.exit_code == 1
@@ -108,10 +108,12 @@ class TestUpdateBlockWhereContent:
         api = _api([])
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "new"])
+                "update-block", "--id", "00000000-0000-4000-8000-0000000000a2", "--content", "new"])
         assert r.exit_code == 0, r.output
-        api.update_block.assert_called_once_with("u-1", "new", properties=None)
-        api.datascript_query.assert_not_called()
+        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a2", "new", properties=None)
+        # the only query is the property read; no content search on the --id path
+        for call in api.datascript_query.call_args_list:
+            assert ":block/properties-text-values" in call.args[0]
 
 
 class TestSetTodoStatusAmbiguity:

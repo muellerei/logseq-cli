@@ -222,7 +222,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches |
+| `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches. The block's properties are kept as written, values as their original text; the one change is Logseq's own spelling of a key (`created_at` is stored and written back as `created-at`) |
 | `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
 | `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"] [--dry-run]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING`. `--dry-run` also verifies the source block exists — a ref to a missing UUID renders as nothing |
 | `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs] [--dry-run]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates. `--dry-run` shows the old and new marker |
@@ -240,7 +240,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `get-todos [--page NAME] [--status S] [--tag TAG] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 lifts the cap) and `references_withheld` counts what was left out — with a range that includes occurrences outside it, so lifting the cap does not make the count zero. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (Logseq stores only the first) and reported as `next_due` |
-| `get-properties --page NAME [--property KEY]` | Get page properties |
+| `get-properties --page NAME [--property KEY]` | Get page properties, keyed as Logseq stores them (`due-date`, not the API's `dueDate`), with the original text alongside the parsed value |
 | `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
 | `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
 

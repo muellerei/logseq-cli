@@ -20,7 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import answer_property_pulls, split_runner
 
 
 MUTATING = ("update_block", "remove_block", "delete_page", "rename_page",
@@ -37,7 +37,7 @@ def _assert_no_mutation(api):
 @pytest.fixture
 def api():
     """A MagicMock LogseqAPI injected into the CLI context."""
-    mock = MagicMock()
+    mock = answer_property_pulls(MagicMock())
     with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
@@ -52,8 +52,8 @@ def _json_payload(result):
 # ---------------------------------------------------------------------------
 class TestSetTodoStatusDryRun:
     def test_dry_run_shows_marker_change_and_does_not_write(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "TODO Write the report"}
-        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "u1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DONE", "--dry-run"])
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
@@ -62,8 +62,8 @@ class TestSetTodoStatusDryRun:
         _assert_no_mutation(api)
 
     def test_json_reports_both_markers(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "TODO Write the report"}
-        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "u1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DOING", "--dry-run", "--json"])
         assert result.exit_code == 0
         payload = _json_payload(result)
@@ -74,11 +74,11 @@ class TestSetTodoStatusDryRun:
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "TODO Write the report"}
-        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "u1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DONE"])
         assert result.exit_code == 0
-        api.update_block.assert_called_once_with("u1", "DONE Write the report")
+        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a1", "DONE Write the report")
 
     def test_missing_block_still_fails_under_dry_run(self, api):
         api.get_block.return_value = None
@@ -108,7 +108,7 @@ class TestSetTodoStatusDryRun:
 class TestSetPropertyDryRun:
     def test_dry_run_shows_old_and_new_value(self, api):
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "properties": {"team": "Core"}}]
+            {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"team": "Core"}}]
         result = CliRunner().invoke(cli, ["set-property", "--name", "Alice",
                                           "--key", "team", "--value", "Platform",
                                           "--dry-run"])
@@ -119,7 +119,7 @@ class TestSetPropertyDryRun:
         _assert_no_mutation(api)
 
     def test_dry_run_marks_a_new_property_as_unset(self, api):
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "properties": {}}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {}}]
         result = CliRunner().invoke(cli, ["set-property", "--name", "Alice",
                                           "--key", "role", "--value", "Engineer",
                                           "--dry-run"])
@@ -129,7 +129,7 @@ class TestSetPropertyDryRun:
 
     def test_json_reports_old_value_and_dry_run(self, api):
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "properties": {"team": "Core"}}]
+            {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"team": "Core"}}]
         result = CliRunner().invoke(cli, ["set-property", "--name", "Alice",
                                           "--key", "team", "--value", "Platform",
                                           "--dry-run", "--json"])
@@ -141,11 +141,11 @@ class TestSetPropertyDryRun:
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes(self, api):
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "properties": {}}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {}}]
         result = CliRunner().invoke(cli, ["set-property", "--name", "Alice",
                                           "--key", "team", "--value", "Platform"])
         assert result.exit_code == 0
-        api.upsert_block_property.assert_called_once_with("b1", "team", "Platform")
+        api.upsert_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "team", "Platform")
 
     def test_missing_page_still_fails_under_dry_run(self, api):
         api.get_page_blocks_tree.return_value = []
@@ -163,7 +163,7 @@ class TestSetPropertyDryRun:
 class TestRemovePropertyDryRun:
     def test_dry_run_names_the_value_that_would_go(self, api):
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "properties": {"team": "Core"}}]
+            {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"team": "Core"}}]
         result = CliRunner().invoke(cli, ["remove-property", "--name", "Alice",
                                           "--key", "team", "--dry-run"])
         assert result.exit_code == 0
@@ -175,7 +175,7 @@ class TestRemovePropertyDryRun:
         # The live call succeeds silently on a key that was never there, so a
         # misspelled --key would otherwise read as a successful removal.
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "properties": {"team": "Core"}}]
+            {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"team": "Core"}}]
         result = CliRunner().invoke(cli, ["remove-property", "--name", "Alice",
                                           "--key", "typo", "--dry-run"])
         assert result.exit_code == 0
@@ -184,7 +184,7 @@ class TestRemovePropertyDryRun:
         _assert_no_mutation(api)
 
     def test_json_reports_not_present(self, api):
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "properties": {}}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {}}]
         result = CliRunner().invoke(cli, ["remove-property", "--name", "Alice",
                                           "--key", "typo", "--dry-run", "--json"])
         payload = _json_payload(result)
@@ -194,22 +194,22 @@ class TestRemovePropertyDryRun:
         _assert_no_mutation(api)
 
     def test_dry_run_on_a_block_target(self, api):
-        api.get_block.return_value = {"uuid": "b9", "properties": {"prio": 1}}
-        result = CliRunner().invoke(cli, ["remove-property", "--id", "b9",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000b9", "properties": {"prio": 1}}
+        result = CliRunner().invoke(cli, ["remove-property", "--id", "00000000-0000-4000-8000-0000000000b9",
                                           "--key", "prio", "--dry-run", "--json"])
         payload = _json_payload(result)
-        assert payload["id"] == "b9"
+        assert payload["id"] == "00000000-0000-4000-8000-0000000000b9"
         assert payload["status"] == "would_remove"
         assert payload["value"] == 1
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes(self, api):
         api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "properties": {"team": "Core"}}]
+            {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"team": "Core"}}]
         result = CliRunner().invoke(cli, ["remove-property", "--name", "Alice",
                                           "--key", "team"])
         assert result.exit_code == 0
-        api.remove_block_property.assert_called_once_with("b1", "team")
+        api.remove_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "team")
 
     def test_missing_block_still_fails_under_dry_run(self, api):
         api.get_block.return_value = None
@@ -225,8 +225,8 @@ class TestRemovePropertyDryRun:
 # ---------------------------------------------------------------------------
 class TestSetBlockPropertyDryRun:
     def test_dry_run_shows_old_and_new_value(self, api):
-        api.get_block.return_value = {"uuid": "b1", "properties": {"prio": 1}}
-        result = CliRunner().invoke(cli, ["set-block-property", "--id", "b1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"prio": 1}}
+        result = CliRunner().invoke(cli, ["set-block-property", "--id", "00000000-0000-4000-8000-0000000000b1",
                                           "--key", "prio", "--value", "3",
                                           "--dry-run"])
         assert result.exit_code == 0
@@ -236,8 +236,8 @@ class TestSetBlockPropertyDryRun:
         _assert_no_mutation(api)
 
     def test_json_reports_old_value_and_dry_run(self, api):
-        api.get_block.return_value = {"uuid": "b1", "properties": {"prio": 1}}
-        result = CliRunner().invoke(cli, ["set-block-property", "--id", "b1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000b1", "properties": {"prio": 1}}
+        result = CliRunner().invoke(cli, ["set-block-property", "--id", "00000000-0000-4000-8000-0000000000b1",
                                           "--key", "prio", "--value", "3",
                                           "--dry-run", "--json"])
         payload = _json_payload(result)
@@ -249,10 +249,10 @@ class TestSetBlockPropertyDryRun:
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes_without_reading_first(self, api):
-        result = CliRunner().invoke(cli, ["set-block-property", "--id", "b1",
+        result = CliRunner().invoke(cli, ["set-block-property", "--id", "00000000-0000-4000-8000-0000000000b1",
                                           "--key", "prio", "--value", "3"])
         assert result.exit_code == 0
-        api.upsert_block_property.assert_called_once_with("b1", "prio", 3)
+        api.upsert_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "prio", 3)
         # The extra read exists only for the preview; the write path is unchanged.
         api.get_block.assert_not_called()
 

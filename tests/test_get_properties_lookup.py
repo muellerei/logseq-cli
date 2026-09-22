@@ -1,20 +1,23 @@
 """get-properties --property must find a key however the user spells it.
 
-The properties dict from the API carries camelCase keys for multi-word
-properties (excludeFromGraphView), while datalog and habit spell them
-kebab-cased. Plain .lower() matched neither, so every multi-word key
-reported "not found" in both spellings.
+Keys are stored kebab-cased (exclude-from-graph-view), while the API and
+Logseq's UI show them camel-cased (excludeFromGraphView), so users type
+either. Plain .lower() matched neither form against the other, and every
+multi-word key reported "not found". The camel-cased stored keys below are
+not what a re-indexed graph holds; they stand for a key written verbatim
+by an older client and not yet re-read, which the lookup must find as well.
 """
 import json
 from unittest.mock import MagicMock, patch
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import answer_property_pulls, split_runner
 
 
 def _api_with_page(properties, text_values=None):
-    api = MagicMock()
+    api = answer_property_pulls(MagicMock())
     api.get_page.return_value = {
+        "uuid": "00000000-0000-4000-8000-00000000c0e1",
         "name": "contents", "originalName": "Contents",
         "properties": properties,
         "propertiesTextValues": text_values or {},

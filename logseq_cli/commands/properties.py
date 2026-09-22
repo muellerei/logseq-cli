@@ -8,6 +8,7 @@ from logseq_cli.helpers import (
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
+    stored_properties,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -29,8 +30,9 @@ def _property_key_spellings(key: str):
 def _find_stored_property_key(props: dict, key: str):
     """Find the stored spelling of a user-typed property key.
 
-    The API returns camelCase keys (excludeFromGraphView), datalog and habit
-    spell them kebab-cased; a plain .lower() matches neither. Compare with
+    Keys are read as stored (kebab-cased, see stored_properties), but users
+    type them the way the API and Logseq's UI show them (excludeFromGraphView);
+    a plain .lower() matches neither form against the other. Compare with
     dashes stripped and case folded so every spelling finds the stored key.
     """
     want = key.replace("-", "").lower()
@@ -80,8 +82,10 @@ def get_properties(ctx, page, prop_name, as_json):
     if not page_data:
         fail(f"Page '{page}' not found.", as_json=as_json, page=page)
 
-    properties = page_data.get("properties") or {}
-    text_values = page_data.get("propertiesTextValues") or {}
+    # Keys as stored, not the camel-cased ones the page object carries: those
+    # name keys no file contains (due-date:: listed as dueDate).
+    properties, text_values = (stored_properties(api, page_data["uuid"])
+                               if page_data.get("uuid") else ({}, {}))
     page_name = page_data.get("originalName") or page_data.get("name", page)
 
     # Logseq does not always expose page properties on the page object itself:
@@ -94,12 +98,9 @@ def get_properties(ctx, page, prop_name, as_json):
             blocks = api.get_page_blocks_tree(page) or []
         except Exception:
             blocks = []
-        if blocks:
-            first = blocks[0] or {}
-            block_props = first.get("properties") or {}
-            if block_props:
-                properties = block_props
-                text_values = first.get("propertiesTextValues") or text_values
+        first = (blocks[0] or {}) if blocks else {}
+        if first.get("uuid"):
+            properties, text_values = stored_properties(api, first["uuid"])
 
     if prop_name:
         stored_key = _find_stored_property_key(properties, prop_name)
@@ -175,8 +176,9 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     if dry_run:
         # Whether this creates or overwrites is the fact worth previewing: the
         # command is called "set" either way, and an unnoticed overwrite loses
-        # the old value with no trace. It is read off the block already fetched.
-        existing = first_block.get("properties") or {}
+        # the old value with no trace. One extra read, only on this path: the
+        # block already fetched carries camel-cased keys (see stored_properties).
+        existing, _texts = stored_properties(api, block_uuid)
         had = key in existing
         old_value = existing.get(key)
         if as_json:
@@ -241,7 +243,6 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         block = api.get_block(block_uuid, include_children=False)
         if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)
-        existing = (block.get("properties") if isinstance(block, dict) else None) or {}
         target = f"block '{block_uuid}'"
         result = {"id": block_uuid, "property": key, "status": "removed"}
     else:
@@ -251,11 +252,11 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         block_uuid = blocks[0].get("uuid")
         if not block_uuid:
             fail("Could not find block UUID", as_json=as_json, page=page)
-        existing = blocks[0].get("properties") or {}
         target = f"page '{page}'"
         result = {"page": page, "property": key, "status": "removed"}
 
     if dry_run:
+        existing, _texts = stored_properties(api, block_uuid)
         # "Property not there" is the outcome worth knowing before the write:
         # the real call succeeds silently either way, so a caller who misspelled
         # the key would otherwise see "Removed" and believe it.
@@ -310,11 +311,12 @@ def set_block_property(ctx, block_id, key, value, dry_run, as_json):
         # The write path sets the property blind — upsert needs no prior read.
         # The preview does need one: without it there is no old value to show,
         # and it also turns a mistyped UUID into an error instead of a silent
-        # no-op. One extra read, only on this path.
+        # no-op. Two extra reads, only on this path: the block, then its
+        # properties under their stored keys (see stored_properties).
         block = api.get_block(block_id, include_children=False)
         if not block:
             fail(f"Block not found: {block_id}", as_json=as_json, id=block_id)
-        existing = (block.get("properties") if isinstance(block, dict) else None) or {}
+        existing, _texts = stored_properties(api, block.get("uuid") or block_id)
         had = key in existing
         old_value = existing.get(key)
         if as_json:
