@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import answer_property_pulls
 
 
 def _build_api(existing_blocks=None, page_exists=True):
@@ -136,34 +137,37 @@ class TestUpdateBlockKeepsProperties:
     used to drop them silently. `updateBlock` takes them back via its third
     parameter, which is what this guards."""
 
-    def _api(self, properties):
+    def _api(self, properties, texts=None):
         api = MagicMock()
         api.get_block.return_value = {
-            "uuid": "u-1", "content": "old", "properties": properties}
-        return api
+            "uuid": "00000000-0000-4000-8000-0000000000a2", "content": "old",
+            "properties": properties, "propertiesTextValues": texts or {}}
+        return answer_property_pulls(api)
 
     def test_properties_are_passed_back(self):
-        api = self._api({"ticket": "ISSUE-42", "owner": ["Bob"]})
+        api = self._api({"ticket": "ISSUE-42", "owner": ["Bob"]},
+                        {"ticket": "ISSUE-42", "owner": "[[Bob]]"})
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "new"])
+                "update-block", "--id", "00000000-0000-4000-8000-0000000000a2", "--content", "new"])
         assert r.exit_code == 0, r.output
         api.update_block.assert_called_once_with(
-            "u-1", "new", properties={"ticket": "ISSUE-42", "owner": ["Bob"]})
+            "00000000-0000-4000-8000-0000000000a2", "new",
+            properties={"ticket": "ISSUE-42", "owner": "[[Bob]]"})
 
     def test_block_without_properties_passes_none(self):
         api = self._api({})
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "new"])
+                "update-block", "--id", "00000000-0000-4000-8000-0000000000a2", "--content", "new"])
         assert r.exit_code == 0, r.output
-        assert api.update_block.call_args.kwargs["properties"] == {}
+        assert api.update_block.call_args.kwargs["properties"] is None
 
     def test_dry_run_names_what_it_keeps(self):
         api = self._api({"ticket": "ISSUE-42"})
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
-                "update-block", "--id", "u-1", "--content", "new", "--dry-run"])
+                "update-block", "--id", "00000000-0000-4000-8000-0000000000a2", "--content", "new", "--dry-run"])
         assert r.exit_code == 0, r.output
         assert "ticket::" in r.output
         api.update_block.assert_not_called()
@@ -173,10 +177,10 @@ class TestUpdateBlockKeepsProperties:
         from logseq_cli.api import LogseqAPI
         api = LogseqAPI(token="t")
         with patch.object(api, "call") as call:
-            api.update_block("u-1", "text")
-            assert call.call_args.args[1] == ["u-1", "text"]
-            api.update_block("u-1", "text", properties={"a": 1})
-            assert call.call_args.args[1] == ["u-1", "text", {"properties": {"a": 1}}]
+            api.update_block("00000000-0000-4000-8000-0000000000a2", "text")
+            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text"]
+            api.update_block("00000000-0000-4000-8000-0000000000a2", "text", properties={"a": 1})
+            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text", {"properties": {"a": 1}}]
 
 
 class TestRemovePropertyById:
