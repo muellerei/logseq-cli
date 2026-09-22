@@ -10,6 +10,7 @@ from logseq_cli.helpers import (
     PROPERTY_LINE_RE,
     apply_block_properties,
     block_id_property,
+    check_property_pairs,
     collect_block_ids,
     contains_hierarchical_content,
     count_blocks,
@@ -25,7 +26,6 @@ from logseq_cli.helpers import (
     move_block_verified,
     parse_date_keyword,
     parse_hierarchical_content,
-    parse_property_pairs,
     parse_tree_input,
     read_content_file,
     reject_unsupported_multiline,
@@ -302,7 +302,7 @@ Notes:
 @click.option("--content", default=None, help="Content for the new block")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
-@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
+@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
 @click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the tree instead of letting Logseq mint new ones. For moving or restoring an outline; do NOT use when copying one that still exists, as two blocks would share a uuid")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--quiet", is_flag=True, help="With --tree: print only the confirmation line, not one uuid line per block")
@@ -323,7 +323,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     # Validate property pairs up-front so a bad pair fails before any write.
     try:
-        parse_property_pairs(properties)
+        check_property_pairs(properties)
     except ValueError as e:
         if as_json:
             output({"error": str(e)}, True)

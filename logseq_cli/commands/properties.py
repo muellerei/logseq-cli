@@ -4,7 +4,11 @@ import click
 
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
-from logseq_cli.helpers import coerce_property_value
+from logseq_cli.helpers import (
+    coerce_property_value,
+    normalize_property_key,
+    note_renamed_property_key,
+)
 from logseq_cli.output import fail, handle_connection_error, output
 
 
@@ -130,6 +134,11 @@ Note:
   Properties land at page-top (above first block). NEVER use update-block for
   properties — that creates a text-block, not a real property.
   Verify with: get-properties --name X
+  Keys are stored the way Logseq reads them back: lower-case, '_' as '-'
+  ("Status" becomes "status", said on stderr). A key Logseq would drop is
+  refused before anything is read: whitespace, a leading '#', or any of
+  : , ; / \\ [ ] ( ) { } | ^ " @ ~ `
+  "custom-id" is refused as well: Logseq reads it as the block's uuid.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
@@ -141,6 +150,14 @@ Note:
 def set_property(ctx, page, key, value, dry_run, as_json):
     """Set or update a property on a page's first block."""
     api = ctx.obj["api"]
+
+    # Before the first read: a key Logseq cannot read back must cost nothing.
+    try:
+        stored = normalize_property_key(key)
+    except ValueError as e:
+        fail(str(e), as_json=as_json, page=page, property=key)
+    note_renamed_property_key(key, stored)
+    key = stored
 
     # Get page blocks to find the first block (properties block)
     blocks = api.get_page_blocks_tree(page)
@@ -189,6 +206,8 @@ Examples:
 Note:
   --name removes a PAGE property (stored on the page's first block).
   --id removes the property from that one block, wherever it sits.
+  The key is addressed as set-property stores it ("Status" as "status");
+  a key set-property would refuse is passed through as given.
 """)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
@@ -202,6 +221,18 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
     api = ctx.obj["api"]
     if bool(page) == bool(block_id):
         fail("Specify exactly one of: --name, --id.", as_json=as_json)
+
+    # Address the key under the name set-property stores it as, or "set
+    # --key Status" followed by "remove --key Status" removes nothing and still
+    # reports success. A key set-property would refuse is passed through as
+    # given instead: versions before the check stored such keys verbatim, and
+    # until the next re-index the database may still hold one.
+    try:
+        stored = normalize_property_key(key)
+    except ValueError:
+        stored = key
+    note_renamed_property_key(key, stored)
+    key = stored
 
     if block_id:
         # A page property is just a property on the page's first block, so the
@@ -250,6 +281,9 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
 @cli.command("set-block-property", epilog="""\b
 Example:
   logseq-cli --token TOKEN set-block-property --id UUID --key "id" --value "abc-123"
+Note:
+  Keys follow the same rule as set-property: stored lower-case with '_' as
+  '-', and refused if Logseq would not read them back as a property.
 """)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
@@ -261,6 +295,13 @@ Example:
 def set_block_property(ctx, block_id, key, value, dry_run, as_json):
     """Set or update a property on a specific block."""
     api = ctx.obj["api"]
+
+    try:
+        stored = normalize_property_key(key)
+    except ValueError as e:
+        fail(str(e), as_json=as_json, block=block_id, property=key)
+    note_renamed_property_key(key, stored)
+    key = stored
 
     # Auto-detect value type (shared coercion with the inline --property option)
     value = coerce_property_value(value)

@@ -138,7 +138,8 @@ logseq-cli get-properties --name "Page"
 # Read single property
 logseq-cli get-properties --name "Page" --property status
 
-# Set property
+# Set property. Keys are stored as Logseq reads them back: "Status" becomes
+# "status" (noted on stderr); a key Logseq would drop is refused, exit 1.
 logseq-cli set-property --name "Page" --key status --value Active
 
 # Find pages by property
