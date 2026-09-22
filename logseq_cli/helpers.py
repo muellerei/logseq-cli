@@ -3,6 +3,7 @@ import sys
 import calendar
 import json
 import datetime
+import uuid as uuid_module
 from pathlib import Path
 
 import click
@@ -1401,6 +1402,34 @@ def check_property_pairs(pairs) -> list:
     for raw, (stored, _value) in zip(pairs, parsed):
         note_renamed_property_key(_split_property_pair(raw)[0], stored)
     return parsed
+
+
+def stored_properties(api, uuid: str) -> tuple:
+    """Properties of the block or page ``uuid`` as the database holds them.
+
+    Returns ``(values, texts)``: the parsed values and the original text of each
+    property, both keyed as stored (``due-date``), or two empty dicts when the
+    entity has none.
+
+    Read with a datascript pull, not from ``getBlock``/``getPage``: the plugin
+    API camel-cases property keys on the way out (``normalize-keyword-for-json``
+    in sdk/utils.cljs), so ``due-date`` and ``created_at`` arrive as ``dueDate``
+    and ``createdAt``, and the stored spelling cannot be recovered from that.
+    Anything that compares or writes back a key needs this form. Measured
+    against Logseq 0.10.15; the cases are pinned in
+    tests/test_stored_property_keys.py.
+    """
+    # Validated before it is spliced into the query text: a uuid is the only
+    # thing this function puts there, so nothing else can reach it.
+    uuid_literal = str(uuid_module.UUID(str(uuid)))
+    rows = api.datascript_query(
+        "[:find (pull ?b [:block/properties :block/properties-text-values]) "
+        f':where [?b :block/uuid #uuid "{uuid_literal}"]]'
+    ) or []
+    entity = rows[0][0] if rows and rows[0] else None
+    if not isinstance(entity, dict):
+        return {}, {}
+    return entity.get("properties") or {}, entity.get("properties-text-values") or {}
 
 
 def apply_block_properties(api, block_uuid: str, pairs) -> dict:

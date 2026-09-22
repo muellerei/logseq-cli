@@ -245,10 +245,13 @@ class LogseqAPI:
         them. Passing them through the documented third parameter
         (``opts.properties``) makes Logseq re-emit them below the new text.
 
-        The round trip is lossless: a value read back as ``["Alice"]`` is
-        written out as ``link:: [[Alice]]`` again (verified against a live
-        graph). ``id::`` is not part of this dict and survives regardless, so
-        block references stay intact.
+        Logseq writes each entry out as ``key:: value`` text, so what goes in
+        decides what lands in the file. Pass the original text under the keys
+        the database stores (``helpers.stored_properties``), not the block's
+        own ``properties`` map: that one is camel-cased by the API and parsed,
+        and writing it back turned ``due-date::`` into ``duedate::`` and
+        ``zip:: 01234`` into ``zip:: 1234`` (measured, Logseq 0.10.15). ``id::`` is part of the map and is written
+        back unchanged, so block references stay intact.
         """
         args = [block_uuid, content]
         if properties:

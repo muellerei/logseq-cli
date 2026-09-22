@@ -32,6 +32,7 @@ from logseq_cli.helpers import (
     require_content,
     require_insert,
     resolve_single_block,
+    stored_properties,
     uuid_fields,
 )
 from logseq_cli.output import fail, handle_connection_error, output
@@ -90,14 +91,21 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run
     # would drop them. This command changes text; properties belong to
     # set-block-property / remove-property, and losing them here was a silent
     # side effect nobody asked for. Carrying them through keeps that split
-    # honest. ``id::`` is handled by Logseq outside this dict and survives on
-    # its own, so block references are unaffected either way.
-    kept_properties = block.get("properties") if isinstance(block, dict) else None
+    # honest. They go back as their original text under the keys the database
+    # stores (see stored_properties): the block's own map from getBlock has
+    # camel-cased keys, and writing those back turned due-date:: into
+    # duedate:: and 01234 into 1234. ``id::`` is among them and is written
+    # back unchanged, so block references survive.
+    values, kept_texts = stored_properties(api, block.get("uuid") or clean_id)
+    # Only what has a text goes back. A markdown heading ("## Title") shows up
+    # as heading 2 among the values but comes from the "##", not from a line;
+    # reporting it as kept would claim a line the file will not have.
+    kept_values = {k: v for k, v in values.items() if k in kept_texts}
 
     if dry_run:
         if as_json:
             output({"id": clean_id, "old_content": old_content,
-                    "new_content": content, "properties": kept_properties or {},
+                    "new_content": content, "properties": kept_values,
                     "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would overwrite block {clean_id}")
@@ -106,15 +114,15 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run
                 click.echo(f"  was: {preview}")
             preview = content[:60] + ("..." if len(content) > 60 else "")
             click.echo(f"  now: {preview}")
-            if kept_properties:
-                click.echo(f"  keeps: {', '.join(f'{k}::' for k in kept_properties)}")
+            if kept_texts:
+                click.echo(f"  keeps: {', '.join(f'{k}::' for k in kept_texts)}")
         return
 
-    api.update_block(clean_id, content, properties=kept_properties)
+    api.update_block(clean_id, content, properties=kept_texts or None)
 
     if as_json:
         output({"id": clean_id, "old_content": old_content, "new_content": content,
-                "properties": kept_properties or {}}, True)
+                "properties": kept_values}, True)
     else:
         click.echo(f"Updated block {clean_id}")
         if old_content:

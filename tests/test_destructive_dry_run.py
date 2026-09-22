@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import answer_property_pulls, split_runner
 
 
 MUTATING = ("update_block", "remove_block", "delete_page",
@@ -29,15 +29,15 @@ def _assert_no_mutation(api):
 @pytest.fixture
 def api(monkeypatch):
     """A MagicMock LogseqAPI injected into the CLI context."""
-    mock = MagicMock()
+    mock = answer_property_pulls(MagicMock())
     monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     return mock
 
 
 class TestUpdateBlockDryRun:
     def test_dry_run_does_not_write(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "old text"}
-        result = CliRunner().invoke(cli, ["update-block", "--id", "u1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "old text"}
+        result = CliRunner().invoke(cli, ["update-block", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--content", "new text", "--dry-run"])
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
@@ -46,11 +46,11 @@ class TestUpdateBlockDryRun:
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes(self, api):
-        api.get_block.return_value = {"uuid": "u1", "content": "old text"}
-        result = CliRunner().invoke(cli, ["update-block", "--id", "u1",
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "old text"}
+        result = CliRunner().invoke(cli, ["update-block", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--content", "new text"])
         assert result.exit_code == 0
-        api.update_block.assert_called_once_with("u1", "new text", properties=None)
+        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a1", "new text", properties=None)
 
     def test_missing_block_errors_as_json_on_stderr(self, api):
         api.get_block.return_value = None
@@ -131,7 +131,7 @@ class TestDeletePageGate:
 
     def test_dry_run_does_not_delete(self, api):
         api.get_page.return_value = {"name": "X"}
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "content": "a"}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "a"}]
         result = CliRunner().invoke(cli, ["delete-page", "--name", "X", "--dry-run"])
         assert result.exit_code == 0
         assert "[DRY RUN]" in result.output
@@ -139,7 +139,7 @@ class TestDeletePageGate:
 
     def test_json_without_force_refuses_when_not_a_tty(self, api):
         api.get_page.return_value = {"name": "X"}
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "content": "a"}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "a"}]
         # CliRunner supplies a non-TTY stdin, i.e. the agent/script case.
         result = split_runner().invoke(cli, ["delete-page", "--name", "X", "--json"])
         assert result.exit_code == 1
@@ -150,7 +150,7 @@ class TestDeletePageGate:
 
     def test_force_deletes_without_prompt(self, api):
         api.get_page.return_value = {"name": "X"}
-        api.get_page_blocks_tree.return_value = [{"uuid": "b1", "content": "a"}]
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "a"}]
         result = CliRunner().invoke(cli, ["delete-page", "--name", "X", "--force"])
         assert result.exit_code == 0
         api.delete_page.assert_called_once_with("X")
