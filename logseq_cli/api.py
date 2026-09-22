@@ -186,9 +186,19 @@ class LogseqAPI:
         return self.call("logseq.Editor.getPage", [page_name])
 
     def get_block(self, block_id: str, include_children: bool = True):
-        return self.call(
+        """The block, or ``None`` when Logseq has none under ``block_id``.
+
+        An unknown uuid comes back as ``null``, a malformed one as HTTP 200 with
+        ``{"error": "... is not a valid UUID string."}`` (measured, 0.10.15).
+        Both mean "no such block"; passing the error object on made it look
+        like one to every ``if not block`` guard.
+        """
+        result = self.call(
             "logseq.Editor.getBlock", [block_id, {"includeChildren": include_children}]
         )
+        if isinstance(result, dict) and "error" in result and "uuid" not in result:
+            return None
+        return result
 
     def create_page(self, page_name: str, properties: dict = None, options: dict = None):
         args = [page_name]

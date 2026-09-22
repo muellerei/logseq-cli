@@ -157,7 +157,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported "(not set)" for a key that was set. `get-properties` listed keys no
   file contains: its output, plain and `--json`, now names `due-date` where it
   said `dueDate`. So do `update-block`'s `properties` field under `--json` and
-  its `keeps:` line under `--dry-run`. See [#29](https://github.com/muellerei/logseq-cli/issues/29).
+  its `keeps:` line under `--dry-run`.
+
+- A mistyped block id passed every "not found" check. For a malformed id
+  `getBlock` answers HTTP 200 with `{"error": "... is not a valid UUID
+  string."}` rather than `null`, and an error object is truthy, so each command
+  took it for the block. `update-block --id foo` reported "Updated block foo",
+  `remove-property --id foo --dry-run` reported the key as not set. Found in
+  review of the entry above, where reading properties by uuid turned the same
+  input into a traceback. `get_block` now returns `None` for an error object,
+  and every command says `Block not found: foo` with exit 1 before anything is
+  written. See [#29](https://github.com/muellerei/logseq-cli/issues/29).
 
 ### Changed
 
