@@ -7,6 +7,7 @@ import requests
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
     apply_block_properties,
+    check_property_pairs,
     count_blocks,
     extract_page_links,
     find_backlinks,
@@ -388,7 +389,7 @@ Note:
 @click.option("--content", required=True, help="Content to add")
 @click.option("--create/--no-create", default=True, help="Create page if it doesn't exist")
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
-@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable")
+@click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show target page, heading and block count, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -399,7 +400,7 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
 
     # Validate property pairs up-front so a bad pair fails before any write.
     try:
-        parse_property_pairs(properties)
+        check_property_pairs(properties)
     except ValueError as e:
         if as_json:
             output({"error": str(e)}, True)

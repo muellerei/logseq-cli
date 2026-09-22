@@ -1304,22 +1304,103 @@ def coerce_property_value(value: str):
             return value
 
 
+# Why property keys are checked here and not left to Logseq
+# ----------------------------------------------------------
+# ``upsertBlockProperty`` stores any key it is handed as ``(keyword key)`` and
+# writes ``key:: value`` into the file. The parser that reads the file back is
+# stricter (``extract-properties`` in graph-parser/block.cljs): it lower-cases
+# the key, reads ``_`` as ``-``, and drops the line unless the result is a valid
+# EDN keyword. So a key the parser would change or drop leaves the database and
+# the file disagreeing until the next re-index, and the write still reports
+# success. Measured per key against Logseq 0.10.15; the verdicts are pinned in
+# tests/test_property_key_validation.py.
+#
+# The two renames are applied here, so the database gets the key the file will
+# be read back as. Everything the parser drops is refused. '/' is refused too:
+# it makes a namespaced keyword, and "a/b" survives only as "b". So is the
+# parser's third rename, "custom-id" to "id": measured, it makes the value the
+# block's uuid on re-read, even when the value is no uuid at all.
+_PROPERTY_KEY_FORBIDDEN = re.compile(r'[:,;/\\\[\](){}|^"@~`]')
+_PROPERTY_KEYS_READ_AS_ID = {"custom-id"}
+
+
+def normalize_property_key(key: str) -> str:
+    """The key Logseq will read back, or ValueError if it reads back none.
+
+    Lower-cases and turns ``_`` into ``-``, as Logseq's parser does. Refuses
+    what the parser drops (whitespace, a leading ``#``, the characters in
+    :data:`_PROPERTY_KEY_FORBIDDEN`), what it reads as the block's id, and
+    bytes that were not valid UTF-8.
+    """
+    def refuse(reason, consequence="Logseq would not read it back as a property"):
+        return ValueError(f"Invalid property key {key!r}: {reason}. {consequence}.")
+
+    if not key:
+        raise refuse("empty")
+    if any(c.isspace() for c in key):
+        raise refuse("contains whitespace")
+    if key.startswith("#"):
+        raise refuse("starts with '#'")
+    bad = _PROPERTY_KEY_FORBIDDEN.search(key)
+    if bad:
+        raise refuse(f"contains {bad.group()!r}")
+    # Bytes that were not valid UTF-8 on the command line, carried as lone
+    # surrogates (PEP 383). They cannot be written to the file as given.
+    if any("\ud800" <= c <= "\udfff" for c in key):
+        raise refuse("contains bytes that are not valid UTF-8")
+    canonical = key.lower().replace("_", "-")
+    if canonical in _PROPERTY_KEYS_READ_AS_ID:
+        raise refuse("Logseq reads it as the block's id",
+                     "Writing it would replace the uuid that ((refs)) to the block point at")
+    return canonical
+
+
+def note_renamed_property_key(key: str, stored: str) -> None:
+    """Say on stderr when the key written differs from the key given."""
+    if key != stored:
+        click.echo(
+            f"Note: property key {key!r} is stored as {stored!r} "
+            "(Logseq lower-cases keys and reads '_' as '-').",
+            err=True,
+        )
+
+
+def _split_property_pair(raw: str):
+    if "=" not in raw:
+        raise ValueError(f"Invalid --property '{raw}', expected KEY=VALUE")
+    key, value = raw.split("=", 1)
+    key = key.strip()
+    if not key:
+        raise ValueError(f"Invalid --property '{raw}', empty key")
+    return key, value
+
+
 def parse_property_pairs(pairs) -> list:
     """Parse ('key=value', ...) strings into [(key, coerced_value), ...].
 
     Splits on the FIRST '=' only, so values may contain '=', commas and spaces
-    (e.g. ``tags=mcp, agents``). Raises ValueError on a missing '=' or empty key.
+    (e.g. ``tags=mcp, agents``). Keys come back as :func:`normalize_property_key`
+    returns them. Raises ValueError on a missing '=', an empty key, or a key
+    Logseq would not read back.
     """
     out = []
     for raw in pairs:
-        if "=" not in raw:
-            raise ValueError(f"Invalid --property '{raw}', expected KEY=VALUE")
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key:
-            raise ValueError(f"Invalid --property '{raw}', empty key")
-        out.append((key, coerce_property_value(value)))
+        key, value = _split_property_pair(raw)
+        out.append((normalize_property_key(key), coerce_property_value(value)))
     return out
+
+
+def check_property_pairs(pairs) -> list:
+    """:func:`parse_property_pairs` for a command's up-front validation.
+
+    Same result, and additionally names every renamed key on stderr. Called
+    once per command, before anything is read or written, so each note appears
+    once however often the pairs are parsed later.
+    """
+    parsed = parse_property_pairs(pairs)
+    for raw, (stored, _value) in zip(pairs, parsed):
+        note_renamed_property_key(_split_property_pair(raw)[0], stored)
+    return parsed
 
 
 def apply_block_properties(api, block_uuid: str, pairs) -> dict:

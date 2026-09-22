@@ -85,6 +85,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own blast radius; `CONTRIBUTING.md` names the gap rather than implying it
   is closed.
 
+- `set-property`, `set-block-property` and `--property KEY=VALUE` wrote any key
+  they were given and reported success. A shell loop that passed
+  `"type Project"` as one argument left a page whose first line had become a
+  bullet block, with the key duplicated in the file and reported by
+  `get-properties` under a camel-cased name the file did not contain.
+
+  The cause sits between two parts of Logseq that disagree.
+  `upsertBlockProperty` stores the key as handed over and writes `key:: value`
+  into the file. The parser that reads the file back lower-cases the key, reads
+  `_` as `-`, and drops the line unless the result is a valid EDN keyword. Until
+  the next re-index the database holds one thing and the file another. Which
+  keys the parser keeps, renames or drops was measured one key at a time
+  against Logseq 0.10.15, not taken from its source alone: `/` for instance
+  passes the source's keyword check, but `a/b` comes back as `b` and `a/`,
+  `/a` and `a/b/c` not at all.
+
+  Keys are now checked before the first API call. The parser's case and `_`
+  renames are applied here as well, so the database gets the key the file will
+  be read back as, and a note on stderr says so (`'Status'` is stored as
+  `'status'`). Everything the parser drops is refused with the reason. So is
+  its third rename, `custom-id` to `id`, found in review and then measured:
+  `custom-id:: plain-text` came back as a block whose uuid was `plain-text`,
+  so a write under that key would have replaced the identity every `((ref))`
+  to the block depends on. Bytes that are not valid UTF-8 are refused too;
+  they used to be written and then crash the confirmation. An empty value stays
+  allowed: measured, `type::` is written and read back as `""` by both sides,
+  and it was the key, not the value, that broke the page above.
+
+  `remove-property` addresses the key the same way. Without that, the fix would
+  have opened a gap it did not have before: `set --key Status` now stores
+  `status`, and `remove --key Status` would have reported success while removing
+  nothing. A key `set-property` refuses is passed through unchanged, since
+  earlier versions stored such keys verbatim and the database can still hold
+  one until the next re-index.
+  See [#21](https://github.com/muellerei/logseq-cli/issues/21).
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and
