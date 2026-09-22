@@ -156,11 +156,17 @@ class TestCommand:
         assert result.exit_code == 0
         assert api.insert_block.call_args[0][2]["customUUID"] == VALID
 
-    def test_top_level_says_it_cannot_keep_root_ids(self, tmp_path):
+    def test_top_level_roots_keep_their_ids_too(self, tmp_path):
+        # This used to say the roots could not keep their ids, on the belief
+        # that appendBlockInPage takes no options. It passes them to
+        # insertBlock; measured, a customUUID keeps the id at top level.
         f = tmp_path / "t.md"
         f.write_text(f"- a\n  id:: {VALID}\n", encoding="utf-8")
         api = MagicMock()
-        api.append_block_in_page.return_value = {"uuid": "new-1"}
+        api.append_block_in_page.return_value = {"uuid": VALID}
+        api.datascript_query.return_value = []
         result = _run(
             ["insert-block", "--page", "P", "--top-level", "--tree-file", str(f), "--keep-ids"], api)
-        assert "cannot preserve ids on top-level blocks" in result.output
+        assert result.exit_code == 0, result.output
+        assert api.append_block_in_page.call_args[0][2] == {"customUUID": VALID}
+        assert "cannot preserve" not in result.output
