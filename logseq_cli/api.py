@@ -210,8 +210,13 @@ class LogseqAPI:
             args.append(options)
         return self.call("logseq.Editor.createPage", args)
 
-    def append_block_in_page(self, page_name: str, content: str):
-        return self.call("logseq.Editor.appendBlockInPage", [page_name, content])
+    def append_block_in_page(self, page_name: str, content: str, options: dict = None):
+        # Options reach insertBlock unchanged (append_block_in_page in api.cljs),
+        # so customUUID works here as it does there.
+        args = [page_name, content]
+        if options:
+            args.append(options)
+        return self.call("logseq.Editor.appendBlockInPage", args)
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
         return self.call(

@@ -214,25 +214,33 @@ To relocate a block, prefer `move-block` over `copy-block --remove`: it moves th
 block itself, so its UUID and every `((block-ref))` pointing at it survive, and
 nothing is deleted.
 
-### 5. `id::` in a Tree Insert
+### 5. `id::` in Written Content
 
-An `id::` line inside `--tree` content names the UUID that block is meant to
+An `id::` line inside written content names the UUID that block is meant to
 keep — it appears in any outline copied out of a graph where something links to
 it. Logseq only honours it when the write asks for it, so by default those ids
 are dropped and the blocks land under fresh UUIDs. Every `((uuid))` elsewhere in
 the graph that pointed at the originals then dangles, and Logseq rewrites such
 references as plain text.
 
-The command says how many ids it dropped, on stderr. Pass `--keep-ids` when you
-are **moving or restoring** an outline:
+This holds for `insert-block` (`--tree` and `--content`), `add-note-content`,
+`add-journal-block` and `add-journal-content`; not for `create-page --content`
+or the deprecated `add-journal-entry`. Each removes the `id::` lines from the
+content and says how many ids it dropped, on stderr. Pass
+`--keep-ids` when you are **moving or restoring** an outline:
 
 ```bash
 logseq-cli insert-block --child-of UUID --tree-file outline.md --keep-ids
 ```
 
-Do NOT pass it when copying an outline whose original still exists: two blocks
-would share one uuid, and `((ref))` becomes ambiguous. Ids that are not valid
-UUIDs abort the command before anything is written.
+Before anything is written, `--keep-ids` refuses four kinds of id: one that is
+repeated in the content; one that is not a valid UUID; one a block still has (the copy case, where two blocks would
+share one uuid; drop the flag to copy with new ids, or use `move-block`); and
+one that survives only as the target of a `((ref))` elsewhere, since Logseq
+keeps a placeholder under that uuid and will not give it to a new block.
+`add-journal-block` rejects the flag with `--upsert-heading`, which rewrites a
+block that already exists (that block keeps its uuid), and with
+`--no-preserve`, which joins the lines and turns `id::` into plain text.
 
 ### 6. Connection Errors
 
@@ -265,7 +273,7 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `smart-query` | Natural language or Datalog queries |
 | `get-todos` | List and filter tasks; a task carried forward by `((block-ref))` is found on the day it stands and stays one row |
 | `get-backlinks` | Find pages linking to a page |
-| `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in a tree |
+| `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in `--tree` or `--content` (also on `add-note-content`, `add-journal-block`, `add-journal-content`) |
 | `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree |
 | `update-block` | Change one block's content (by `--id` or `--where-content`); its properties are kept |
 | `set-todo-status` | Change a TODO/DOING/DONE marker (never `replace-text`) |

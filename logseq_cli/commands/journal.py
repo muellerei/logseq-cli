@@ -9,7 +9,10 @@ import click
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
+    BlockIdError,
     MultilineContentError,
+    append_in_page,
+    check_block_ids,
     contains_hierarchical_content,
     count_blocks,
     extract_page_links,
@@ -21,6 +24,7 @@ from logseq_cli.helpers import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_formatted_content_with_uuids,
+    insert_options,
     journal_day_to_date,
     normalize_heading,
     normalize_indentation,
@@ -34,6 +38,7 @@ from logseq_cli.helpers import (
     require_insert,
     strip_title_heading,
     uuid_fields,
+    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 from logseq_cli.render import (
@@ -387,6 +392,10 @@ Notes:
   --content-file reads the whole file as ONE tree: flush "- " lines become
   sibling roots, tab-indented lines their children. No shell quoting, so
   apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
+  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  --keep-ids refuses, before writing anything, an id a block still has, one
+  only a ((ref)) still holds, and one repeated in the content.
+  --keep-ids cannot be combined with --upsert-heading or --no-preserve.
 """)
 @click.option("--content", "contents", multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
 @click.option("--content-file", "content_file", default=None, help="Read block content from a file and insert it as a tree (multiple flush '- ' roots allowed). Mutually exclusive with --content.")
@@ -396,10 +405,11 @@ Notes:
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, top_level, preserve_formatting, dry_run, as_json):
+def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, top_level, preserve_formatting, dry_run, keep_ids, as_json):
     """Add one or more blocks to a journal page.
 
     Pass --content multiple times for batch inserts under the same heading.
@@ -450,6 +460,31 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 )
             except MultilineContentError as e:
                 raise click.UsageError(str(e))
+
+    # --upsert-heading rewrites a block that already exists, and an existing
+    # block's uuid cannot change. The flag would half work there, so the
+    # combination is refused rather than honoured for some blocks only.
+    if keep_ids and upsert_heading:
+        raise click.UsageError("--keep-ids cannot be combined with --upsert-heading: "
+                               "the block it replaces keeps its own uuid.")
+    # --no-preserve joins the lines, and an id:: that is no longer on a line
+    # of its own is no property: it would be written as text, silently.
+    if keep_ids and not preserve_formatting:
+        raise click.UsageError("--keep-ids cannot be combined with --no-preserve: "
+                               "joining the lines turns id:: into plain text.")
+
+    # Before the journal page is looked up or created: a refused id must leave
+    # the graph untouched, and creating the page is a write too.
+    try:
+        note = check_block_ids(
+            ctx.obj["api"],
+            [node for c in contents for node in parse_hierarchical_content(c)],
+            keep_ids)
+    except BlockIdError as e:
+        fail(str(e), as_json=as_json, **{e.field: e.ids})
+    if note:
+        click.echo(note, err=True)
+        contents = tuple(without_block_ids(c) for c in contents)
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -523,16 +558,18 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             if kind == "tree":
                 if heading_uuid:
                     uuids.extend(insert_block_tree_with_uuids(
-                        api, payload, heading_uuid, strict=True, _written=len(uuids)))
+                        api, payload, heading_uuid, strict=True, keep_ids=keep_ids,
+                        _written=len(uuids)))
                 else:
                     # payload is the parsed tree; insert top nodes + children at page level
                     uuids.extend(insert_block_tree_at_page_top(
-                        api, payload, page_name, _written=len(uuids)))
+                        api, payload, page_name, keep_ids=keep_ids, _written=len(uuids)))
             else:
                 if heading_uuid:
-                    r = api.insert_block(heading_uuid, payload, {"sibling": False})
+                    r = api.insert_block(heading_uuid, payload,
+                                         insert_options(payload, keep_ids, sibling=False))
                 else:
-                    r = api.append_block_in_page(page_name, payload)
+                    r = append_in_page(api, page_name, payload, keep_ids)
                 uuids.append(require_insert(r, "a journal block", written_so_far=len(uuids)))
         total = len(uuids)
         if any_hierarchical:
@@ -675,13 +712,13 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         if under_heading:
             heading_uuid = find_or_create_heading(api, page_name, under_heading)
             if heading_uuid:
-                uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
+                uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
             else:
                 click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-                uuids = insert_formatted_content_with_uuids(api, page_name, content)
+                uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
                 position = "top-level (heading not found)"
         else:
-            uuids = insert_formatted_content_with_uuids(api, page_name, content)
+            uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
 
         n = len(uuids)
         if as_json:
@@ -710,16 +747,17 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
-            result = api.insert_block(heading_uuid, content, {"sibling": False})
+            result = api.insert_block(heading_uuid, content,
+                                      insert_options(content, keep_ids, sibling=False))
             position = f"under '{under_heading}'"
             _u = require_insert(result, f"a block under '{under_heading}'")
         else:
-            result = api.append_block_in_page(page_name, content)
+            result = append_in_page(api, page_name, content, keep_ids)
             position = "top-level (heading not found)"
             click.echo(f"Warning: Could not find or create '{under_heading}', added as top-level block", err=True)
             _u = require_insert(result, f"a block on '{page_name}'")
     else:
-        result = api.append_block_in_page(page_name, content)
+        result = append_in_page(api, page_name, content, keep_ids)
         position = "top-level"
         _u = require_insert(result, f"a block on '{page_name}'")
 
@@ -736,16 +774,20 @@ Example:
 Note:
   Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
   it now auto-detects hierarchy.
+  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  --keep-ids refuses, before writing anything, an id a block still has, one
+  only a ((ref)) still holds, and one repeated in the content.
 """)
 @click.option("--content", required=True, help="Hierarchical content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert under this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--top-level", is_flag=True, help="Add as top-level content (ignore --under-heading and env var)")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, as_json):
+def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, keep_ids, as_json):
     """Add hierarchical (nested) content to a journal page.
 
     Use this for structured multi-block content with parent-child relationships.
@@ -770,6 +812,16 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
         under_heading = resolve_heading(load_config(), under_heading)
 
     api = ctx.obj["api"]
+
+    # Before the journal page is created: a refused id must leave the graph
+    # untouched.
+    try:
+        note = check_block_ids(api, parse_hierarchical_content(content), keep_ids)
+    except BlockIdError as e:
+        fail(str(e), as_json=as_json, **{e.field: e.ids})
+    if note:
+        click.echo(note, err=True)
+        content = without_block_ids(content)
 
     if date:
         d = parse_date_keyword(date)
@@ -805,13 +857,13 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, a
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
             tree = parse_hierarchical_content(content)
-            uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
+            uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         else:
             click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-            uuids = insert_formatted_content_with_uuids(api, page_name, content)
+            uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
             position = "top-level (heading not found)"
     else:
-        uuids = insert_formatted_content_with_uuids(api, page_name, content)
+        uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
 
     n = len(uuids)
     if as_json:

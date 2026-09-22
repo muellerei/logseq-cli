@@ -158,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file contains: its output, plain and `--json`, now names `due-date` where it
   said `dueDate`. So do `update-block`'s `properties` field under `--json` and
   its `keeps:` line under `--dry-run`.
+  See [#29](https://github.com/muellerei/logseq-cli/issues/29).
 
 - A mistyped block id passed every "not found" check. For a malformed id
   `getBlock` answers HTTP 200 with `{"error": "... is not a valid UUID
@@ -167,7 +168,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review of the entry above, where reading properties by uuid turned the same
   input into a traceback. `get_block` now returns `None` for an error object,
   and every command says `Block not found: foo` with exit 1 before anything is
-  written. See [#29](https://github.com/muellerei/logseq-cli/issues/29).
+  written. Found while fixing [#29](https://github.com/muellerei/logseq-cli/issues/29).
+
+- `add-note-content`, `add-journal-block`, `add-journal-content` and
+  `insert-block --content` dropped every `id::` in their content without a
+  word. #1 had closed that for `insert-block --tree` only. In real use a page
+  was rebuilt with `add-note-content`: a block that a journal entry pointed
+  at came back under a fresh uuid, the reference died, and the file still
+  carried the old `id::` line under a block the database knew by another id.
+  All of them now follow one contract, decided in one place: without
+  `--keep-ids` the `id::` lines are removed from the content and the drop is
+  announced on stderr; with it, the ids are kept. Removing the line is new:
+  left in place it named a uuid the block did not have, and a copy carried the
+  original's id into the file, where the next parse finds two blocks claiming
+  it. Every spelling Logseq reads as the block's id counts, indented or not,
+  in any case, and `custom-id`/`custom_id` too; before, `custom-id::` slipped
+  past the check and could hand an existing block's uuid to a batch write.
+
+  Two assumptions behind the old limits were measured wrong (Logseq 0.10.15).
+  `appendBlockInPage` does take options — it hands them to `insertBlock` — so
+  top-level blocks keep their ids too, and `insert-block --top-level` no longer
+  says it cannot. And a well-formed id is not automatically safe to keep. An id
+  a block still has is the copy case: `insertBlock` throws on it halfway
+  through a write, and `insertBatchBlock` does not check an id given as an
+  `id::` line at all. Measured, it wrote the copy over the original in the
+  database, whose block list for that page then came back empty while the
+  file still held the original. An id that
+  survives only as a `((ref))` target has a placeholder in the database, and
+  `insertBlock` refuses to give it to a new block. Both are now refused before
+  anything is written, including the journal page. Restoring an id that only a
+  reference still holds is not possible yet; see
+  [#31](https://github.com/muellerei/logseq-cli/issues/31).
+  An id repeated within the content is refused as well. `add-journal-block`
+  rejects `--keep-ids` together with `--upsert-heading`, which rewrites an
+  existing block whose uuid cannot change, and with `--no-preserve`, which
+  joins the lines and turns `id::` into plain text. `create-page --content` and
+  the deprecated `add-journal-entry` are not covered.
+  See [#22](https://github.com/muellerei/logseq-cli/issues/22).
 
 ### Changed
 

@@ -588,7 +588,14 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # insertBlock, ``keepUUID`` on insertBatchBlock); otherwise it mints a fresh one
 # and drops the id, which leaves every ((uuid)) pointing at the old one
 # dangling. Verified against a live graph, both ways.
-_ID_PROPERTY_RE = re.compile(r'^id:: *(\S+) *$', re.MULTILINE)
+#
+# Logseq reads more than one spelling as the block's id: keys are lower-cased,
+# and custom-id / custom_id are renamed to id (extract-properties, measured in
+# #21). A copied block also carries the line indented, as it sits in the file.
+# Every spelling counts, or one of them would slip past the checks below and
+# still set the uuid.
+_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: *(\S+) *$',
+                             re.MULTILINE | re.IGNORECASE)
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot
 # become a block id, so a tree carrying one has to be refused before the write
@@ -604,6 +611,28 @@ def block_id_property(content: str) -> str:
     """The ``id::`` value in ``content``, or ``""`` if it carries none."""
     match = _ID_PROPERTY_RE.search(content or "")
     return match.group(1) if match else ""
+
+
+def without_block_ids(content: str) -> str:
+    """``content`` with its ``id::`` lines removed, in every spelling.
+
+    What "dropped" has to mean when an id is not kept: left in the content,
+    the line would name a uuid the block does not have, and a copy would put
+    the original's id into the file, where the next parse finds two blocks
+    claiming it.
+    """
+    return "\n".join(line for line in (content or "").split("\n")
+                     if not _ID_PROPERTY_RE.fullmatch(line))
+
+
+def tree_without_block_ids(tree: list) -> list:
+    """``tree`` with :func:`without_block_ids` applied to every node."""
+    return [
+        {**block,
+         "content": without_block_ids(block.get("content", "")),
+         "children": tree_without_block_ids(block.get("children") or [])}
+        for block in tree or [] if isinstance(block, dict)
+    ]
 
 
 def collect_block_ids(tree: list) -> list:
@@ -626,6 +655,118 @@ def collect_block_ids(tree: list) -> list:
 def invalid_block_ids(tree: list) -> list:
     """The ``id::`` values in ``tree`` that are not RFC 4122 UUIDs."""
     return [v for v in collect_block_ids(tree) if not _UUID_RE.match(v)]
+
+
+class BlockIdError(ValueError):
+    """``--keep-ids`` cannot be honoured. ``field`` names the offending ``ids``
+    in a JSON error (``repeated_ids``, ``invalid_ids``, ``existing_ids`` or
+    ``referenced_ids``)."""
+
+    def __init__(self, message: str, field: str, ids: list):
+        super().__init__(message)
+        self.field = field
+        self.ids = ids
+
+
+def existing_block_uuids(api, ids: list, *, on_a_page: bool = True) -> list:
+    """Those of ``ids`` (well-formed uuids) that an entity in the graph has.
+
+    ``on_a_page`` (the default) counts only real blocks. With ``False`` it also
+    counts the placeholder Logseq keeps for a ``((ref))`` whose target does not
+    exist: an entity with that uuid, no page and no parent (measured, 0.10.15).
+    """
+    if not ids:
+        return []
+    literals = " ".join(f'#uuid "{i.lower()}"' for i in ids)
+    page_clause = " [?b :block/page _]" if on_a_page else ""
+    rows = api.datascript_query(
+        f"[:find ?u :where [?b :block/uuid ?u]{page_clause} "
+        f"[(contains? #{{{literals}}} ?u)]]") or []
+    found = {str(row[0]).lower() for row in rows if row}
+    return [i for i in ids if i.lower() in found]
+
+
+def check_block_ids(api, tree: list, keep_ids: bool):
+    """Apply the ``id::`` contract to ``tree`` before any of it is written.
+
+    insert-block (--tree and --content), add-note-content, add-journal-block
+    and add-journal-content go through this, so none of them can drop an id
+    in silence again (#1 fixed insert-block --tree alone, and the others kept
+    the defect). Returns a note for stderr when ids would
+    be dropped, or ``None``. With ``keep_ids`` raises :class:`BlockIdError` for
+    an id that cannot become a block id, and for one a block already has:
+    that is the copy case, and insertBlock would throw on it midway, after the
+    blocks before it were written.
+    """
+    ids = collect_block_ids(tree)
+    if not ids:
+        return None
+    if not keep_ids:
+        return (
+            f"Note: {len(ids)} id:: propert(ies) in the content will be dropped; "
+            "Logseq mints new UUIDs and any ((uuid)) pointing at the old ones "
+            "will dangle. Pass --keep-ids to preserve them (for moving or "
+            "restoring an outline; ids that still exist are refused).")
+    folded = [i.lower() for i in ids]  # Logseq's uuids are lower-case
+    repeated = sorted({i for i in ids if folded.count(i.lower()) > 1})
+    if repeated:
+        # The second block would ask for a uuid the first one just took, and
+        # the write would stop halfway.
+        raise BlockIdError(
+            f"{len(repeated)} id:: value(s) appear more than once in the content: "
+            f"{', '.join(repeated[:3])}{' ...' if len(repeated) > 3 else ''}. "
+            "One uuid can belong to one block only. Nothing was written.",
+            "repeated_ids", repeated)
+    bad = invalid_block_ids(tree)
+    if bad:
+        raise BlockIdError(
+            f"{len(bad)} id:: value(s) are not valid UUIDs and cannot become "
+            f"block ids: {', '.join(bad[:3])}{' ...' if len(bad) > 3 else ''}. "
+            "Nothing was written.", "invalid_ids", bad)
+    taken = existing_block_uuids(api, ids)
+    if taken:
+        raise BlockIdError(
+            f"{len(taken)} id:: value(s) already belong to a block in the graph: "
+            f"{', '.join(taken[:3])}{' ...' if len(taken) > 3 else ''}. Keeping "
+            "them would give two blocks one uuid; drop --keep-ids to copy with "
+            "new ids, or move the original with move-block. Nothing was written.",
+            "existing_ids", taken)
+    # A ((ref)) to an id with no block leaves a placeholder under that uuid.
+    # It is not a block, but insertBlock refuses to give a new block its uuid
+    # all the same ("Custom block UUID already exists", measured), and would
+    # do so midway through the write.
+    held = [i for i in existing_block_uuids(api, ids, on_a_page=False) if i not in taken]
+    if held:
+        raise BlockIdError(
+            f"{len(held)} id:: value(s) survive only as the target of a ((reference)) "
+            f"elsewhere: {', '.join(held[:3])}{' ...' if len(held) > 3 else ''}. "
+            "Logseq keeps a placeholder under such a uuid and refuses to give it "
+            "to a new block, so --keep-ids cannot restore it. Nothing was written.",
+            "referenced_ids", held)
+    return None
+
+
+def append_in_page(api, page_name: str, content: str, keep_ids: bool):
+    """``appendBlockInPage``, asking for the block's own id when it is to be kept."""
+    opts = insert_options(content, keep_ids)
+    if opts:
+        return api.append_block_in_page(page_name, content, opts)
+    return api.append_block_in_page(page_name, content)
+
+
+def insert_options(content: str, keep_ids: bool, **base) -> dict:
+    """insertBlock options, with ``customUUID`` when the block's id is to be kept.
+
+    Without customUUID the id:: line stays in the content while the block
+    answers to a different uuid - the property would then lie about the block
+    carrying it.
+    """
+    opts = dict(base)
+    if keep_ids:
+        wanted = block_id_property(content)
+        if wanted:
+            opts["customUUID"] = wanted
+    return opts
 
 
 
@@ -904,14 +1045,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
 
     uuids = []
     for block in tree:
-        opts = {"sibling": False}
-        if keep_ids:
-            # Without customUUID the id:: line stays in the content while the
-            # block answers to a different UUID - the property would then lie
-            # about the block carrying it.
-            wanted = block_id_property(block.get("content", ""))
-            if wanted:
-                opts["customUUID"] = wanted
+        opts = insert_options(block.get("content", ""), keep_ids, sibling=False)
         result = api.insert_block(parent_uuid, block["content"], opts)
         if strict:
             new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
@@ -1165,11 +1299,7 @@ def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, ke
     """
     if not tree:
         return []
-    head_opts = {"sibling": False, "before": True}
-    if keep_ids:
-        wanted = block_id_property(tree[0].get("content", ""))
-        if wanted:
-            head_opts["customUUID"] = wanted
+    head_opts = insert_options(tree[0]["content"], keep_ids, sibling=False, before=True)
     head = api.insert_block(parent_uuid, tree[0]["content"], head_opts)
     head_uuid = require_insert(head, "the first child", written_so_far=_written)
     uuids = [head_uuid]
@@ -1199,11 +1329,7 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     uuids = []
     cursor = anchor_uuid
     for block in tree:
-        opts = {"sibling": True, "before": before}
-        if keep_ids:
-            wanted = block_id_property(block.get("content", ""))
-            if wanted:
-                opts["customUUID"] = wanted
+        opts = insert_options(block["content"], keep_ids, sibling=True, before=before)
         result = api.insert_block(cursor, block["content"], opts)
         if strict:
             new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
@@ -1238,11 +1364,7 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: 
     """
     uuids = []
     for block in tree:
-        # ``appendBlockInPage`` takes no options, so a top-level node cannot
-        # keep its id here even when ``keep_ids`` is set; the command warns
-        # about that rather than pretending otherwise. Children go through
-        # ``insertBlock`` and can keep theirs.
-        result = api.append_block_in_page(page_name, block["content"])
+        result = append_in_page(api, page_name, block["content"], keep_ids)
         new_uuid = require_insert(
             result, f"a block on '{page_name}'", written_so_far=_written + len(uuids))
         uuids.append(new_uuid)
@@ -1254,7 +1376,7 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: 
     return uuids
 
 
-def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True) -> list:
+def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True, keep_ids: bool = False) -> list:
     """Insert hierarchical content into a page, returning the inserted block UUIDs.
 
     Top-level nodes are appended to the page; children use insert_block.
@@ -1273,10 +1395,12 @@ def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, st
     def insert_tree(blocks, parent_uuid=None):
         for block in blocks:
             if parent_uuid:
-                result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
+                result = api.insert_block(
+                    parent_uuid, block["content"],
+                    insert_options(block["content"], keep_ids, sibling=False))
                 what = "a block"
             else:
-                result = api.append_block_in_page(page_name, block["content"])
+                result = append_in_page(api, page_name, block["content"], keep_ids)
                 what = f"a block on '{page_name}'"
             if strict:
                 new_uuid = require_insert(result, what, written_so_far=len(uuids))

@@ -6,7 +6,9 @@ import requests
 
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
+    BlockIdError,
     apply_block_properties,
+    check_block_ids,
     check_property_pairs,
     count_blocks,
     extract_page_links,
@@ -22,6 +24,7 @@ from logseq_cli.helpers import (
     require_insert,
     strip_title_heading,
     uuid_fields,
+    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 from logseq_cli.render import (
@@ -384,6 +387,9 @@ Examples:
 Note:
   Counterpart of add-journal-block --under-heading for non-journal pages.
   Heading is created if missing.
+  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  --keep-ids refuses, before writing anything, an id a block still has, one
+  only a ((ref)) still holds, and one repeated in the content.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", required=True, help="Content to add")
@@ -391,10 +397,11 @@ Note:
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show target page, heading and block count, without writing")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_note_content(ctx, page, content, create, under_heading, properties, dry_run, as_json):
+def add_note_content(ctx, page, content, create, under_heading, properties, dry_run, keep_ids, as_json):
     """Add content to any page."""
     api = ctx.obj["api"]
 
@@ -416,6 +423,15 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
              as_json=as_json, page=page, created=False)
 
     content = strip_title_heading(content, page)
+
+    # Checked before the dry run returns: a refused id is part of the preview.
+    try:
+        note = check_block_ids(api, parse_hierarchical_content(content), keep_ids)
+    except BlockIdError as e:
+        fail(str(e), as_json=as_json, **{e.field: e.ids})
+    if note:
+        click.echo(note, err=True)
+        content = without_block_ids(content)
 
     if dry_run:
         # Everything below this point writes — the page, possibly the heading,
@@ -453,10 +469,10 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
             click.echo(f"Failed to find or create heading '{under_heading}' on '{page}'", err=True)
             sys.exit(1)
         tree = parse_hierarchical_content(content)
-        uuids = insert_block_tree_with_uuids(api, tree, heading_uuid)
+        uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         position = f"under '{under_heading}' on '{page}'"
     else:
-        uuids = insert_formatted_content_with_uuids(api, page, content)
+        uuids = insert_formatted_content_with_uuids(api, page, content, keep_ids=keep_ids)
         position = page
 
     n = len(uuids)
