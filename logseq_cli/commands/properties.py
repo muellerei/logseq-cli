@@ -170,7 +170,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     if not block_uuid:
         fail("Could not find block UUID", as_json=as_json, page=page)
 
-    # Auto-detect value type (shared with set-block-property / --property)
+    # Sent as typed unless it is a number that prints back the same (#35)
     value = coerce_property_value(value)
 
     if dry_run:
@@ -304,7 +304,7 @@ def set_block_property(ctx, block_id, key, value, dry_run, as_json):
     note_renamed_property_key(key, stored)
     key = stored
 
-    # Auto-detect value type (shared coercion with the inline --property option)
+    # Sent as typed unless it is a number that prints back the same (#35)
     value = coerce_property_value(value)
 
     if dry_run:

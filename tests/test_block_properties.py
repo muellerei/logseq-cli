@@ -4,6 +4,7 @@ add-note-content / insert-block (atomic capture)."""
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
@@ -94,6 +95,31 @@ class TestAddNoteContentProperties:
         # value is an int, not the string "5"
         assert api.upsert_block_property.call_args.args[2] == 5
         assert isinstance(api.upsert_block_property.call_args.args[2], int)
+
+    @pytest.mark.parametrize("typed", ["01234", "1.50", "nan"])
+    def test_value_reaches_logseq_as_typed(self, typed):
+        """#35: ``01234`` was written as ``1234``, ``1.50`` as ``1.5``, and
+        ``nan`` failed to serialise after the content had been written."""
+        api = _build_api()
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            result = CliRunner().invoke(cli, [
+                "add-note-content", "--page", "Foo", "--content", "body",
+                "--property", f"zip={typed}"])
+        assert result.exit_code == 0, result.output
+        api.upsert_block_property.assert_called_once_with("appended-uuid", "zip", typed)
+        json.dumps(api.upsert_block_property.call_args.args[2], allow_nan=False)
+
+    @pytest.mark.parametrize("typed, sent", [("5", 5), ("01234", "01234")])
+    def test_set_property_sends_the_same_value(self, typed, sent):
+        """set-property calls the helper on its own; this pins that call."""
+        block = "00000000-0000-4000-8000-0000000000b1"
+        api = _build_api(existing_blocks=[{"uuid": block, "content": ""}])
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            result = CliRunner().invoke(cli, [
+                "set-property", "--name", "Foo", "--key", "zip", "--value", typed])
+        assert result.exit_code == 0, result.output
+        api.upsert_block_property.assert_called_once_with(block, "zip", sent)
+        assert type(api.upsert_block_property.call_args.args[2]) is type(sent)
 
 
 class TestInsertBlockProperties:
