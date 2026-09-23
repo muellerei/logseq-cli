@@ -373,7 +373,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         if tree_input is not None:
             click.echo("Specify either --tree or --tree-file, not both.", err=True)
             sys.exit(1)
-        tree_input = read_content_file(tree_file)
+        tree_input = read_content_file(tree_file, option="--tree-file")
 
     # Validate property pairs up-front so a bad pair fails before any write.
     try:
@@ -383,7 +383,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     if tree_input is not None:
         if content is not None:
-            click.echo("Specify either --content (or --content-file) or --tree, not both.", err=True)
+            tree_option = "--tree-file" if tree_file is not None else "--tree"
+            click.echo(f"Specify either --content (or --content-file) or {tree_option}, not both.", err=True)
             sys.exit(1)
         tree = parse_tree_input(tree_input)
         if not tree:
@@ -466,7 +467,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         return
 
     if content is None:
-        click.echo("Specify --content, --content-file or --tree.", err=True)
+        click.echo("Specify --content, --content-file, --tree or --tree-file.", err=True)
         sys.exit(1)
     require_content(content)
 

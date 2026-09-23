@@ -17,9 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stdin) and nothing more: the text goes through the same path, the one-block
   rule from #47 included, and a test holds that the same text sent both ways
   makes the same calls. `add-journal-block` keeps its own meaning, the file as
-  one tree. The either/or is decided in one place, so both, neither and a bad
-  file are answered the same way on all five.
+  one tree. The either/or is decided in one place for the four; `add-journal-block`
+  keeps its own check, since its `--content` is repeatable, and answers with
+  the same words.
   See [#49](https://github.com/muellerei/logseq-cli/issues/49).
+
+### Fixed
+
+- `insert-block --tree-file` named the wrong option when it could not read the
+  file: `--content-file not found: tree.md`, an option `insert-block` did not
+  have. It reads through the function written for `add-journal-block`, whose
+  messages named that command's option. They name the option given now, and
+  so do the refusal of `--content` together with `--tree-file`, which named
+  `--tree`, and the answer to `insert-block` with nothing to insert, which
+  left `--tree-file` out.
 
 ## [0.14.0] - 2026-09-23
 

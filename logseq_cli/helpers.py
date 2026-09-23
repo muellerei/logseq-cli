@@ -971,7 +971,7 @@ def require_content(content: str, option: str = "--content") -> str:
     return content
 
 
-def read_content_file(path: str) -> str:
+def read_content_file(path: str, option: str = "--content-file") -> str:
     """Read block content from a file, for ``--content-file``.
 
     The file is read as UTF-8 and returned verbatim (minus a trailing newline),
@@ -986,26 +986,28 @@ def read_content_file(path: str) -> str:
     is then unreachable — the convention wins, and ``./-`` still names the file.
 
     Raises :class:`click.BadParameter` for a missing, unreadable, non-UTF-8 or
-    effectively empty file, so the caller fails before any write.
+    effectively empty file, so the caller fails before any write. ``option``
+    is the flag the message names: ``insert-block --tree-file`` reads through
+    here too.
     """
     if path == "-":
         raw = sys.stdin.read()
         if not raw.strip():
-            raise click.BadParameter("--content-file is empty: stdin")
+            raise click.BadParameter(f"{option} is empty: stdin")
         return raw.rstrip("\n")
 
     try:
         raw = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise click.BadParameter(f"--content-file not found: {path}")
+        raise click.BadParameter(f"{option} not found: {path}")
     except IsADirectoryError:
-        raise click.BadParameter(f"--content-file is a directory: {path}")
+        raise click.BadParameter(f"{option} is a directory: {path}")
     except UnicodeDecodeError as e:
-        raise click.BadParameter(f"--content-file is not valid UTF-8: {path} ({e})")
+        raise click.BadParameter(f"{option} is not valid UTF-8: {path} ({e})")
     except OSError as e:
-        raise click.BadParameter(f"--content-file cannot be read: {path} ({e})")
+        raise click.BadParameter(f"{option} cannot be read: {path} ({e})")
     if not raw.strip():
-        raise click.BadParameter(f"--content-file is empty: {path}")
+        raise click.BadParameter(f"{option} is empty: {path}")
     return raw.rstrip("\n")
 
 
