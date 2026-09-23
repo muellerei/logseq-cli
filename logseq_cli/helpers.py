@@ -634,7 +634,16 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # Every spelling counts, or one of them would slip past the checks below and
 # still set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
 # space is text to Logseq (measured as "k::v", #39) and must not be dropped.
-_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+) *$',
+# After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
+# as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
+#
+# An id:: line between ``` fences is code to Logseq, and still counts here.
+# Telling it apart needs the check, the removal and the write to see the same
+# block boundaries, which they do not yet: the removal runs over the raw
+# content, where a fence opened on a bullet line is not seen. A first attempt
+# left an id line in place after announcing it dropped. Counting it errs
+# toward refusing and removing; see #43.
+_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+)[ \t]*$',
                              re.MULTILINE | re.IGNORECASE)
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot

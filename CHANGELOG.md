@@ -114,6 +114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An `id::` line with a tab after the value was not seen as an id, while
+  Logseq keeps it as the block's (measured, 0.10.15). Flat `--content` is
+  written as given, so an existing block's uuid could reach a second block
+  unchecked. A carriage return does stop Logseq, and the check agrees. An
+  `id::` line inside a code block still counts as an id; telling it apart
+  needs the check, the removal and the write to see the same block
+  boundaries, see [#43](https://github.com/muellerei/logseq-cli/issues/43).
 - `insert-block --before` with several top-level blocks (`--tree`, or
   `--content` with indented children) wrote them in reverse: `a, b, c` came
   out as `c, b, a` (measured, 0.10.15). Each root was sent "before" the one
