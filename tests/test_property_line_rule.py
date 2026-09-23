@@ -58,7 +58,7 @@ def _replace_text(content, find, replace):
     api.get_page_blocks_tree.return_value = [
         {"uuid": "b1", "content": content, "children": []}]
     written = {}
-    api.update_block.side_effect = lambda u, c, properties=None: written.update(c=c)
+    api.update_block.side_effect = lambda u, c, properties=None, replacing=None: written.update(c=c)
     api.get_block.side_effect = lambda u, include_children=False: {
         "uuid": "b1", "content": written.get("c", content)}
     with patch("logseq_cli.group.LogseqAPI", return_value=api):

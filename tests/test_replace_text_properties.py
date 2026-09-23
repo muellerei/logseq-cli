@@ -22,7 +22,7 @@ def _api(content, after=None):
     # write is correct.
     written = {}
 
-    def _update(uuid, new_content, properties=None):
+    def _update(uuid, new_content, properties=None, replacing=None):
         written["content"] = new_content
         return None
 

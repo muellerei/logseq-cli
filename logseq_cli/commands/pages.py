@@ -4,6 +4,7 @@ import sys
 import click
 import requests
 
+from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
     BlockIdError,
@@ -396,6 +397,8 @@ Note:
   For pages with properties, use create-page (no --content) + multiple set-property,
   THEN add-note-content for the body. Properties via --content land as bullet-blocks
   (NOT as real properties).
+  --content is ONE block: a "- " or "# " line after the first, or a code fence
+  nothing closes, is refused, since Logseq would read it as a block of its own.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
@@ -413,6 +416,9 @@ def create_page(ctx, page, content, as_json, dry_run):
     # that existed. A retry after a timeout therefore duplicated content and
     # was told the write had succeeded. Ask first.
     exists = api.get_page(page) is not None
+    if content:
+        # Written as one block, so it must come back as one (#47).
+        refuse_split_block(content, command="create-page")
 
     if dry_run:
         # The preview reports the state the live run would refuse on, rather
@@ -459,6 +465,10 @@ Note:
   Heading is created if missing.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
+  A code block stays one block: from a ``` or ~~~ line to the next such line
+  without a bullet, every line is code. Without a bullet the fence goes on
+  the block above; on a bullet line it is a block of its own. A fence
+  nothing closes is refused: Logseq would let it swallow the blocks after it.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
@@ -482,6 +492,7 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
         check_property_pairs(properties)
     except ValueError as e:
         fail(str(e), as_json=as_json)
+    refuse_split_heading(under_heading, command="add-note-content")
 
     # Check if page exists
     existing = None
@@ -500,6 +511,7 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
     # The tree checked is the tree written; parsing the text again after
     # removing lines from it is how an announced id line once stayed in.
     tree = parse_hierarchical_content(content)
+    refuse_split_tree(tree, command="add-note-content")
     try:
         note = check_block_ids(api, tree, keep_ids)
     except BlockIdError as e:

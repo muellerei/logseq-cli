@@ -6,11 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
 
+from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
     BlockIdError,
-    MultilineContentError,
     append_in_page,
     check_block_ids,
     contains_hierarchical_content,
@@ -34,7 +34,6 @@ from logseq_cli.helpers import (
     parse_hierarchical_content,
     process_blocks,
     read_content_file,
-    reject_unsupported_multiline,
     require_content,
     require_insert,
     strip_title_heading,
@@ -362,12 +361,15 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     except Exception:
         existing = None
     content = strip_title_heading(content, page_name)
+    # The blocks as they are written: checked to come back as one each (#47),
+    # counted for the preview and written, from this one list.
+    blocks = [content] if as_block else [l.strip() for l in content.split("\n") if l.strip()]
+    refuse_split_tree([{"content": block} for block in blocks], command="add-journal-entry")
 
     # Before the journal page is created: the preview must not be the one run
     # that leaves a page behind.
     if dry_run:
-        planned = 1 if as_block else len(
-            [l for l in content.split("\n") if l.strip()])
+        planned = len(blocks)
         if as_json:
             output({"page": page_name, "date": str(d), "blocks_added": planned,
                     "would_create_page": not existing, "dry_run": True}, True)
@@ -389,10 +391,9 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
         require_insert(result, f"a block on '{page_name}'")
         blocks_added = 1
     else:
-        lines = [l.strip() for l in content.split("\n") if l.strip()]
         result = None
         written = 0
-        for line in lines:
+        for line in blocks:
             result = api.append_block_in_page(page_name, line)
             require_insert(result, f"a block on '{page_name}'", written_so_far=written)
             written += 1
@@ -424,6 +425,10 @@ Notes:
   --content-file reads the whole file as ONE tree: flush "- " lines become
   sibling roots, tab-indented lines their children. No shell quoting, so
   apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
+  --content without indentation is ONE block, and is refused if Logseq would
+  read a line of it as a block of its own: a "- " or "# " line after the
+  first, or a code fence nothing closes. In a closed code block such lines are
+  fine. Indent sub-bullets for children, pass --content again for siblings.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
@@ -480,20 +485,9 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             )
         contents = (read_content_file(content_file),)
 
-    # Guard: reject flush (non-indented) newline bullets in ANY --content value.
-    # Such content is neither detected as hierarchy (needs indentation) nor split
-    # into siblings — it would silently become ONE block with raw "\n- " lines,
-    # breaking the outline. Fail loudly with a fix instruction instead.
-    # Skipped for --content-file, which always takes the structured path.
     if not from_file:
         for c in contents:
             require_content(c)
-            try:
-                reject_unsupported_multiline(
-                    c, command="add-journal-block", accepts_tree=True
-                )
-            except MultilineContentError as e:
-                raise click.UsageError(str(e))
 
     # --upsert-heading rewrites a block that already exists, and an existing
     # block's uuid cannot change. The flag would half work there, so the
@@ -533,14 +527,17 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
              else None
              for c in contents]
 
+    blocks = [node for c, tree in zip(contents, trees)
+              for node in (tree if tree is not None else [{"content": c, "children": []}])]
+    # Every block as written must come back from the page file as that block
+    # (#47). A flat value with a "- " line of its own is refused here, and one
+    # that --no-preserve joins into a single line is not.
+    refuse_split_tree(blocks, command="add-journal-block")
+
     # Before the journal page is looked up or created: a refused id must leave
     # the graph untouched, and creating the page is a write too.
     try:
-        note = check_block_ids(
-            api,
-            [node for c, tree in zip(contents, trees)
-             for node in (tree if tree is not None else [{"content": c, "children": []}])],
-            keep_ids)
+        note = check_block_ids(api, blocks, keep_ids)
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
@@ -563,6 +560,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # is passed through, so a literal "## Log" keeps working. With no value
         # at all, the env var wins over the config's default_heading.
         under_heading = resolve_heading(load_config(), under_heading)
+        refuse_split_heading(under_heading, command="add-journal-block")
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
@@ -823,6 +821,10 @@ Note:
   it now auto-detects hierarchy.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
+  A code block stays one block: from a ``` or ~~~ line to the next such line
+  without a bullet, every line is code. Without a bullet the fence goes on
+  the block above; on a bullet line it is a block of its own. A fence
+  nothing closes is refused: Logseq would let it swallow the blocks after it.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
@@ -859,6 +861,7 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
         under_heading = None
     else:
         under_heading = resolve_heading(load_config(), under_heading)
+    refuse_split_heading(under_heading, command="add-journal-content")
 
     api = ctx.obj["api"]
 
@@ -875,6 +878,7 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
     # Before the journal page is created: a refused id must leave the graph
     # untouched. The tree checked is the tree written.
     tree = parse_hierarchical_content(content)
+    refuse_split_tree(tree, command="add-journal-content")
     try:
         note = check_block_ids(api, tree, keep_ids)
     except BlockIdError as e:
