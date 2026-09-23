@@ -1906,11 +1906,13 @@ def coerce_property_value(value: str):
 #
 # The two renames are applied here, so the database gets the key the file will
 # be read back as. Everything the parser drops is refused. '/' is refused too:
-# it makes a namespaced keyword, and "a/b" survives only as "b". So is the
-# parser's third rename, "custom-id" to "id": measured, it makes the value the
-# block's uuid on re-read, even when the value is no uuid at all.
+# it makes a namespaced keyword, and "a/b" survives only as "b". So is "id",
+# and the parser's third rename, "custom-id" to "id": measured, both make the
+# value the block's uuid on re-read, even when the value is no uuid at all.
+# Only the rename had been measured at first, so "id" itself went through
+# until #51, with the set-block-property --help example writing it.
 _PROPERTY_KEY_FORBIDDEN = re.compile(rf'[/{_PROPERTY_KEY_STOP}]')
-_PROPERTY_KEYS_READ_AS_ID = {"custom-id"}
+_PROPERTY_KEYS_READ_AS_ID = {"id", "custom-id"}
 
 
 def normalize_property_key(key: str) -> str:

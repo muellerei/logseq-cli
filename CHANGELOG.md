@@ -65,6 +65,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only then refused. The check now comes first, so a refused run writes
   nothing; with several `--content` values, where `--upsert-heading` is not
   used, it is refused the same way instead of being passed over.
+- `set-block-property`, `set-property` and `--property` wrote the key `id`,
+  and Logseq reads it as the block's id: measured, `id:: plain-text` made
+  `plain-text` the block's uuid when the page file was read again, so every
+  `((ref))` to the block lost it. The command reported success. `custom-id`,
+  which the parser renames to `id`, had been refused since #21; `id` itself was
+  not, because only the rename had been measured. The `set-block-property`
+  `--help` example wrote exactly that key. Both keys are refused now, and a
+  test runs every example in `--help`, epilog and docstring, through the
+  parser and every key an example writes through the rule its command
+  applies.
+  See [#51](https://github.com/muellerei/logseq-cli/issues/51).
 
 ## [0.14.0] - 2026-09-23
 

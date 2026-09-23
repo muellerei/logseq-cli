@@ -140,7 +140,8 @@ Note:
   ("Status" becomes "status", said on stderr). A key Logseq would drop is
   refused before anything is read: whitespace, a leading '#', or any of
   : , ; / \\ [ ] ( ) { } | ^ " @ ~ `
-  "custom-id" is refused as well: Logseq reads it as the block's uuid.
+  "id" and "custom-id" are refused as well: Logseq reads them as the block's
+  uuid.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
 """)
@@ -285,7 +286,7 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
 
 @cli.command("set-block-property", epilog="""\b
 Example:
-  logseq-cli --token TOKEN set-block-property --id UUID --key "id" --value "abc-123"
+  logseq-cli --token TOKEN set-block-property --id UUID --key "status" --value "done"
 Note:
   Keys follow the same rule as set-property: stored lower-case with '_' as
   '-', and refused if Logseq would not read them back as a property.
