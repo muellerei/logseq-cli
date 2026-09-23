@@ -230,6 +230,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the move, so a preview that passes is one the move will not refuse up front.
   Found in review of the entry above.
 
+- `set-property`, `set-block-property` and `--property KEY=VALUE` rewrote any
+  value Python can read as a number. The file held `1234` for `01234`, `1.5`
+  for `1.50`, `1000` for `1e3`, `10` for `1_0`, and `9007199254740992` for
+  `9007199254740993`, which travels as a JavaScript number. Exit code 0,
+  nothing on stderr. `nan` and `1e400` became floats JSON cannot carry: the
+  command ended in a traceback, and under `add-note-content` and
+  `insert-block`, whose properties are set after the content, the content
+  stayed without them, so a retry duplicated it.
+
+  `upsertBlockProperty` writes a string verbatim and a number as JavaScript
+  prints it. Logseq's own parser makes a number only from ASCII digits up to
+  2^53-1, and keeps the text beside it (measured, Logseq 0.10.15). A value is
+  now sent as a number only where both hold: the parser would make one, and it
+  prints back as typed. Everything else, `01234` included, is sent as typed.
+  For a leading zero the database holds the text until Logseq next reads the
+  file; the file is right from the start. The conversion had come in with the
+  initial import, with no reason recorded. Under `--json` these commands
+  report the value as sent, so `-7` or `1.50` now appear as strings.
+  See [#35](https://github.com/muellerei/logseq-cli/issues/35).
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and

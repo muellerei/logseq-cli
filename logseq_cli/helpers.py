@@ -1442,19 +1442,45 @@ def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, st
     return uuids
 
 
-def coerce_property_value(value: str):
-    """Coerce a property value string to int/float when possible, else leave as str.
+# Why a property value is sent as a number only in one narrow case
+# ----------------------------------------------------------------
+# ``upsertBlockProperty`` stores what it is sent and writes it into the file:
+# a string verbatim, a number the way JavaScript prints it. So every value sent
+# as a number is rewritten in the file unless printing it gives back the typed
+# text. Python's ``int``/``float`` accept far more than that (``01234``,
+# ``1.50``, ``1e3``, ``1_0``, non-ASCII digits, ``nan``), and an integer above
+# 2^53-1 loses digits as a JavaScript number.
+#
+# When Logseq reads a file it makes a number only from ASCII digits up to
+# 2^53-1, ignoring surrounding whitespace, and keeps the text beside it;
+# ``1.50``, ``-7`` and ``1e3`` stay text (measured, 0.10.15). A number is
+# therefore sent only where the parser would make one AND it prints back as
+# typed. A leading zero is sent as text: the
+# file keeps it, and the database holds the text until the file is next read,
+# the lesser of the two disagreements. See #35.
+_MAX_EXACT_INTEGER = 2**53 - 1
 
-    Single source of truth for property-value typing (shared by set-block-property
-    and the inline --property option).
+
+def coerce_property_value(value: str):
+    """``value`` as an int where Logseq reads one that prints back as typed.
+
+    Anything else comes back unchanged, ``01234`` included: Logseq reads that
+    as 1234, but sent as a number it would lose its zero in the file.
+
+    Single source of truth for property-value typing (shared by set-property,
+    set-block-property and the inline --property option). See the note above
+    for why the rule is this narrow.
     """
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return value
+    if not isinstance(value, str):
+        return value
+    digits = value.strip()  # the parser trims the value before reading it
+    # The length bound keeps int() away from Python's digit limit (4300), which
+    # raises instead of converting; 2^53-1 has 16 digits.
+    if (digits.isascii() and digits.isdigit() and len(digits) <= 16
+            and (digits == "0" or not digits.startswith("0"))
+            and int(digits) <= _MAX_EXACT_INTEGER):
+        return int(digits)
+    return value
 
 
 # Why property keys are checked here and not left to Logseq
