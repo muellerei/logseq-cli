@@ -364,6 +364,25 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 - Journals: `journals/YYYY_MM_DD.md`
 - Pages: `pages/Page Name.md`
 
+### 7. Page Aliases
+
+A page name means the page Logseq opens for it: an alias from `alias::` reads
+and writes that page, in every command that names a page (Logseq's API does
+not resolve it; the CLI does, by Logseq's own rule). Under `--json` a result
+that names the page keeps your name in `page` and adds `alias_of` with the
+page used, so match results by `page` and use `alias_of` where you need the
+page's own name. `get-todos --page` is a substring filter and matches the
+text as given.
+
+- An alias two pages claim: exit 1, `reason: "ambiguous_alias"`, with the
+  candidates in `ambiguous`. In a batch `get-page` or `get-backlinks` it is
+  reported per name, like a missing page.
+- `delete-page` and `rename-page` refuse an alias (`reason: "alias"`, exit 1)
+  and name the page: use its own name.
+- An alias just set with `set-property --key alias` is not an alias until
+  Logseq has read the file again; a write to it before then makes a page of
+  its own.
+
 ## Environment Variables
 
 | Variable | Default | Purpose |

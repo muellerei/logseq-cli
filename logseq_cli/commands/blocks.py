@@ -4,7 +4,7 @@ import click
 
 from logseq_cli.group import cli
 from logseq_cli.helpers import find_blocks_by_content, process_blocks
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
 FIND_BLOCK_CHILDREN_LIMIT = 25
@@ -110,6 +110,9 @@ def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, wi
         fail("--uuid-only is an output form of its own; drop --json and "
              "--with-children.", as_json)
 
+    if page:
+        ref = follow_page(api, page, as_json)
+        page = ref.page
     matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
 
     # For a write target, picking one of several matches is a guess, and the

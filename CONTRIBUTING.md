@@ -30,6 +30,7 @@ logseq-cli/
 │   ├── helpers.py    # Date parsing, block processing, content formatting
 │   ├── group.py      # The click group: global options, API client
 │   ├── output.py     # Results on stdout, failures on stderr, --json
+│   ├── pagenames.py  # Which page a name means: an alias as Logseq resolves it
 │   ├── render.py     # Blocks to text, and resolving block references
 │   ├── commands/     # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page

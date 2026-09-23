@@ -33,7 +33,9 @@ from logseq_cli.helpers import (
     uuid_fields,
     without_block_ids_noted,
 )
-from logseq_cli.output import fail, handle_connection_error, json_text, output
+from logseq_cli.output import (ambiguous_message, fail, follow_page, follow_pages,
+                               handle_connection_error, json_text, output)
+from logseq_cli.pagenames import AmbiguousAliasError, refuse_alias, resolve_page
 from logseq_cli.render import (
     blocks_to_markdown,
     blocks_with_ids,
@@ -131,7 +133,10 @@ Notes:
   --from-block continues a cut read: same command, plus the uuid the note
   names. The block's ancestors come along as context. A block that does not
   fit is named with the --max-chars it needs instead. Both flags refuse a
-  page named twice.
+  page named twice, an alias and its page included.
+  An alias (from a page's alias::) reads the page it names; --json keeps the
+  name given in "page" and adds "alias_of". An alias two pages claim is
+  reported like a missing page, with the candidates.
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name (repeatable for batch: --name A --name B)")
 @click.option("--no-backlinks", is_flag=True, help="Skip backlink computation")
@@ -171,13 +176,30 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
                      f"--max-chars and --from-block need each page once.", as_json)
             seen[name.lower()] = name
 
-    def _fetch_one(page_name):
+    # Each name as the page Logseq would open (#63). One claimed by two pages
+    # is reported like a missing one, so the other names still read.
+    refs, ambiguous = follow_pages(api, page, as_json)
+    if max_chars is not None or from_block:
+        # Again after resolving: an alias and its page are one page read twice.
+        seen = {}
+        for ref in filter(None, refs):
+            if ref.page.lower() in seen:
+                fail(f"page '{ref.requested}' is named twice ('{seen[ref.page.lower()]}' "
+                     f"means the same page); --max-chars and --from-block need "
+                     f"each page once.", as_json)
+            seen[ref.page.lower()] = ref.requested
+
+    def _fetch_one(name, ref):
+        if ref is None:
+            # No blocks key: an empty list would read as an empty page.
+            return {"page": name, "ambiguous": ambiguous[name]}
+        page_name = ref.page
         # A page that does not exist is an error, not an empty result: Logseq's
         # getPage returns null for it but a real object for an existing-but-empty
         # page. Without this check both render as "(empty page)" and the caller
         # cannot tell "typo in the name" from "nothing written yet".
         if api.get_page(page_name) is None:
-            missing.append(page_name)
+            missing.append(name)
         blocks = api.get_page_blocks_tree(page_name)
         if no_backlinks or heading or outline:
             backlinks = []
@@ -197,9 +219,9 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             blocks = outline_blocks(blocks)
         if resolve_refs and blocks:
             resolve_refs_in_blocks(api, blocks, dead_refs)
-        return {"page": page_name, "blocks": blocks, "backlinks": backlinks}
+        return {**ref.fields(), "blocks": blocks, "backlinks": backlinks}
 
-    results = [_fetch_one(p) for p in page]
+    results = [_fetch_one(name, ref) for name, ref in zip(page, refs)]
     first_uuid = first_uuids(results)
 
     for result in results:
@@ -222,9 +244,12 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             return json_text(payload) + "\n"
         out = []
         for result in results:
-            p, blocks, backlinks = result["page"], result["blocks"], result["backlinks"]
+            p, blocks, backlinks = result["page"], result.get("blocks"), result.get("backlinks")
             if p in missing:
                 placeholder = "(page does not exist)"
+            elif p in ambiguous:
+                placeholder = ("(an alias of more than one page: "
+                               f"{', '.join(ambiguous[p])})")
             elif result.get("withheld"):
                 placeholder = f"({result['withheld']} block(s) withheld by --max-chars)"
             elif outline:
@@ -284,14 +309,18 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     # Exit non-zero if any requested page is absent. Batch reads still print every
     # page that does exist first, so one typo does not cost the whole result.
     # The payload already went to stdout; the error goes to stderr only.
-    if missing:
+    # One error object for both, so stderr stays one JSON document.
+    if missing or ambiguous:
         if as_json:
-            click.echo(json.dumps(
-                {"error": "Page(s) not found", "missing": missing},
-                indent=2, default=str), err=True)
+            fail(". ".join((["Page(s) not found"] if missing else [])
+                          + ([ambiguous_message(ambiguous)] if ambiguous else [])),
+                 True, **({"missing": missing} if missing else {}),
+                 **({"ambiguous": ambiguous} if ambiguous else {}))
         else:
             for page_name in missing:
                 click.echo(f"Error: Page '{page_name}' not found", err=True)
+            if ambiguous:
+                click.echo(f"Error: {ambiguous_message(ambiguous)}", err=True)
         sys.exit(1)
 
 @cli.command("search-pages", epilog="""\b
@@ -371,14 +400,24 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
             except Exception:
                 return []
 
-    results = [{"page": p, "backlinks": (bl := _fetch_one(p)), "count": len(bl)} for p in page]
+    # Logseq merges an alias group's references, but asked for the alias it
+    # also lists the page itself, by its alias:: line (measured); asked for
+    # the page, it does not. An alias two pages claim is reported per name,
+    # as get-page does, so the other names still answer.
+    refs, ambiguous = follow_pages(api, page, as_json)
+    results = [{"page": name, "ambiguous": ambiguous[name]} if ref is None else
+               {**ref.fields(), "backlinks": (bl := _fetch_one(ref.page)), "count": len(bl)}
+               for name, ref in zip(page, refs)]
 
     if as_json:
         output(results if len(results) > 1 else results[0], True)
     else:
         for result in results:
-            p, backlinks = result["page"], result["backlinks"]
-            if not backlinks:
+            p, backlinks = result["page"], result.get("backlinks")
+            if p in ambiguous:
+                click.echo(f"'{p}': an alias of more than one page: "
+                           f"{', '.join(ambiguous[p])}")
+            elif not backlinks:
                 click.echo(f"No backlinks found for '{p}'.")
             else:
                 click.echo(f"Backlinks to '{p}' ({len(backlinks)}):")
@@ -393,6 +432,8 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
                         click.echo(f"  <- {bl}")
             if len(results) > 1:
                 click.echo()
+    if ambiguous:
+        fail(ambiguous_message(ambiguous), as_json, ambiguous=ambiguous)
 
 @cli.command("create-page", epilog="""\b
 Example:
@@ -425,6 +466,16 @@ def create_page(ctx, page, content, as_json, dry_run):
     # that existed. A retry after a timeout therefore duplicated content and
     # was told the write had succeeded. Ask first.
     exists = api.get_page(page) is not None
+    # An alias already means a page: the refusal and the preview name it
+    # (#63). The preview reports rather than refuses, an ambiguous one too.
+    ref, candidates = None, None
+    if exists:
+        try:
+            ref = resolve_page(api, page)
+        except AmbiguousAliasError as e:
+            if not dry_run:
+                raise
+            candidates = e.candidates
     id_note = None
     if content:
         # Written as one block, so it must come back as one (#47).
@@ -448,7 +499,9 @@ def create_page(ctx, page, content, as_json, dry_run):
         # than refusing here: a preview that exits non-zero is indistinguishable
         # from one that failed to run.
         if as_json:
-            output({"page": page, "exists": exists, "would_create": not exists,
+            output({**(ref.fields() if ref else {"page": page}),
+                    **({"ambiguous": candidates} if candidates else {}),
+                    "exists": exists, "would_create": not exists,
                     "has_content": content is not None, "dry_run": True}, True)
         elif exists:
             click.echo(f"[DRY RUN] Page '{page}' already exists — would not be created")
@@ -458,6 +511,10 @@ def create_page(ctx, page, content, as_json, dry_run):
                 click.echo(f"  content: {content[:60]}{'...' if len(content) > 60 else ''}")
         return
 
+    if ref is not None and ref.redirected:
+        fail(f"'{page}' is an alias of '{ref.page}', so it names that page. Use "
+             "add-note-content to add to it.", as_json=as_json, exists=True,
+             **ref.fields())
     if exists:
         fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
              "or delete-page first.", as_json=as_json, page=page, exists=True)
@@ -521,6 +578,9 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         fail(str(e), as_json=as_json)
     refuse_split_heading(under_heading, command="add-note-content")
 
+    ref = follow_page(api, page, as_json)
+    page = ref.page
+
     # Check if page exists
     existing = None
     try:
@@ -559,7 +619,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         parsed_properties = dict(parse_property_pairs(properties))
 
         if as_json:
-            output({"page": page, "would_create_page": existing is None,
+            output({**ref.fields(), "would_create_page": existing is None,
                     "blocks_added": planned, "under_heading": under_heading,
                     "would_create_heading": bool(under_heading) and not heading_exists,
                     "properties": parsed_properties, "position": position,
@@ -600,7 +660,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
 
     if as_json:
         output({
-            "page": page,
+            **ref.fields(),
             "created": existing is None,
             "blocks_added": n,
             "content_added": True,
@@ -622,6 +682,7 @@ Example:
   logseq-cli --token TOKEN rename-page --name "Old Name" --new-name "New Name"
 Note:
   Updates all [[Old Name]] references in the graph automatically.
+  An alias of a page is refused, naming the page: rename by its own name.
 """)
 @click.option("--page", "--name", required=True, help="Current page name")
 @click.option("--new-name", required=True, help="New page name")
@@ -637,6 +698,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
     page_data = api.get_page(page)
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
+    refuse_alias(resolve_page(api, page), "rename-page")
 
     if dry_run:
         # A rename reaches past the page itself: Logseq rewrites every [[Old]]
@@ -693,6 +755,7 @@ Note:
   --force and fails otherwise — --json alone is not a confirmation.
   Refuses while ((block-refs)) from other pages point into it, and lists
   them; --force does not override that, --ignore-refs does.
+  An alias of a page is refused, naming the page: delete by its own name.
 """)
 @click.option("--page", "--name", required=True, help="Page name to delete")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt (required when non-interactive)")
@@ -728,6 +791,10 @@ def delete_page(ctx, page, force, ignore_refs, dry_run, as_json):
         fail(f"Cannot read the blocks of page '{page}' to report what would be "
              f"deleted ({read_error}). The page was left untouched.",
              as_json=as_json, page=page)
+    if block_count is not None:
+        # An empty page is where an alias shows; the read above is cached.
+        # Unreadable under --force, it goes as named, as before #63.
+        refuse_alias(resolve_page(api, page), "delete-page")
 
     # Asked by page, not by the uuids read above: that read may have failed,
     # and --force proceeds without it. By the name Logseq resolved, not the
@@ -790,6 +857,8 @@ Note:
 def get_page_stats(ctx, page, as_json):
     """Show statistics for a page (blocks, words, links)."""
     api = ctx.obj["api"]
+    ref = follow_page(api, page, as_json)
+    page = ref.page
     blocks = api.get_page_blocks_tree(page)
     if blocks is None:
         fail(f"Page '{page}' not found.", as_json=as_json, page=page)
@@ -825,7 +894,7 @@ def get_page_stats(ctx, page, as_json):
         inbound = []
 
     stats = {
-        "page": page,
+        **ref.fields(),
         "blocks": block_count,
         "words": word_count,
         "outbound_links": sorted(outbound_links),

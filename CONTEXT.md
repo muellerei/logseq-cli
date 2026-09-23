@@ -39,8 +39,8 @@ _Avoid_: command list, command table
 
 **Page Alias**:
 A Logseq alias — an alternative name under which a page can be addressed
-inside the graph. Unrelated to Command Name and Parameter Alias, and not
-resolved by Logseq's API on the caller's behalf.
+inside the graph. Unrelated to Command Name and Parameter Alias. Logseq's API
+does not resolve it; the CLI does, by the rule Logseq's UI follows (ADR 0002).
 _Avoid_: alias (unqualified)
 
 **Journal Page**:

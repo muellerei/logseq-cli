@@ -14,7 +14,7 @@ from logseq_cli.helpers import (
     parse_date_keyword,
     parse_repeater,
 )
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import BLOCK_REF_RE
 
 
@@ -478,6 +478,9 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
 
     # Resolve UUID via content search if needed
     if not block_id:
+        if page:
+            ref = follow_page(api, page, as_json)
+            page = ref.page
         matches = find_blocks_by_content(api, content, page=page)
         # Prefer blocks that actually carry a TODO marker: a status change is
         # only meaningful there, and it disambiguates a text that also appears
