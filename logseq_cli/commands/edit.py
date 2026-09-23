@@ -8,7 +8,6 @@ from logseq_cli.group import cli
 from logseq_cli.helpers import (
     BlockIdError,
     MultilineContentError,
-    PROPERTY_LINE_RE,
     append_in_page,
     apply_block_properties,
     check_block_ids,
@@ -30,6 +29,7 @@ from logseq_cli.helpers import (
     parse_date_keyword,
     parse_hierarchical_content,
     parse_tree_input,
+    property_line_mask,
     read_content_file,
     refs_refusal,
     reject_unsupported_multiline,
@@ -242,9 +242,10 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
                 continue
             # Replace only in text lines; a property line (id::/key:: value) is
             # left verbatim so a --find that matches inside it cannot rewrite it.
+            lines = content.split("\n")
             new_lines = [
-                ln if PROPERTY_LINE_RE.match(ln) else pattern.sub(replace_text, ln)
-                for ln in content.split("\n")
+                ln if is_property else pattern.sub(replace_text, ln)
+                for ln, is_property in zip(lines, property_line_mask(lines))
             ]
             new_content = "\n".join(new_lines)
             if new_content != content:

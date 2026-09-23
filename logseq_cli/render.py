@@ -12,7 +12,7 @@ them, and a helper three modules import is not private to any of them.
 """
 import re
 
-from logseq_cli.helpers import normalize_heading
+from logseq_cli.helpers import PROPERTY_LINE_RE, normalize_heading
 
 
 BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
@@ -78,20 +78,22 @@ def extract_backlink_names(refs) -> list:
 def is_properties_block(content: str) -> bool:
     """Check if block content is a Logseq properties block (key:: value lines)."""
     lines = content.strip().split("\n")
-    return all(re.match(r"^[\w-]+::", line) for line in lines if line.strip())
+    return all(PROPERTY_LINE_RE.match(line) for line in lines if line.strip())
 
 def blocks_to_markdown(blocks, indent=0):
     """Convert block tree to Logseq-compatible markdown.
 
-    Properties blocks (top-level, all lines match 'key:: value') are rendered
-    without bullet prefix to match Logseq's on-disk format.
+    The page's own properties, its first block when that holds nothing but
+    property lines, are rendered without a bullet, as Logseq writes them. Any
+    other properties-only block (an empty numbered-list item, say) keeps its
+    bullet, or the output would turn it into page properties.
     """
     lines = []
     prefix = "\t" * indent
-    for block in blocks:
+    for position, block in enumerate(blocks):
         content = block.get("content", "")
         if content:
-            if indent == 0 and is_properties_block(content):
+            if indent == 0 and position == 0 and is_properties_block(content):
                 # Properties block: no bullet prefix, matches Logseq file format
                 lines.append(content)
             else:
