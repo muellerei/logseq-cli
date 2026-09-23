@@ -171,6 +171,9 @@ logseq-cli get-page --page "My Page" --format markdown
 # Write hierarchical content
 logseq-cli add-journal-content --content "- ## Notes\n\t- Item 1\n\t- Item 2"
 
+# A code block in it stays one block (on the block above, or on its own bullet)
+logseq-cli add-note-content --page "Notes" --content $'- Example\n  ```js\n  run()\n  ```'
+
 # JSON output for piping
 logseq-cli get-all-pages --json | jq length
 
@@ -231,7 +234,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
 | `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
-| `insert-block --tree ... --keep-ids` | Keep the `id::` values in the content instead of letting Logseq mint new ones, for moving or restoring an outline — top-level blocks included. Without it they are dropped and the count is reported on stderr. With it, an id a block or page still has is refused before anything is written (a copy would put one uuid on two blocks), and so is a second `id::` line in one block. One that survives only as a `((ref))` target is restored: the block takes over the placeholder Logseq keeps under that uuid, and the ref resolves again. An `id::` line inside a code block (```` ``` ```` or `~~~`) is code and is written as is where the fence stays in one block (flat `--content`, a JSON `--tree` node); outline text is one block per line, so a fence there is split and its `id::` line counts. The same flag and rule apply to `--content` and to `add-note-content`, `add-journal-block` and `add-journal-content` |
+| `insert-block --tree ... --keep-ids` | Keep the `id::` values in the content instead of letting Logseq mint new ones, for moving or restoring an outline — top-level blocks included. Without it they are dropped and the count is reported on stderr. With it, an id a block or page still has is refused before anything is written (a copy would put one uuid on two blocks), and so is a second `id::` line in one block. One that survives only as a `((ref))` target is restored: the block takes over the placeholder Logseq keeps under that uuid, and the ref resolves again. An `id::` line inside a code block (```` ``` ```` or `~~~`) is code and is written as is. The same flag and rule apply to `--content` and to `add-note-content`, `add-journal-block` and `add-journal-content` |
 | `copy-block --id UUID --to-page NAME [--remove] [--ignore-refs] [--dry-run]` | Copy/move block with children to another page. The copy gets new UUIDs, so `--remove` refuses while `((block-refs))` point into the source (`--ignore-refs` overrides); `move-block` keeps them |
 | `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 

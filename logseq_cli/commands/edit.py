@@ -322,10 +322,7 @@ Notes:
   It restores an id that survives only as a ((ref)) target, and refuses,
   before writing anything, an id a block or page still has (the copy case:
   drop --keep-ids) and a second id:: line in one block.
-  An id:: line inside a code block (``` or ~~~) is code and is written as is
-  where the fence stays in one block: flat --content, a JSON --tree node.
-  Outline text is one block per line, so a fence there is split and its id::
-  line counts.
+  An id:: line inside a code block (``` or ~~~) is code and is written as is.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
