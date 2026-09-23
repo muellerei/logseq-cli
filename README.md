@@ -205,9 +205,8 @@ one came back empty and a write landed on a page of its own. With `--json` a
 result that names the page keeps the name you gave in `page` and adds
 `alias_of` with the page used; in text a `Note:` says so. An alias two pages
 claim is refused, naming both. `delete-page` and `rename-page` take the page's
-own name. An alias that has blocks of its own is a page, as in Logseq. Right
-after `set-property --key alias` the alias exists only once Logseq has read
-the file again. Filters on page names (`get-todos --page`,
+own name. An alias that has blocks of its own is a page, as in Logseq.
+Filters on page names (`get-todos --page`,
 `suggest-connections --focus`) match the text as given. On the unsupported DB
 version the alias is not followed: the lookup relies on fields of the file
 graph.
@@ -273,8 +272,8 @@ graph.
 
 | Command | Description |
 |---------|-------------|
-| `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so are `id` and `custom-id`, which Logseq reads as the block's uuid |
-| `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it |
+| `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property, in the page's property block (made before the first block when there is none), so Logseq and `query-pages-by-property` see it at once. `title` is refused: it would rename the page; use `rename-page`. So is `collapsed`, which Logseq reads as the block's folded state. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so are `id` and `custom-id`, which Logseq reads as the block's uuid |
+| `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property; the property block goes with its last one. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it |
 | `set-block-property --id UUID --key KEY --value VAL [--dry-run]` | Set/update a block property. `--dry-run` shows the old value and fails on an unknown UUID, which the write path cannot detect. Keys follow the `set-property` rule |
 
 ### Page Management (2)

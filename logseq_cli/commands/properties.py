@@ -2,16 +2,18 @@ import re
 
 import click
 
-from logseq_cli.blocktext import refuse_split_property
+from logseq_cli.blocktext import refuse_split_property, with_property_line
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.helpers import (
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
+    require_insert,
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
+from logseq_cli.render import is_properties_block
 
 
 def _property_key_spellings(key: str):
@@ -94,11 +96,10 @@ def get_properties(ctx, page, prop_name, as_json):
     # rule of the others, the name asked for and alias_of (#63).
     names = ref.fields() if ref.redirected else {"page": page_name}
 
-    # Logseq does not always expose page properties on the page object itself:
-    # for pages written via set-property they live on the first block instead
-    # (the property block). Without this fallback the command reported
-    # "No properties" for pages whose properties were perfectly intact on disk,
-    # which is what made set-property look like it had silently failed.
+    # A page whose first block holds text has no page properties to Logseq,
+    # but set-property wrote into that block before #80, and a page created
+    # empty got its lines in a block Logseq did not take them from. Without
+    # this fallback the command reported "No properties" for them.
     if not properties:
         try:
             blocks = api.get_page_blocks_tree(page) or []
@@ -133,14 +134,109 @@ def get_properties(ctx, page, prop_name, as_json):
                     display = text_values.get(key, properties[key])
                     click.echo(f"  {key}:: {display}")
 
+# Keys a page's property block cannot carry as the page's own (#80).
+_NOT_PAGE_PROPERTIES = {
+    "title": "'title' is refused: saved into the page's property block it renames "
+             "the page, past every check rename-page makes. Use rename-page.",
+    "collapsed": "'collapsed' is refused: Logseq reads it as the block's folded "
+                 "state and takes it out of the page's properties.",
+}
+
+
+def _current_text(api, block):
+    """``block``'s text read again just before a write. The whole text is
+    written back, so a key another call set since the page was read would
+    otherwise be undone; upsertBlockProperty changed one key and had no such
+    window."""
+    fresh = api.get_block(block["uuid"], include_children=False)
+    return fresh.get("content") or "" if isinstance(fresh, dict) else block.get("content") or ""
+
+
+def _property_block(blocks):
+    """The page's property block, or ``None`` when one has to be made.
+
+    Logseq takes a page's properties from its property block, and only when
+    that block is saved (``save-block-inner!``; ``upsertBlockProperty`` skips
+    that step, so the page kept its old properties, #80). The page's first
+    block becomes the property block when it is saved holding nothing but
+    property lines, so an empty one, or one of property lines only (what
+    set-property used to leave on a page created empty), serves as well.
+    A first block with text does not: its lines stay the block's own.
+    """
+    first = blocks[0] if blocks else None
+    if first and (first.get("preBlock?") or is_properties_block(first.get("content") or "")):
+        return first
+    return None
+
+
+def _refuse_front_matter(block, page, as_json):
+    """A property block written as front matter has no ``key::`` lines to
+    set; rewriting it would turn it into something else."""
+    if block and (block.get("content") or "").lstrip().startswith("---"):
+        fail(f"Page '{page}' keeps its properties as front matter (---); "
+             f"edit that in the file.", as_json=as_json, page=page)
+
+
+def _write_property_block(api, blocks, block, content):
+    """Save ``content`` as the page's property block, made before the first
+    block when there is none, and removed when nothing is left in it.
+
+    Saved with ``updateBlock``, the one call that makes Logseq take the page's
+    properties from the block. A block inserted with property text is not
+    made the property block; one inserted empty and then saved is (measured,
+    0.10.15). Logseq saves only a change, the text compared trimmed, so a
+    block whose text is already right but which the page does not show (the
+    old way's leftovers) is saved empty first, then with its text: the same
+    two steps as a new one.
+    """
+    if block is None:
+        result = api.insert_block(blocks[0]["uuid"], "", {"before": True, "sibling": True})
+        uuid, old = require_insert(result, "the page's property block"), ""
+    else:
+        uuid, old = block["uuid"], block.get("content") or ""
+    if not content and block is not None and not block.get("children") and len(blocks) > 1:
+        api.remove_block(uuid)
+        return
+    if content == old and old:
+        api.update_block(uuid, "", replacing=old)
+        old = ""
+    api.update_block(uuid, content, replacing=old)
+
+
+def _page_uuid(api, page):
+    page_data = api.get_page(page)
+    return page_data.get("uuid") if isinstance(page_data, dict) else None
+
+
+def _page_shows(api, page_uuid, key, value):
+    """Whether the page, as Logseq shows it, holds ``key`` as ``value``, or
+    lacks it for ``None``. Compared as text, the way the line was written."""
+    got = stored_properties(api, page_uuid)[1].get(key) if page_uuid else None
+    return got is None if value is None else str(got).strip() == str(value).strip()
+
+
+def _check_page_took(api, page, page_uuid, key, value, as_json):
+    """Fail unless the page now shows ``key`` as written: a write Logseq
+    drops, or one another write overtook, must not report success."""
+    if _page_shows(api, page_uuid, key, value):
+        return
+    what = f"'{key}' removed" if value is None else f"'{key}:: {value}'"
+    fail(f"Logseq did not show {what} on page '{page}' after the write; "
+         f"check the page before retrying.", as_json=as_json, page=page, property=key)
+
+
 @cli.command("set-property", epilog="""\b
 Examples:
   logseq-cli --token TOKEN set-property --name "Alice" --key "team" --value "[[Platform]]"
   logseq-cli --token TOKEN set-property --name "X" --key "type" --value "Person"
 Note:
-  Properties land at page-top (above first block). NEVER use update-block for
-  properties — that creates a text-block, not a real property.
-  Verify with: get-properties --name X
+  Properties go into the page's property block, the lines above its first
+  block; a page without one gets one, before its first block. Logseq reads the
+  page's properties from there, so query-pages-by-property finds them at
+  once. The page is read back, and a write it does not show exits 1.
+  "title" is refused: saved there, it renames the page, past every check
+  rename-page makes. Use rename-page. "collapsed" is refused too: Logseq
+  reads it as the block's folded state, never as the page's.
   Keys are stored the way Logseq reads them back: lower-case, '_' as '-'
   ("Status" becomes "status", said on stderr). A key Logseq would drop is
   refused before anything is read: whitespace, a leading '#', or any of
@@ -158,7 +254,7 @@ Note:
 @click.pass_context
 @handle_connection_error
 def set_property(ctx, page, key, value, dry_run, as_json):
-    """Set or update a property on a page's first block."""
+    """Set or update a property in the page's property block."""
     api = ctx.obj["api"]
 
     # Before the first read: a key Logseq cannot read back must cost nothing.
@@ -169,36 +265,39 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     note_renamed_property_key(key, stored)
     key = stored
     refuse_split_property(key, value)
+    if key in _NOT_PAGE_PROPERTIES:
+        fail(_NOT_PAGE_PROPERTIES[key], as_json=as_json, page=page, property=key)
 
     ref = follow_page(api, page, as_json)
     page = ref.page
 
-    # Get page blocks to find the first block (properties block)
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
         fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
-
-    first_block = blocks[0]
-    block_uuid = first_block.get("uuid")
-    if not block_uuid:
-        fail("Could not find block UUID", as_json=as_json, page=page)
+    block = _property_block(blocks)
+    _refuse_front_matter(block, page, as_json)
 
     # Sent as typed unless it is a number that prints back the same (#35)
     value = coerce_property_value(value)
+    old = (block or {}).get("content") or ""
+    new = with_property_line(old, key, value)
+    target = "property block" if block else "new property block"
 
     if dry_run:
         # Whether this creates or overwrites is the fact worth previewing: the
         # command is called "set" either way, and an unnoticed overwrite loses
-        # the old value with no trace. One extra read, only on this path: the
-        # block already fetched carries camel-cased keys (see stored_properties).
-        existing, _texts = stored_properties(api, block_uuid)
+        # the old value with no trace. Read from the block the write changes,
+        # under the keys as stored (see stored_properties).
+        existing = stored_properties(api, block["uuid"])[0] if block else {}
         had = key in existing
         old_value = existing.get(key)
         if as_json:
             output({**ref.fields(), "property": key, "old_value": old_value,
-                    "value": value, "existed": had, "dry_run": True}, True)
+                    "value": value, "existed": had, "target": target,
+                    "dry_run": True}, True)
         else:
-            click.echo(f"[DRY RUN] Would set '{key}::' on page '{page}'")
+            click.echo(f"[DRY RUN] Would set '{key}::' on page '{page}'"
+                       + ("" if block else ", in a new property block before its first block"))
             if had:
                 click.echo(f"  was: {old_value}")
             else:
@@ -206,11 +305,21 @@ def set_property(ctx, page, key, value, dry_run, as_json):
             click.echo(f"  now: {value}")
         return
 
-    api.upsert_block_property(str(block_uuid), key, value)
+    page_uuid = _page_uuid(api, page)
+    in_step = block is not None and new == old and _page_shows(api, page_uuid, key, value)
+    if not in_step:
+        if block is not None:
+            block = {**block, "content": _current_text(api, block)}
+            new = with_property_line(block["content"], key, value)
+        _write_property_block(api, blocks, block, new)
+        _check_page_took(api, page, page_uuid, key, value, as_json)
 
-    result = {**ref.fields(), "property": key, "value": value, "status": "updated"}
+    result = {**ref.fields(), "property": key, "value": value,
+              "status": "unchanged" if in_step else "updated"}
     if as_json:
         output(result, True)
+    elif in_step:
+        click.echo(f"'{key}:: {value}' is already set on page '{page}'")
     else:
         click.echo(f"Set '{key}:: {value}' on page '{page}'")
 
@@ -219,7 +328,8 @@ Examples:
   logseq-cli --token TOKEN remove-property --name "X" --key "deprecated_key"
   logseq-cli --token TOKEN remove-property --id UUID --key "prio"
 Note:
-  --name removes a PAGE property (stored on the page's first block).
+  --name removes a PAGE property, from the page's property block (the block
+  goes with its last one).
   --id removes the property from that one block, wherever it sits.
   The key is addressed as set-property stores it ("Status" as "status");
   a key set-property would refuse is passed through as given.
@@ -243,15 +353,13 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
     # given instead: versions before the check stored such keys verbatim, and
     # until the next re-index the database may still hold one.
     try:
-        stored = normalize_property_key(key)
+        stored, verbatim = normalize_property_key(key), False
     except ValueError:
-        stored = key
+        stored, verbatim = key, True
     note_renamed_property_key(key, stored)
     key = stored
 
     if block_id:
-        # A page property is just a property on the page's first block, so the
-        # API call is the same; only the way the block is found differs.
         block_uuid = block_id.strip().replace("((", "").replace("))", "")
         block = api.get_block(block_uuid, include_children=False)
         if not block:
@@ -264,27 +372,19 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         blocks = api.get_page_blocks_tree(page)
         if not blocks:
             fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
-        block_uuid = blocks[0].get("uuid")
-        if not block_uuid:
-            fail("Could not find block UUID", as_json=as_json, page=page)
+        if not verbatim:
+            _remove_page_property(api, ref, blocks, key, dry_run, as_json)
+            return
+        # Such a key is in the database only: the file line holding it is no
+        # property line to Logseq, so there is no line to take out, and Logseq
+        # removes it by name.
+        block_uuid = blocks[0]["uuid"]
         target = f"page '{page}'"
         result = {**ref.fields(), "property": key, "status": "removed"}
 
     if dry_run:
         existing, _texts = stored_properties(api, block_uuid)
-        # "Property not there" is the outcome worth knowing before the write:
-        # the real call succeeds silently either way, so a caller who misspelled
-        # the key would otherwise see "Removed" and believe it.
-        present = key in existing
-        if as_json:
-            output({**result, "status": "would_remove" if present else "not_present",
-                    "value": existing.get(key), "present": present,
-                    "dry_run": True}, True)
-        elif present:
-            click.echo(f"[DRY RUN] Would remove '{key}' from {target}")
-            click.echo(f"  value: {existing[key]}")
-        else:
-            click.echo(f"[DRY RUN] '{key}' is not set on {target}; nothing would be removed")
+        _preview_removal(result, target, key, existing.get(key), key in existing, as_json)
         return
 
     api.remove_block_property(str(block_uuid), key)
@@ -293,6 +393,55 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         output(result, True)
     else:
         click.echo(f"Removed '{key}' from {target}")
+
+def _preview_removal(result, target, key, value, present, as_json):
+    """remove-property --dry-run. "Property not there" is the outcome worth
+    knowing before the write: a caller who misspelled the key would
+    otherwise see "Removed" and believe it."""
+    if as_json:
+        output({**result, "status": "would_remove" if present else "not_present",
+                "value": value, "present": present, "dry_run": True}, True)
+    elif present:
+        click.echo(f"[DRY RUN] Would remove '{key}' from {target}")
+        click.echo(f"  value: {value}")
+    else:
+        click.echo(f"[DRY RUN] '{key}' is not set on {target}; nothing would be removed")
+
+
+def _remove_page_property(api, ref, blocks, key, dry_run, as_json):
+    """remove-property --name: the key's lines go from the page's first block
+    and the block is saved, so the page lets go of the key at once (#80).
+
+    That block is the property block, or, on a page that starts with text,
+    the block set-property used to write into, whose property it was all
+    along. The property block goes when its last line does.
+    """
+    page, first = ref.page, blocks[0]
+    block = _property_block(blocks)
+    _refuse_front_matter(block, page, as_json)
+    page_uuid = _page_uuid(api, page)
+    old = first.get("content") or ""
+    # The page may still show a key whose line is gone (the old way's
+    # leftovers): that is present too, until the page lets go of it.
+    present = with_property_line(old, key, None) != old or (
+        first is block and not _page_shows(api, page_uuid, key, None))
+    result = {**ref.fields(), "property": key,
+              "status": "removed" if present else "not_present"}
+    if dry_run:
+        value = stored_properties(api, first["uuid"])[0].get(key)
+        _preview_removal(result, f"page '{page}'", key, value, present, as_json)
+        return
+    if present:
+        first = {**first, "content": _current_text(api, first)}
+        _write_property_block(api, blocks, first, with_property_line(first["content"], key, None))
+        _check_page_took(api, page, page_uuid, key, None, as_json)
+    if as_json:
+        output(result, True)
+    elif present:
+        click.echo(f"Removed '{key}' from page '{page}'")
+    else:
+        click.echo(f"'{key}' is not set on page '{page}'; nothing was removed")
+
 
 @cli.command("set-block-property", epilog="""\b
 Example:

@@ -79,6 +79,35 @@ def property_line_mask(lines: list) -> list:
             for line, code in zip(lines, inside)]
 
 
+
+def stored_property_key(key: str) -> str:
+    """``key`` as Logseq stores it: lower-cased, ``_`` read as ``-`` (#21)."""
+    return key.lower().replace("_", "-")
+
+
+def with_property_line(content: str, key: str, value) -> str:
+    """``content`` with property ``key`` set to ``value``, or taken out when
+    ``value`` is ``None``.
+
+    ``key`` is the stored spelling, and a line counts as the key's in any
+    spelling Logseq reads as it (``Due_Date::`` is ``due-date``): a second
+    line would leave the key two values. The first such line takes the value
+    in its place, any further ones go, and a key not there goes last. What
+    Logseq does not read as a property, a line in a code block say, stays.
+    """
+    lines = content.split("\n") if content else []
+    kept, placed = [], value is None
+    for line, is_property in zip(lines, property_line_mask(lines)):
+        if is_property and stored_property_key(PROPERTY_LINE_RE.match(line).group(1)) == key:
+            if not placed:
+                kept.append(f"{key}:: {value}")
+                placed = True
+            continue
+        kept.append(line)
+    if not placed:
+        kept.append(f"{key}:: {value}")
+    return "\n".join(kept)
+
 # An ``id::`` line inside a block's content names the UUID that block is meant
 # to keep. Logseq only honours it when the write asks for it (``keepUUID`` on
 # insertBatchBlock, which every --keep-ids write goes through since #31);
