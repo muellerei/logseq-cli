@@ -187,3 +187,30 @@ class TestCommand:
         _, siblings, i, parent = api.graph.locate(VALID)
         assert parent is None and i == len(siblings) - 1
         assert "cannot preserve" not in result.output
+
+
+class TestIdLinesAsLogseqReadsThem:
+    """An id:: line counts where Logseq reads it as the block's id (measured,
+    0.10.15): a tab after the value does not stop it, a carriage return keeps
+    Logseq from reading it at all."""
+
+    def test_a_trailing_tab_still_names_the_id(self):
+        assert block_id_property(f"a\nid:: {VALID}\t") == VALID
+
+    def test_a_trailing_carriage_return_does_not(self):
+        assert block_id_property(f"a\nid:: {VALID}\r") == ""
+
+    def test_dropping_ids_removes_one_with_a_trailing_tab(self):
+        from logseq_cli.helpers import without_block_ids
+        assert without_block_ids(f"a\nid:: {VALID}\t") == "a"
+
+    def test_keep_ids_refuses_a_taken_id_with_a_trailing_tab(self):
+        """Flat --content is written as given; --tree and hierarchical content
+        are parsed, which strips the tab, so this is the path that kept it."""
+        from tests.conftest import PageGraph, page_graph_api
+        api = page_graph_api(PageGraph({"P": [{"uuid": "anchor", "content": "anchor"},
+                                              {"uuid": VALID, "content": "real"}]}))
+        result = _run(["insert-block", "--after", "anchor", "--keep-ids",
+                       "--content", f"copy\nid:: {VALID}\t"], api)
+        assert result.exit_code == 1
+        assert "already belong" in result.output
