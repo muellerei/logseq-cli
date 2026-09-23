@@ -127,6 +127,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whether it is written as an outline or as one block. What the commands echo
   (dry-run preview, `--json` `content`, the text preview) is derived from that
   outline too, so the dropped line does not reappear there.
+- The code-block rule behind `replace-text` and `get-todos --match` hid too
+  much and too little. A ``` line with no closer after it made every later line
+  code, and so did a one-line ```` ```x``` ````; to Logseq neither is a code
+  block, and the `k:: v` lines after them are properties. A `~~~` fence was not
+  known at all, though Logseq hides a property between two of them. Measured
+  against Logseq 0.10.15 by writing blocks into page files: a fence line starts,
+  after spaces, tabs or form feeds (not a no-break space), with ``` or `~~~`,
+  the next fence line closes it
+  whichever of the two it uses and whatever follows on the line, and an opener
+  nothing closes is no code block. The mask now follows that.
 - An `id::` line with a tab after the value was not seen as an id, while
   Logseq keeps it as the block's (measured, 0.10.15). Flat `--content` is
   written as given, so an existing block's uuid could reach a second block
