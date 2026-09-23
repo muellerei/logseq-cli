@@ -114,6 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `insert-block --before` with several top-level blocks (`--tree`, or
+  `--content` with indented children) wrote them in reverse: `a, b, c` came
+  out as `c, b, a` (measured, 0.10.15). Each root was sent "before" the one
+  written just ahead of it. Now only the first goes before the anchor and
+  each further one after the previous. The test for `--before` could not see
+  it: its mock handed out uuids in order whatever the graph would have done
+  with them; the new one reads the page back. `--keep-ids` writes were not
+  affected once they went through one batch (#31).
 - Whether a line in a block is a property line was decided by two patterns,
   and neither agreed with Logseq. `PROPERTY_LINE_RE` (used by `replace-text`,
   `parse_hierarchical_content` and `get-todos`) accepted no `.` in a key, no

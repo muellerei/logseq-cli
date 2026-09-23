@@ -1603,8 +1603,12 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
                                        anchor_uuid, written_before=_written)
     uuids = []
     cursor = anchor_uuid
-    for block in tree:
-        result = api.insert_block(cursor, block["content"], {"sibling": True, "before": before})
+    for position, block in enumerate(tree):
+        # Only the first root goes before the anchor; each further one after
+        # the root just written. Sending every root "before" the one written
+        # ahead of it put a, b, c down as c, b, a (measured, 0.10.15).
+        ahead = before and position == 0
+        result = api.insert_block(cursor, block["content"], {"sibling": True, "before": ahead})
         if strict:
             new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
         else:
@@ -1618,9 +1622,6 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
             uuids.extend(insert_block_tree_with_uuids(
                 api, children, new_uuid, strict=strict,
                 _written=_written + len(uuids)))
-        # When inserting "before", keep each new top node before the anchor in
-        # order by advancing the cursor to the node just placed; when "after",
-        # the next sibling must follow the one we just inserted.
         cursor = new_uuid
     return uuids
 

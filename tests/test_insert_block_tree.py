@@ -283,6 +283,24 @@ class TestInsertBlockTreeAsSiblings:
         data = _json.loads(result.output)
         assert data["uuids"] == ["b1", "b2"]
 
+    @pytest.mark.parametrize("args", [
+        ["--tree", "- a\n- b\n\t- b1\n- c"],
+        ["--content", "- a\n- b\n\t- b1\n- c"],
+    ], ids=["tree", "hierarchical content"])
+    def test_before_keeps_the_order_of_several_roots(self, args):
+        """Measured on 0.10.15 with the code this replaced: a, b, c came out as
+        c, b, a. Each root went in before the one written just ahead of it.
+        The test above could not see it: its mock hands out uuids in order
+        whatever the graph would have done with them."""
+        from tests.conftest import PageGraph, page_graph_api
+        graph = PageGraph({"P": [{"uuid": "x", "content": "x"},
+                                 {"uuid": "y", "content": "y"}]})
+        with patch("logseq_cli.group.LogseqAPI", return_value=page_graph_api(graph)):
+            result = CliRunner().invoke(cli, ["insert-block", "--before", "y", *args])
+        assert result.exit_code == 0, result.output
+        assert graph.tree("P") == [("x", []), ("a", []), ("b", [("b1", [])]),
+                                   ("c", []), ("y", [])]
+
 
 # ---------- insert-block --dry-run -----------------------------------------
 
