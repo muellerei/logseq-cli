@@ -22,12 +22,19 @@ from logseq_cli.render import BLOCK_REF_RE
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
 
 def _swap_todo_marker(content: str, new_status: str) -> str:
-    """Replace the leading TODO-marker in content with new_status."""
-    parts = content.split(None, 1)
+    """Replace the leading TODO-marker in content with new_status.
+
+    On the first line only: split over the whole content, a line break counts
+    as the whitespace after the marker, and "TODO\nnotes" came out joined as
+    "DONE notes".
+    """
+    first, newline, rest = content.partition("\n")
+    parts = first.split(None, 1)
     if parts and parts[0].upper() in _TODO_MARKERS:
-        rest = parts[1] if len(parts) > 1 else ""
-        return f"{new_status} {rest}".strip()
-    return f"{new_status} {content}"
+        first = f"{new_status} {parts[1]}".strip() if len(parts) > 1 else new_status
+    else:
+        first = f"{new_status} {first}"
+    return first + newline + rest
 
 def _fetch_todo_references(api, markers_str: str) -> dict:
     """Map each referenced todo's uuid to the pages its references sit on.
