@@ -768,14 +768,61 @@ def uuids_in_use(api, ids: list) -> list:
     return [i for i in ids if i.lower() in found]
 
 
+def dropped_ids_note(count: int, way: str = None) -> str:
+    """The note for ``count`` id:: lines a write drops, with ``way`` to keep
+    them; the default is the --keep-ids of the commands that have it."""
+    return (f"Note: {count} id:: propert(ies) in the content will be dropped; "
+            "Logseq mints new UUIDs and any ((uuid)) pointing at the old ones "
+            "will dangle. " + (way or "Pass --keep-ids to preserve them (for "
+                               "moving or restoring an outline; ids that still "
+                               "exist are refused)."))
+
+
+def without_block_ids_noted(contents: list) -> tuple:
+    """``contents``, the texts of blocks a writer without --keep-ids sends,
+    with their id:: lines removed, and the note saying so (``None`` if there
+    were none). An id:: line would become the block's uuid (#56)."""
+    dropped = collect_block_ids([{"content": c} for c in contents])
+    if not dropped:
+        return contents, None
+    return [without_block_ids(c) for c in contents], dropped_ids_note(
+        len(dropped), way="To write a block under a uuid of your choosing, use "
+                          "insert-block --keep-ids.")
+
+
+def without_foreign_block_ids(content: str, own: str) -> tuple:
+    """``content`` without the id:: lines that name another uuid than
+    ``own``, and the note saying so (``None`` if there were none).
+
+    For an update of the block ``own``: its own line is what getBlock hands
+    out, and writing it back keeps the uuid (measured, #56). Another one would
+    become the block's uuid once Logseq reads the file again, and leave every
+    ((ref)) to it dangling, so it goes, as it would in any other write.
+    """
+    kept, dropped = [], 0
+    for line, value in id_lines(content):
+        if value and value.lower() != own.lower():
+            dropped += 1
+        else:
+            kept.append(line)
+    if not dropped:
+        return content, None
+    return "\n".join(kept), (
+        f"Note: {dropped} id:: line(s) naming another block's uuid will be "
+        "dropped: a block keeps its uuid when its text changes, and taking "
+        "that one would leave every ((ref)) to this block dangling. move-block "
+        "moves a block with its uuid.")
+
+
 def check_block_ids(api, tree: list, keep_ids: bool):
     """Apply the ``id::`` contract to ``tree`` before any of it is written.
 
     insert-block (--tree and --content), add-note-content, add-journal-block
     and add-journal-content go through this, so none of them can drop an id
     in silence again (#1 fixed insert-block --tree alone, and the others kept
-    the defect). Returns a note for stderr when ids would
-    be dropped, or ``None``. With ``keep_ids`` raises :class:`BlockIdError` for
+    the defect). The writers without --keep-ids decide their own contract, and
+    LogseqAPI refuses a line none of them decided on (#56). Returns a note for
+    stderr when ids would be dropped, or ``None``. With ``keep_ids`` raises :class:`BlockIdError` for
     an id that cannot become a block id, and for one a block already has:
     that is the copy case, and insertBatchBlock would give the uuid to a second
     block without a word (measured), leaving two blocks one uuid.
@@ -784,11 +831,7 @@ def check_block_ids(api, tree: list, keep_ids: bool):
     if not ids:
         return None
     if not keep_ids:
-        return (
-            f"Note: {len(ids)} id:: propert(ies) in the content will be dropped; "
-            "Logseq mints new UUIDs and any ((uuid)) pointing at the old ones "
-            "will dangle. Pass --keep-ids to preserve them (for moving or "
-            "restoring an outline; ids that still exist are refused).")
+        return dropped_ids_note(len(ids))
     several = blocks_with_several_ids(tree)
     if several:
         # Only one can be the block's id, and which one a batch keeps is not
@@ -989,6 +1032,16 @@ def require_content(content: str, option: str = "--content") -> str:
     """
     if not content.strip():
         raise click.BadParameter(f"{option} is empty")
+    return content
+
+
+def require_text_besides_ids(content: str) -> str:
+    """Refuse text that dropping its id:: lines left empty (#56): there is
+    nothing the caller meant left to write, and writing an empty block, or
+    emptying the one updated, reports a success that is none."""
+    if not content.strip():
+        raise click.BadParameter("--content holds nothing but id:: lines, and "
+                                 "those are dropped: nothing is left to write")
     return content
 
 

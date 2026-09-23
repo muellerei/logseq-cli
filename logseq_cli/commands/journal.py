@@ -38,9 +38,11 @@ from logseq_cli.helpers import (
     read_content_file,
     require_content,
     require_insert,
+    require_text_besides_ids,
     strip_title_heading,
     tree_without_block_ids,
     uuid_fields,
+    without_block_ids_noted,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (
@@ -328,6 +330,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
 @cli.command("add-journal-entry", epilog="""\b
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
 --under-heading / --upsert-heading.
+An id:: line in --content is dropped with a Note, as in add-journal-block.
 """)
 @click.option("--content", required=True, help="Content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
@@ -366,6 +369,16 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     # counted for the preview and written, from this one list.
     blocks = [content] if as_block else [l.strip() for l in content.split("\n") if l.strip()]
     refuse_split_tree([{"content": block} for block in blocks], command="add-journal-entry")
+    # An id:: line would become a block's uuid (#56); dropped, as every writer
+    # drops it without --keep-ids, which this deprecated command does not get.
+    # A line that was nothing but the id leaves no empty block behind, and
+    # text that was nothing but ids is refused before the page is created.
+    blocks, id_note = without_block_ids_noted(blocks)
+    if id_note:
+        if not as_block:
+            blocks = [block for block in blocks if block.strip()]
+        require_text_besides_ids("\n".join(blocks))
+        click.echo(id_note, err=True)
     note_quote_breaks([{"content": block} for block in blocks])
 
     # Before the journal page is created: the preview must not be the one run
@@ -389,7 +402,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     # no hint that two are missing, which invites a retry that duplicates the
     # one that landed.
     if as_block:
-        result = api.append_block_in_page(page_name, content)
+        result = api.append_block_in_page(page_name, blocks[0])
         require_insert(result, f"a block on '{page_name}'")
         blocks_added = 1
     else:
@@ -539,6 +552,22 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # that --no-preserve joins into a single line is not.
     refuse_split_tree(blocks, command="add-journal-block")
 
+    if top_level:
+        under_heading = None
+    else:
+        # A name from [journal.headings] resolves to its heading; anything else
+        # is passed through, so a literal "## Log" keeps working. With no value
+        # at all, the env var wins over the config's default_heading.
+        under_heading = resolve_heading(load_config(), under_heading)
+        # Before the id note below, which would otherwise sit ahead of the
+        # refusal and break its JSON.
+        refuse_split_heading(under_heading, command="add-journal-block")
+    # Before the journal page is looked up and created: that is a write. And
+    # before the id note below, like the heading check.
+    if upsert_heading and not under_heading:
+        click.echo("Error: --upsert-heading requires --under-heading", err=True)
+        sys.exit(1)
+
     # Before the journal page is looked up or created: a refused id must leave
     # the graph untouched, and creating the page is a write too.
     try:
@@ -557,19 +586,6 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         content = contents[0]
     else:
         content = None  # Will be handled in batch path below
-
-    if top_level:
-        under_heading = None
-    else:
-        # A name from [journal.headings] resolves to its heading; anything else
-        # is passed through, so a literal "## Log" keeps working. With no value
-        # at all, the env var wins over the config's default_heading.
-        under_heading = resolve_heading(load_config(), under_heading)
-        refuse_split_heading(under_heading, command="add-journal-block")
-    # Before the journal page is looked up and created: that is a write.
-    if upsert_heading and not under_heading:
-        click.echo("Error: --upsert-heading requires --under-heading", err=True)
-        sys.exit(1)
 
     # After the checks that can refuse, and on the text as written: dropped
     # id:: lines are gone from it.

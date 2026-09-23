@@ -3,7 +3,14 @@ import sys
 
 import click
 
-from logseq_cli.blocktext import property_line_mask, refuse_split_block, refuse_split_heading, refuse_split_tree
+from logseq_cli.blocktext import (
+    property_line_mask,
+    refuse_id_lines,
+    refuse_split_block,
+    refuse_split_heading,
+    refuse_split_tree,
+    without_block_ids,
+)
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -36,11 +43,13 @@ from logseq_cli.helpers import (
     refs_refusal,
     require_content,
     require_insert,
+    require_text_besides_ids,
     resolve_single_block,
     stored_properties,
     subtree_uuids,
     tree_without_block_ids,
     uuid_fields,
+    without_foreign_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -66,6 +75,9 @@ Note:
   A quote ends at a blank line, and the paragraph after it shows as plain
   text: written anyway, with a Note on stderr. Start the blank line with ">"
   to keep the paragraph in the quote.
+  The block's own id:: line (as get-block shows it) may stay in --content;
+  one naming another uuid is dropped with a Note, since Logseq would make
+  it this block's uuid and every ((ref)) to the block would dangle.
 """)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
@@ -102,6 +114,11 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
         fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
 
     old_content = block.get("content", "") if isinstance(block, dict) else ""
+    # The block's own id:: line, as getBlock hands it out, goes back as it
+    # came; one naming another uuid is dropped, as every writer drops it (#56).
+    content, id_note = without_foreign_block_ids(content, block.get("uuid") or clean_id)
+    if id_note:
+        require_text_besides_ids(content)
     # Properties are stored inside the block content, so replacing the text
     # would drop them. This command changes text; properties belong to
     # set-block-property / remove-property, and losing them here was a silent
@@ -119,6 +136,8 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
 
     # After every check that can refuse: a note ahead of an error would sit in
     # front of the JSON on stderr, and speak of text that is never written.
+    if id_note:
+        click.echo(id_note, err=True)
     note_quote_breaks([{"content": content}])
     if dry_run:
         if as_json:
@@ -224,6 +243,8 @@ Note:
   A replacement that gives a block a line Logseq would read as a block of its
   own ("- " or "# " at a line start, an unclosed code fence) is refused before
   any block is written; it may change such lines the block had, not add one.
+  So is one that turns a line into an id:: line, which Logseq would make the
+  block's uuid.
 """)
 @click.option("--page", "--name", required=True, help="Page name to search in")
 @click.option("--find", "find_text", required=True, help="Text to find")
@@ -277,8 +298,11 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # Every replacement is checked before the first is written, so a refusal
     # leaves no block half done (#47). Lines a block already had may stay.
     for r in replacements:
-        refuse_split_block(r["new"], command="replace-text", replacing=r["old"],
-                           where=f"The block {r['id'][:8]}.. after the replacement")
+        where = f"The block {r['id'][:8]}.. after the replacement"
+        refuse_split_block(r["new"], command="replace-text", replacing=r["old"], where=where)
+        # A text line turned into an id:: line would give the block another
+        # uuid (#56); the property lines it had are masked above and stay.
+        refuse_id_lines(r["new"], own=r["id"], replacing=r["old"], where=where)
     if not dry_run:
         for r in replacements:
             api.update_block(r["id"], r["new"], replacing=r["old"])
@@ -726,7 +750,8 @@ Examples:
 Note:
   Copies block + all children. With --remove: original is deleted (move).
   The copy gets new UUIDs, so --remove refuses while ((block-refs)) point
-  into the original, even from within it; move-block keeps the UUIDs.
+  into the original, even from within it; move-block keeps the UUIDs. The
+  source's id:: lines are left out of the copy.
   A source block Logseq would not read back as one block (a "- " or "# " line
   after the first, a code fence nothing closes) is refused before anything is
   copied; move-block moves it as it is.
@@ -764,7 +789,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     if dry_run:
         planned = count_blocks([source])
         action = "move" if remove else "copy"
-        content = source.get("content", "") if isinstance(source, dict) else ""
+        content = without_block_ids(source.get("content", "")) if isinstance(source, dict) else ""
         if as_json:
             output({"action": action, "blocks": planned, "to_page": to_page,
                     "source_id": block_id, "removes_source": bool(remove),
@@ -787,7 +812,10 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     written = [0]
 
     def _copy_tree(block, parent_uuid=None):
-        content = block.get("content", "")
+        # The copy gets uuids of its own, and refs stay with the original, so
+        # the source's id:: lines go without a word; left in, the file would
+        # name one uuid for two blocks until Logseq reads it again (#56).
+        content = without_block_ids(block.get("content", ""))
         if parent_uuid:
             result = api.insert_block(parent_uuid, content, {"sibling": False})
             new_uuid = require_insert(

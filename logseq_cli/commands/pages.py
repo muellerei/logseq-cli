@@ -27,9 +27,11 @@ from logseq_cli.helpers import (
     process_blocks,
     refs_refusal,
     require_insert,
+    require_text_besides_ids,
     strip_title_heading,
     tree_without_block_ids,
     uuid_fields,
+    without_block_ids_noted,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (
@@ -404,6 +406,8 @@ Note:
   A quote ends at a blank line, and the paragraph after it shows as plain
   text: written anyway, with a Note on stderr. Start the blank line with ">"
   to keep the paragraph in the quote.
+  An id:: line in --content is dropped with a Note: Logseq would make it the
+  block's uuid. insert-block --keep-ids writes a block under a given uuid.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
@@ -421,13 +425,22 @@ def create_page(ctx, page, content, as_json, dry_run):
     # that existed. A retry after a timeout therefore duplicated content and
     # was told the write had succeeded. Ask first.
     exists = api.get_page(page) is not None
+    id_note = None
     if content:
         # Written as one block, so it must come back as one (#47).
         refuse_split_block(content, command="create-page")
+        # An id:: line would become the new block's uuid (#56). There is no
+        # --keep-ids here: restoring an id is insert-block's, with its checks.
+        # Text that was nothing but the id leaves nothing to write.
+        (content,), id_note = without_block_ids_noted([content])
+        if id_note:
+            require_text_besides_ids(content)
 
     # Only for a write that would happen: a live run on a page that exists is
     # refused below, and a note in front of that error would break its JSON;
     # a preview of that run says it would not write.
+    if id_note and not exists:
+        click.echo(id_note, err=True)
     if content and not exists:
         note_quote_breaks([{"content": content}])
     if dry_run:

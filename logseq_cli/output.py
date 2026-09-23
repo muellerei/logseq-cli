@@ -13,7 +13,7 @@ import requests
 from logseq_cli.api import DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
-from logseq_cli.blocktext import SplitBlockError
+from logseq_cli.blocktext import IdLineError, SplitBlockError
 
 
 def handle_connection_error(func):
@@ -88,6 +88,16 @@ def handle_connection_error(func):
                 reason="splits_into_blocks",
                 line=e.line,
                 kind=e.kind,
+            )
+        except IdLineError as e:
+            # Refused before the write, like a line that splits the block: the
+            # text would give the block another uuid (#56).
+            fail(
+                str(e),
+                as_json=as_json,
+                exit_code=2,
+                reason="id_line",
+                line=e.line,
             )
         except InvalidKeywordError as e:
             # The connection is healthy and no query was sent; the input was
