@@ -7,6 +7,7 @@ import click
 from logseq_cli.datalog import edn_string
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
+    PROPERTY_LINE_RE,
     find_blocks_by_content,
     journal_day_to_date,
     next_occurrence,
@@ -130,11 +131,21 @@ Notes:
   names the other pages it appears on. Following refs costs one extra query for
   the whole command, not one per task. --no-follow-refs restores the old reading.
   Plain-text output: "MARKER [Page] preview" — page name inline, no grouping needed.
+  --json: {"todos": [...], "count": N}, plus "repeating_excluded": N when a
+  due range left out repeaters it could not place. Each task has marker,
+  content (the task text without its marker, properties, SCHEDULED/DEADLINE
+  and LOGBOOK), page and uuid; journal_day when the page its block lives on is
+  a journal; scheduled, deadline, next_due (dates as YYYY-MM-DD), repeating,
+  references, references_withheld where they apply. A key that does not apply
+  is absent, not null.
+  --match is a Python regex over that content as stored: ((refs)) are not
+  resolved, and ^/$ anchor the whole text unless the pattern starts with (?m).
 """)
 @click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
               help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
 @click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
+@click.option("--match", "match", default=None, help="Filter by what the task says: a regular expression, case-insensitive, searched in the task text (not its properties)")
 @click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal pages a task stands on — the one its block lives on and the ones it was carried into by ((block-ref)) — so tasks found only on ordinary pages are excluded whenever a range is given.")
 @click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
 @click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. Repeating tasks are excluded and reported — Logseq stores their first occurrence, not the next")
@@ -147,7 +158,7 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, include_done,
+def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_to, include_done,
               refs_limit, no_follow_refs, as_json):
     """List all TODOs/tasks in the graph."""
     api = ctx.obj["api"]
@@ -158,6 +169,10 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
 
     if refs_limit < 0:
         fail("--refs-limit must be 0 or greater (0 lifts the cap).", as_json)
+    try:
+        match_re = re.compile(match, re.IGNORECASE) if match else None
+    except re.error as e:
+        fail(f"--match is not a valid regular expression: {e}.", as_json)
 
     markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (
@@ -198,7 +213,7 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
                 continue
             if in_logbook:
                 continue
-            if re.match(r"^\w[\w-]*::\s", line):
+            if PROPERTY_LINE_RE.match(line.lstrip()):
                 continue
             if re.match(r"^\s*(SCHEDULED|DEADLINE):\s*<", line):
                 continue
@@ -214,6 +229,13 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
             "uuid": uuid,
             "_journal_day": journal_day,
         }
+        # The day the task was noted on, for its age. Already read for
+        # --from/--to; absent on an ordinary page, like the due fields below.
+        if journal_day:
+            try:
+                record["journal_day"] = str(journal_day_to_date(journal_day))
+            except (ValueError, TypeError):
+                pass
         # scheduled/deadline are YYYYMMDD integers, the same shape as
         # journal-day (verified against a live graph), so the existing
         # conversion applies. Absent keys stay absent: a graph that does not
@@ -251,6 +273,11 @@ def get_todos(ctx, status, page, tag, from_date, to_date, due_from, due_to, incl
     if tag:
         tag_pattern = re.compile(rf"#\b{re.escape(tag)}\b", re.IGNORECASE)
         todos = [t for t in todos if tag_pattern.search(t["content"])]
+
+    # On the cleaned text, so a property value or a LOGBOOK timestamp cannot
+    # match a task that does not say it.
+    if match_re:
+        todos = [t for t in todos if match_re.search(t["content"])]
 
     # Resolve block references. A task carried forward by ((uuid)) stands on the
     # later day as much as on the day it was written, so its occurrences are
