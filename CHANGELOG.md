@@ -114,6 +114,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An `id::` line that a command announced as dropped could still be written.
+  `add-note-content`, `add-journal-block`, `add-journal-content` and
+  `insert-block --content` checked the parsed outline for `id::` lines but
+  removed them from the raw text, line by line, and the two did not always see
+  the same line. A bulleted `\t- id:: <uuid>` one level deeper is a property of
+  the block above to the parser; the raw line starts with `- `, so it stayed.
+  Logseq then minted a fresh uuid and kept the line (`insertBlock` and
+  `appendBlockInPage` write the text as given, measured, 0.10.15), and the file
+  named a uuid the block did not have. The check, the removal and the write now
+  use the one parsed outline; `add-journal-block` decides once per value
+  whether it is written as an outline or as one block. What the commands echo
+  (dry-run preview, `--json` `content`, the text preview) is derived from that
+  outline too, so the dropped line does not reappear there.
 - An `id::` line with a tab after the value was not seen as an id, while
   Logseq keeps it as the block's (measured, 0.10.15). Flat `--content` is
   written as given, so an existing block's uuid could reach a second block

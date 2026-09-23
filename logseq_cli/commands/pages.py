@@ -17,7 +17,7 @@ from logseq_cli.helpers import (
     find_or_create_heading,
     incoming_block_refs,
     insert_block_tree_with_uuids,
-    insert_formatted_content_with_uuids,
+    insert_tree_at_page_end,
     is_journal_date,
     parse_hierarchical_content,
     parse_property_pairs,
@@ -25,8 +25,8 @@ from logseq_cli.helpers import (
     refs_refusal,
     require_insert,
     strip_title_heading,
+    tree_without_block_ids,
     uuid_fields,
-    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (
@@ -496,20 +496,23 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
     content = strip_title_heading(content, page)
 
     # Checked before the dry run returns: a refused id is part of the preview.
+    # The tree checked is the tree written; parsing the text again after
+    # removing lines from it is how an announced id line once stayed in.
+    tree = parse_hierarchical_content(content)
     try:
-        note = check_block_ids(api, parse_hierarchical_content(content), keep_ids)
+        note = check_block_ids(api, tree, keep_ids)
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
         click.echo(note, err=True)
-        content = without_block_ids(content)
+        tree = tree_without_block_ids(tree)
 
     if dry_run:
         # Everything below this point writes — the page, possibly the heading,
         # then the blocks. The block count comes from the same parse the live
         # path uses, so the preview reports what would actually land, not the
         # raw line count.
-        planned = count_blocks(parse_hierarchical_content(content))
+        planned = count_blocks(tree)
         heading_exists = (find_heading(api, page, under_heading) is not None
                           if under_heading and existing else False)
         position = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
@@ -539,11 +542,10 @@ def add_note_content(ctx, page, content, create, under_heading, properties, dry_
         if not heading_uuid:
             click.echo(f"Failed to find or create heading '{under_heading}' on '{page}'", err=True)
             sys.exit(1)
-        tree = parse_hierarchical_content(content)
         uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         position = f"under '{under_heading}' on '{page}'"
     else:
-        uuids = insert_formatted_content_with_uuids(api, page, content, keep_ids=keep_ids)
+        uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
         position = page
 
     n = len(uuids)
