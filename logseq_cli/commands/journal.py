@@ -29,6 +29,7 @@ from logseq_cli.helpers import (
     journal_day_to_date,
     normalize_heading,
     normalize_indentation,
+    note_quote_breaks,
     outline_text,
     parse_date_keyword,
     parse_date_range,
@@ -366,6 +367,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     # counted for the preview and written, from this one list.
     blocks = [content] if as_block else [l.strip() for l in content.split("\n") if l.strip()]
     refuse_split_tree([{"content": block} for block in blocks], command="add-journal-entry")
+    note_quote_breaks([{"content": block} for block in blocks])
 
     # Before the journal page is created: the preview must not be the one run
     # that leaves a page behind.
@@ -436,6 +438,9 @@ Notes:
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
   --keep-ids cannot be combined with --upsert-heading or --no-preserve.
+  A quote ends at a blank line, and the paragraph after it shows as plain
+  text: written anyway, with a Note on stderr. Start the blank line with ">"
+  to keep the paragraph in the quote.
 """)
 @click.option("--content", "contents", multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
 @click.option("--content-file", "content_file", default=None, help="Read block content from a file and insert it as a tree (multiple flush '- ' roots allowed). Mutually exclusive with --content.")
@@ -562,6 +567,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # at all, the env var wins over the config's default_heading.
         under_heading = resolve_heading(load_config(), under_heading)
         refuse_split_heading(under_heading, command="add-journal-block")
+
+    # After the checks that can refuse, and on the text as written: dropped
+    # id:: lines are gone from it.
+    note_quote_breaks([node for c, t in zip(contents, trees)
+                       for node in (t if t is not None else [{"content": c}])])
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
