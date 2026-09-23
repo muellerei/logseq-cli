@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-todos --match REGEX` filters by what a task says, case-insensitive,
+  on the task text without its properties, `SCHEDULED`/`DEADLINE` lines and
+  `LOGBOOK`, so a property value cannot match a task that does not say it. It
+  is a single option: next to the repeatable `--status`, which ORs, a
+  repeatable `--match` that ANDs would read ambiguously, and a regex expresses
+  alternatives itself. The JSON shape, `{"todos": [...], "count": N}` with its
+  fields, is now stated in `--help` and the README. Each task also carries
+  `journal_day`, the day of the journal page its block lives on, so its age
+  is one subtraction; it was already read for `--from/--to` and dropped
+  before output. Property lines are now recognised by the rule the other
+  commands share, indented ones included; `get-todos` had kept its own copy,
+  which let an indented `owner:: someone` through as task text. In two days of recorded use, `get-todos --json` ran 7 times, 6 of
+  them into an inline script, 5 of those to filter by content, and all 6
+  guessed the shape.
+  See [#27](https://github.com/muellerei/logseq-cli/issues/27).
 - `find-block --uuid-only` prints bare uuids, one per line, for use in
   `$(...)`. With no match it exits 1 and says so on stderr, where the plain
   form prints "No blocks found." and exits 0: an empty `$U` would otherwise
@@ -42,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them and reported a break no contributor could have seen.
 
 ### Fixed
+
+- `get-todos` left the marker in `content` for `CANCELED` and `WAIT` tasks,
+  both markers `set-todo-status` writes itself, and left a bare `TODO` with
+  no text as `"TODO"`. The strip was a hand-kept list that had drifted from
+  the markers in use. It now removes the word the block's own
+  `:block/marker` names, so the list cannot drift again. Found in review of
+  `--match`, which made the difference visible: `--match "^ship"` missed
+  `CANCELED ship it`, and `--match cancel` hit every cancelled task.
 
 - The build now ships `logseq_cli.commands`. `pyproject.toml` lists packages
   explicitly, which was right while the package was flat and became wrong the
