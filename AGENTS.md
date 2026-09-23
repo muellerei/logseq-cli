@@ -79,6 +79,12 @@ logseq-cli add-journal-block --date 2026-04-03 --content "**14:30** Late note"
 logseq-cli add-journal-block --top-level --content "Top-level block"
 ```
 
+`add-journal-block`, `add-journal-content`, `add-note-content` and
+`add-block-ref` print the uuid of the block they wrote (the root, for a tree)
+on one `  uuid: ...` line, so a follow-up `find-block` to recover it is not
+needed. `insert-block` prints one such line per block, root first, unless
+`--quiet`.
+
 ### 3. Search and Query
 
 ```bash
@@ -95,6 +101,10 @@ logseq-cli smart-query --advanced --request '[:find (pull ?b [*]) :where [?b :bl
 
 # Find backlinks
 logseq-cli get-backlinks --name "Page Name"
+
+# The uuid of the one block to write to; exits 1 on no match and on several
+# (--first would pick one of several without a word on stdout)
+U=$(logseq-cli find-block --content "tag support" --page "Project Alpha" --exactly-one --uuid-only)
 ```
 
 ### 4. Manage TODOs
@@ -281,7 +291,7 @@ If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and 
 | `get-todos` | List and filter tasks; a task carried forward by `((block-ref))` is found on the day it stands and stays one row |
 | `get-backlinks` | Find pages linking to a page |
 | `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in `--tree` or `--content` (also on `add-note-content`, `add-journal-block`, `add-journal-content`) |
-| `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree |
+| `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree; `--uuid-only` prints bare uuids and fails on no match; `--exactly-one` fails unless exactly one block matches |
 | `update-block` | Change one block's content (by `--id` or `--where-content`); its properties are kept |
 | `set-todo-status` | Change a TODO/DOING/DONE marker (never `replace-text`) |
 | `move-block` | Relocate a block, keeping its UUID and refs |

@@ -545,10 +545,11 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u])}, True)
     else:
         click.echo(f"Inserted block {position}")
-        preview = content[:80] + ("..." if len(content) > 80 else "")
-        click.echo(f"  {preview}")
+        # Before the preview: the content may itself contain "uuid: ...".
         if new_uuid:
             click.echo(f"  uuid: {new_uuid}")
+        preview = content[:80] + ("..." if len(content) > 80 else "")
+        click.echo(f"  {preview}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
 
