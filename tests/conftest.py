@@ -226,9 +226,12 @@ def _logseq_block_id(content):
             else:
                 code.update(range(opener + 1, i))
                 opener = None
-    ids = [m.group(1) for i, line in enumerate(lines) if i not in code
-           for m in [re.fullmatch(r"(?i)[ \t]*(?:id|custom[-_]id):: +(\S+)[ \t]*", line)] if m]
-    return ids[-1] if ids else ""
+    found = ""
+    for i, line in enumerate(lines):
+        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +(\S+)[ \t]*", line)
+        if m and i not in code:
+            found = m.group(1)
+    return found
 
 
 class PageGraph:
