@@ -3,7 +3,7 @@ import sys
 
 import click
 
-from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
+from logseq_cli.blocktext import property_line_mask, refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -32,7 +32,6 @@ from logseq_cli.helpers import (
     parse_date_keyword,
     parse_hierarchical_content,
     parse_tree_input,
-    property_line_mask,
     read_content_file,
     refs_refusal,
     require_content,
