@@ -190,6 +190,22 @@ logseq-cli get-page --page "My Page"
 logseq-cli get-page --name "My Page"   # equivalent
 ```
 
+### Page aliases
+
+A page name means the page Logseq would open for it. An alias from a page's
+`alias::` property reads and writes that page, in every command that names a
+page: Logseq's HTTP API does not resolve an alias, and without this a read of
+one came back empty and a write landed on a page of its own. With `--json` a
+result that names the page keeps the name you gave in `page` and adds
+`alias_of` with the page used; in text a `Note:` says so. An alias two pages
+claim is refused, naming both. `delete-page` and `rename-page` take the page's
+own name. An alias that has blocks of its own is a page, as in Logseq. Right
+after `set-property --key alias` the alias exists only once Logseq has read
+the file again. Filters on page names (`get-todos --page`,
+`suggest-connections --focus`) match the text as given. On the unsupported DB
+version the alias is not followed: the lookup relies on fields of the file
+graph.
+
 ## Commands
 
 ### Read (14)
@@ -662,6 +678,7 @@ logseq-cli/
 │   ├── helpers.py    # Date parsing, block processing, backlink search
 │   ├── group.py      # The click group: global options, API client
 │   ├── output.py     # Results on stdout, failures on stderr, --json
+│   ├── pagenames.py  # Which page a name means: an alias as Logseq resolves it
 │   ├── render.py     # Blocks to text, and resolving block references
 │   ├── commands/     # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page

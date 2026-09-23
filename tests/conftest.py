@@ -269,15 +269,25 @@ class PageGraph:
     * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
       placeholder for a ``((ref))`` without a block as ``id:: <uuid>`` with no
       page.
+    * An alias (``aliases={"al": ["Ziel"]}``: pages whose own ``alias::``
+      names it) is a page of its own to the API: ``getPage`` answers its stub,
+      ``getPageBlocksTree`` its blocks, none unless given, and
+      ``appendBlockInPage`` writes onto it. Only the query on ``:block/alias``
+      and the source's ``alias::`` property leads to the source (#63).
+    * ``getPage`` names a ``file`` for a page built with text in a block; an
+      alias, a page known only from a link and one ``createPage`` made empty
+      have none.
     """
 
-    def __init__(self, pages=None, *, placeholders=(), blockless=()):
+    def __init__(self, pages=None, *, placeholders=(), blockless=(), aliases=None):
         self._ids = 0
         self.pages = []                 # {"id", "uuid", "name", "blocks"}
         self.placeholders = set(placeholders)
+        self.alias_sources = {a.lower(): list(s) for a, s in (aliases or {}).items()}
         for name, nodes in (pages or {}).items():
-            self._page(name, [self._node(n) for n in nodes])
-        for name in blockless:
+            self._page(name, [self._node(n) for n in nodes])["file"] = True
+        for name in list(blockless) + [a for a in (aliases or {})
+                                       if a not in (pages or {})]:
             self._page(name, [])
 
     # --- building ----------------------------------------------------------
@@ -350,8 +360,11 @@ class PageGraph:
         page = self.page_named(name)
         if page is None:
             return None
-        return {"id": page["id"], "uuid": page["uuid"], "name": page["name"].lower(),
-                "originalName": page["name"]}
+        found = {"id": page["id"], "uuid": page["uuid"], "name": page["name"].lower(),
+                 "originalName": page["name"]}
+        if page.get("file") and any(b["content"] for b in page["blocks"]):
+            found["file"] = {"id": page["id"] + 5000}
+        return found
 
     def get_page_blocks_tree(self, name):
         page = self.page_named(name)
@@ -472,6 +485,11 @@ class PageGraph:
         attribute matches only the entities carrying it.
         """
         import re
+        if ":block/alias" in query:
+            # The source query of pagenames.alias_sources: each page whose own
+            # alias:: names the alias, with that property value as a list.
+            alias = re.search(r'\[\?a :block/name "([^"]*)"\]', query).group(1)
+            return [[source, [alias]] for source in self.alias_sources.get(alias, [])]
         if "contains?" not in query:
             return []
         asked = re.findall(r'#uuid "([^"]+)"', query)
