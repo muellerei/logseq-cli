@@ -65,7 +65,8 @@ logseq-cli/
    ```
    Tests mock the API (`unittest.mock` + `CliRunner`); `tests/conftest.py` has a
    `FakeGraph` for the write paths, needed wherever a command verifies its write
-   by reading back. A new command or flag ships with tests: the failure modes
+   by reading back, and a `PageGraph` that holds whole pages and answers the
+   way Logseq was measured to, for writes proven by reading the page back. A new command or flag ships with tests: the failure modes
    that matter here are silent ones, since Logseq answers a failed write with
    HTTP 200 + `null` rather than an error.
 

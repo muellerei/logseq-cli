@@ -57,37 +57,55 @@ def _api(uuids):
     return api
 
 
+def _graph():
+    """Page P with an anchor block and a parent with one child, answered the way
+    Logseq does: a --keep-ids write goes out as one insertBatchBlock and is
+    proven by reading the page back (#31)."""
+    from tests.conftest import PageGraph, page_graph_api
+    return page_graph_api(PageGraph({"P": [
+        {"uuid": "anchor", "content": "anchor"},
+        {"uuid": "parent", "content": "parent", "children": [{"content": "old child"}]}]}))
+
+
 class TestPerBlockPath:
     def test_without_keep_ids_the_uuid_is_not_requested(self):
         api = _api(["new-1"])
         insert_block_tree_with_uuids(api, [{"content": f"a\nid:: {VALID}"}], "parent")
         assert "customUUID" not in api.insert_block.call_args[0][2]
 
-    def test_keep_ids_asks_logseq_for_the_supplied_uuid(self):
-        api = _api(["new-1"])
-        insert_block_tree_with_uuids(
-            api, [{"content": f"a\nid:: {VALID}"}], "parent", keep_ids=True)
-        assert api.insert_block.call_args[0][2]["customUUID"] == VALID
 
-    def test_blocks_without_an_id_stay_untouched_under_keep_ids(self):
-        api = _api(["new-1"])
-        insert_block_tree_with_uuids(
+class TestKeepIds:
+    """With --keep-ids every block of the tree keeps its id, wherever it sits."""
+
+    def test_the_block_gets_the_supplied_uuid(self):
+        api = _graph()
+        uuids = insert_block_tree_with_uuids(
+            api, [{"content": f"a\nid:: {VALID}"}], "parent", keep_ids=True)
+        assert uuids == [VALID]
+        assert api.graph.locate(VALID)[3]["uuid"] == "parent"
+
+    def test_blocks_without_an_id_get_a_fresh_one(self):
+        api = _graph()
+        uuids = insert_block_tree_with_uuids(
             api, [{"content": "no id here"}], "parent", keep_ids=True)
-        assert "customUUID" not in api.insert_block.call_args[0][2]
+        assert len(uuids) == 1 and uuids[0] not in (VALID, VALID2)
 
     def test_children_keep_their_ids_too(self):
-        api = _api(["new-1", "new-2"])
-        insert_block_tree_with_uuids(
+        api = _graph()
+        uuids = insert_block_tree_with_uuids(
             api,
             [{"content": f"a\nid:: {VALID}", "children": [{"content": f"b\nid:: {VALID2}"}]}],
-            "parent", keep_ids=True, batch=False)
-        assert api.insert_block.call_args_list[1][0][2]["customUUID"] == VALID2
+            "parent", keep_ids=True)
+        assert uuids == [VALID, VALID2]
+        assert api.graph.locate(VALID2)[3]["uuid"] == VALID
 
     def test_siblings_keep_their_ids(self):
-        api = _api(["new-1"])
-        insert_block_tree_as_siblings(
+        api = _graph()
+        uuids = insert_block_tree_as_siblings(
             api, [{"content": f"a\nid:: {VALID}"}], "anchor", keep_ids=True)
-        assert api.insert_block.call_args[0][2]["customUUID"] == VALID
+        assert uuids == [VALID]
+        _, siblings, i, _ = api.graph.locate(VALID)
+        assert siblings[i - 1]["uuid"] == "anchor"
 
 
 class TestBatchPath:
@@ -107,7 +125,7 @@ class TestBatchPath:
         assert "keepUUID" not in api.insert_batch_block.call_args[0][2]
 
     def test_keep_ids_sets_keepuuid_on_the_batch(self):
-        api = self._batch_api()
+        api = _graph()
         tree = [{"content": f"a\nid:: {VALID}", "children": [{"content": "b"}]}]
         insert_block_tree_with_uuids(api, tree, "parent", keep_ids=True)
         assert api.insert_batch_block.call_args[0][2]["keepUUID"] is True
@@ -147,26 +165,25 @@ class TestCommand:
         assert "Nothing was written" in result.output
         api.insert_block.assert_not_called()
 
-    def test_keep_ids_reaches_the_api(self, tmp_path):
+    def test_keep_ids_reaches_the_graph(self, tmp_path):
         f = tmp_path / "t.md"
         f.write_text(f"- a\n  id:: {VALID}\n", encoding="utf-8")
-        api = _api(["new-1"])
+        api = _graph()
         result = _run(
             ["insert-block", "--child-of", "anchor", "--tree-file", str(f), "--keep-ids"], api)
-        assert result.exit_code == 0
-        assert api.insert_block.call_args[0][2]["customUUID"] == VALID
+        assert result.exit_code == 0, result.output
+        assert api.graph.locate(VALID)[3]["uuid"] == "anchor"
 
     def test_top_level_roots_keep_their_ids_too(self, tmp_path):
         # This used to say the roots could not keep their ids, on the belief
-        # that appendBlockInPage takes no options. It passes them to
-        # insertBlock; measured, a customUUID keeps the id at top level.
+        # that appendBlockInPage takes no options. Measured, a customUUID kept
+        # the id at top level; since #31 the batch path does, like everywhere.
         f = tmp_path / "t.md"
         f.write_text(f"- a\n  id:: {VALID}\n", encoding="utf-8")
-        api = MagicMock()
-        api.append_block_in_page.return_value = {"uuid": VALID}
-        api.datascript_query.return_value = []
+        api = _graph()
         result = _run(
             ["insert-block", "--page", "P", "--top-level", "--tree-file", str(f), "--keep-ids"], api)
         assert result.exit_code == 0, result.output
-        assert api.append_block_in_page.call_args[0][2] == {"customUUID": VALID}
+        _, siblings, i, parent = api.graph.locate(VALID)
+        assert parent is None and i == len(siblings) - 1
         assert "cannot preserve" not in result.output

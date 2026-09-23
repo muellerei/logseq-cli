@@ -204,3 +204,239 @@ def answer_property_pulls(api):
 
     api.datascript_query.side_effect = query
     return api
+
+
+class PageGraph:
+    """Pages and their block trees, answering the way Logseq 0.10.15 does.
+
+    Built for #31, where the writes went through ``insertBatchBlock`` and are
+    proven by reading the page back. A MagicMock answers every read with
+    something and hid a defect that way before (#23), so each behaviour here
+    is one that was measured:
+
+    * ``insertBatchBlock`` answers ``null``. ``sibling: false`` puts the batch
+      at the head of the anchor's children, ``sibling: true`` right after the
+      anchor, ``+ before: true`` right before it. A page uuid as anchor with
+      ``sibling: false`` puts it at the head of the page.
+    * With ``keepUUID`` a node keeps the uuid of its ``id::`` line, a
+      placeholder's included, and also one a real block already has: the
+      batch does not check (the CLI must).
+    * Anchored ``before`` the page's first block, or on a page with no blocks
+      at all, Logseq writes every node of the batch with ``* `` in front of its
+      content. Anchored on the page uuid of a page that holds a block, it does
+      not.
+    * ``insertBlock`` and ``appendBlockInPage`` refuse a ``customUUID`` that a
+      block or a placeholder holds.
+    * ``createPage`` makes a page with one empty block. A page known only from
+      a ``[[link]]`` has none.
+    * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
+      placeholder for a ``((ref))`` without a block as ``id:: <uuid>`` with no
+      page.
+    """
+
+    def __init__(self, pages=None, *, placeholders=(), blockless=()):
+        self._ids = 0
+        self.pages = []                 # {"id", "uuid", "name", "blocks"}
+        self.placeholders = set(placeholders)
+        for name, nodes in (pages or {}).items():
+            self._page(name, [self._node(n) for n in nodes])
+        for name in blockless:
+            self._page(name, [])
+
+    # --- building ----------------------------------------------------------
+    def _fresh(self):
+        self._ids += 1
+        return f"00000000-0000-4000-8000-{self._ids:012d}"
+
+    def _page(self, name, blocks):
+        page = {"id": 1000 + len(self.pages), "uuid": self._fresh(), "name": name,
+                "blocks": blocks}
+        self.pages.append(page)
+        return page
+
+    def _node(self, spec, *, keep=False, prefix=""):
+        from logseq_cli.helpers import block_id_property
+        spec = {"content": spec} if isinstance(spec, str) else spec
+        wanted = block_id_property(spec["content"]) if keep else ""
+        uuid = spec.get("uuid") or (wanted.lower() if wanted else self._fresh())
+        self.placeholders.discard(uuid)
+        return {"uuid": uuid, "content": prefix + spec["content"],
+                "children": [self._node(c, keep=keep, prefix=prefix)
+                             for c in spec.get("children") or []]}
+
+    # --- lookup ------------------------------------------------------------
+    def page_named(self, name):
+        if isinstance(name, int):
+            return next((p for p in self.pages if p["id"] == name), None)
+        return next((p for p in self.pages if p["name"].lower() == str(name).lower()), None)
+
+    def locate(self, uuid):
+        """``(page, siblings, index, parent)`` of the block, or ``None``."""
+        def walk(page, blocks, parent):
+            for i, b in enumerate(blocks):
+                if b["uuid"] == uuid:
+                    return page, blocks, i, parent
+                found = walk(page, b["children"], b)
+                if found:
+                    return found
+        for page in self.pages:
+            found = walk(page, page["blocks"], None)
+            if found:
+                return found
+        return None
+
+    def every_uuid(self):
+        def walk(blocks):
+            for b in blocks:
+                yield b["uuid"]
+                yield from walk(b["children"])
+        return [u for p in self.pages for u in walk(p["blocks"])]
+
+    def tree(self, name):
+        """The page as first lines, nested: for assertions."""
+        def walk(blocks):
+            return [(b["content"].split("\n")[0], walk(b["children"])) for b in blocks]
+        return walk(self.page_named(name)["blocks"])
+
+    def _out(self, block, page, parent, children=True):
+        return {"uuid": block["uuid"], "content": block["content"],
+                "page": {"id": page["id"]},
+                "parent": {"id": parent["uuid"] if parent else page["id"]},
+                "children": [self._out(c, page, block) for c in block["children"]]
+                            if children else []}
+
+    # --- API surface -------------------------------------------------------
+    def get_page(self, name):
+        page = self.page_named(name)
+        if page is None:
+            return None
+        return {"id": page["id"], "uuid": page["uuid"], "name": page["name"].lower(),
+                "originalName": page["name"]}
+
+    def get_page_blocks_tree(self, name):
+        page = self.page_named(name)
+        if page is None:
+            return None
+        return [self._out(b, page, None) for b in page["blocks"]]
+
+    def get_block(self, uuid, include_children=True):
+        found = self.locate(uuid)
+        if found:
+            page, siblings, i, parent = found
+            return self._out(siblings[i], page, parent, children=include_children)
+        if uuid in self.placeholders:
+            return {"uuid": uuid, "content": f"id:: {uuid}", "children": []}
+        return None
+
+    def create_page(self, name, properties=None, options=None):
+        page = self._page(name, [{"uuid": self._fresh(), "content": "", "children": []}])
+        return self.get_page(page["name"])
+
+    def insert_batch_block(self, anchor, batch, options=None):
+        opts = options or {}
+        keep = bool(opts.get("keepUUID"))
+        page = next((p for p in self.pages if p["uuid"] == anchor), None)
+        if page is not None:
+            if opts.get("sibling"):
+                return None
+            # Measured: clean on a page holding a block (even an empty one),
+            # prefixed on a page with none.
+            target, at = page["blocks"], 0
+            headless = not page["blocks"]
+        else:
+            found = self.locate(anchor)
+            if not found:
+                return None
+            page, siblings, i, parent = found
+            if not opts.get("sibling"):
+                target, at, headless = siblings[i]["children"], 0, False
+            elif opts.get("before"):
+                target, at = siblings, i
+                headless = parent is None and i == 0
+            else:
+                target, at, headless = siblings, i + 1, False
+        prefix = "* " if headless else ""
+        target[at:at] = [self._node(n, keep=keep, prefix=prefix) for n in batch]
+        return None
+
+    def insert_block(self, target, content, options=None):
+        opts = options or {}
+        wanted = opts.get("customUUID")
+        if wanted and (self.locate(wanted) or wanted in self.placeholders):
+            return {"error": "Custom block UUID already exists"}
+        found = self.locate(target)
+        if not found:
+            return None
+        page, siblings, i, parent = found
+        block = {"uuid": wanted or self._fresh(), "content": content, "children": []}
+        if not opts.get("sibling"):
+            kids = siblings[i]["children"]
+            kids.insert(0, block) if opts.get("before") else kids.append(block)
+        else:
+            siblings.insert(i if opts.get("before") else i + 1, block)
+        return self._out(block, page, parent)
+
+    def append_block_in_page(self, name, content, options=None):
+        page = self.page_named(name)
+        if page is None:
+            return None
+        wanted = (options or {}).get("customUUID")
+        if wanted and (self.locate(wanted) or wanted in self.placeholders):
+            return {"error": "Custom block UUID already exists"}
+        block = {"uuid": wanted or self._fresh(), "content": content, "children": []}
+        page["blocks"].append(block)
+        return self._out(block, page, None)
+
+    def remove_block(self, uuid):
+        found = self.locate(uuid)
+        if found:
+            _, siblings, i, _ = found
+            del siblings[i]
+        return None
+
+    def move_block(self, src, target, options=None):
+        opts = options or {}
+        moving = self.locate(src)
+        if not moving or not self.locate(target):
+            return None
+        _, siblings, i, _ = moving
+        block = siblings.pop(i)
+        _, t_siblings, t_i, _ = self.locate(target)
+        if opts.get("children"):
+            t_siblings[t_i]["children"].append(block)
+        else:
+            t_siblings.insert(t_i if opts.get("before") else t_i + 1, block)
+        return None
+
+    def datascript_query(self, query):
+        """The id existence check: which of the literal uuids an entity has.
+
+        Measured attributes: a block has ``:block/page``, a page has
+        ``:block/name``, a placeholder has neither. A query that names either
+        attribute matches only the entities carrying it.
+        """
+        import re
+        if "contains?" not in query:
+            return []
+        asked = re.findall(r'#uuid "([^"]+)"', query)
+        blocks, pages = set(self.every_uuid()), {p["uuid"] for p in self.pages}
+        if ":block/page" in query or ":block/name" in query:
+            have = (blocks if ":block/page" in query else set()) | \
+                   (pages if ":block/name" in query else set())
+        else:
+            have = blocks | pages | self.placeholders
+        return [[u] for u in asked if u in have]
+
+
+def page_graph_api(graph):
+    """MagicMock whose page and block calls are answered by ``graph``."""
+    from unittest.mock import MagicMock
+    api = MagicMock()
+    for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
+                 "insert_batch_block", "insert_block", "append_block_in_page",
+                 "remove_block", "move_block", "datascript_query"):
+        getattr(api, name).side_effect = getattr(graph, name)
+    api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
+    api.get_page_linked_references.return_value = []
+    api.graph = graph
+    return api

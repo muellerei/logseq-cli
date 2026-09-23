@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--keep-ids` restores an id that only a `((ref))` still holds: the restore
+  case, where a block was deleted, other pages still point at it, and the
+  outline is written back from a copy. Logseq keeps a placeholder under such a
+  uuid; `insertBlock` and `appendBlockInPage` refuse to give it to a new block,
+  while `insertBatchBlock` with `keepUUID` and the id as an `id::` line takes
+  it over, and the refs resolve again (measured, 0.10.15). Every write with
+  `--keep-ids` now goes through that one call, whichever position it writes
+  to, rather than a second path for placeholders only; the issue proposed the
+  latter, and one path means a restore cannot behave differently from a move
+  depending on which ids the graph happens to hold. Without `--keep-ids`
+  nothing changes. Two positions needed care, both measured: before a page's
+  first block, and on a page with no blocks at all, the batch comes out with
+  `* ` in front of every node. The first is written after that block and its
+  roots moved before it; the second is written after a stand-in block that is
+  removed again. The batch answers `null` whatever it did, so the page is read
+  back: the blocks must be there in the number sent, under the ids asked for,
+  and where they were sent, or the command fails and says what landed. A
+  placeholder is told apart by what it lacks: a block has a page, a page has
+  a name, a placeholder neither (measured). An id a page holds is refused like
+  one a block holds, and so is a block carrying two `id::` lines: which one a
+  batch keeps is not the CLI's to guess, and the other would go unchecked. A
+  page that does not exist is created first, as `appendBlockInPage` does
+  without `--keep-ids`.
+  See [#31](https://github.com/muellerei/logseq-cli/issues/31).
 - `get-page --outline` lists a page's headings, one line each with its uuid:
   the table of contents, and the uuid to write under, in one call. A heading
   is what Logseq reads as one (`properties.heading`, set for `## X`,
@@ -307,12 +331,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through a write, and `insertBatchBlock` does not check an id given as an
   `id::` line at all. Measured, it wrote the copy over the original in the
   database, whose block list for that page then came back empty while the
-  file still held the original. An id that
-  survives only as a `((ref))` target has a placeholder in the database, and
-  `insertBlock` refuses to give it to a new block. Both are now refused before
-  anything is written, including the journal page. Restoring an id that only a
-  reference still holds is not possible yet; see
-  [#31](https://github.com/muellerei/logseq-cli/issues/31).
+  file still held the original. That case is now refused before anything is
+  written, including the journal page. An id that survives only as a `((ref))`
+  target has a placeholder in the database, and `insertBlock` refuses to give
+  it to a new block; it was refused as well until `--keep-ids` learned to
+  restore it (see Added,
+  [#31](https://github.com/muellerei/logseq-cli/issues/31)).
   An id repeated within the content is refused as well. `add-journal-block`
   rejects `--keep-ids` together with `--upsert-heading`, which rewrites an
   existing block whose uuid cannot change, and with `--no-preserve`, which
