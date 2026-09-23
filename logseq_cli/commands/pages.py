@@ -21,6 +21,7 @@ from logseq_cli.helpers import (
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
     is_journal_date,
+    note_quote_breaks,
     parse_hierarchical_content,
     parse_property_pairs,
     process_blocks,
@@ -400,6 +401,9 @@ Note:
   (NOT as real properties).
   --content is ONE block: a "- " or "# " line after the first, or a code fence
   nothing closes, is refused, since Logseq would read it as a block of its own.
+  A quote ends at a blank line, and the paragraph after it shows as plain
+  text: written anyway, with a Note on stderr. Start the blank line with ">"
+  to keep the paragraph in the quote.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
@@ -421,6 +425,11 @@ def create_page(ctx, page, content, as_json, dry_run):
         # Written as one block, so it must come back as one (#47).
         refuse_split_block(content, command="create-page")
 
+    # Only for a write that would happen: a live run on a page that exists is
+    # refused below, and a note in front of that error would break its JSON;
+    # a preview of that run says it would not write.
+    if content and not exists:
+        note_quote_breaks([{"content": content}])
     if dry_run:
         # The preview reports the state the live run would refuse on, rather
         # than refusing here: a preview that exits non-zero is indistinguishable
