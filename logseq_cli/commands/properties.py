@@ -16,6 +16,22 @@ from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import is_properties_block
 
 
+# Logseq's hidden-built-in-properties (graph-parser property.cljs, 0.10.15),
+# with the card keys srs.cljs registers into it, keyed as stored: kept for
+# a block itself, never shown as a property.
+_HIDDEN_BUILT_IN = frozenset({
+    "id", "custom-id", "background-color", "heading", "collapsed",
+    "created-at", "updated-at", "last-modified-at",
+    "query-table", "query-properties", "query-sort-by", "query-sort-desc",
+    "ls-type", "hl-type", "hl-page", "hl-stamp", "hl-color",
+    "logseq.macro-name", "logseq.macro-arguments", "logseq.order-list-type",
+    "logseq.tldraw.page", "logseq.tldraw.shape",
+    "todo", "doing", "now", "later", "done",
+    "card-last-interval", "card-repeats", "card-last-reviewed",
+    "card-next-schedule", "card-ease-factor", "card-last-score",
+})
+
+
 def _property_key_spellings(key: str):
     """Return the datalog spellings to try for a property key.
 
@@ -107,7 +123,12 @@ def get_properties(ctx, page, prop_name, as_json):
             blocks = []
         first = (blocks[0] or {}) if blocks else {}
         if first.get("uuid"):
-            properties, text_values = stored_properties(api, first["uuid"])
+            # Not the keys Logseq keeps for the block itself: a heading's
+            # ``heading``, its ``id``. They were reported as the page's on
+            # 754 of 918 pages of a real graph (#82).
+            values, texts = stored_properties(api, first["uuid"])
+            properties = {k: v for k, v in values.items() if k not in _HIDDEN_BUILT_IN}
+            text_values = {k: v for k, v in texts.items() if k not in _HIDDEN_BUILT_IN}
 
     if prop_name:
         stored_key = _find_stored_property_key(properties, prop_name)
