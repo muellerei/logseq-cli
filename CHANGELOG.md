@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `get-page --outline` lists a page's headings, one line each with its uuid:
+  the table of contents, and the uuid to write under, in one call. A heading
+  is what Logseq reads as one (`properties.heading`, set for `## X`,
+  `heading:: true` and `heading:: 2` alike), not a pattern over the text, and
+  the outline is cut from the same block tree the full read returns. It is
+  indented by how the headings nest, not by their number of `#`: a `### B`
+  next to a `## A` is not in A's section, and `--heading "## A"` would not
+  return it. With `--heading` it outlines that section. It reads no
+  backlinks.
+  Recorded use read whole pages through `grep "- ##"` for this, then ran
+  `find-block` per heading for the uuid.
+- `get-page --max-chars N` and `get-journal-range --max-chars N` cut the
+  blocks so the output fits. The size is measured in the format printed,
+  because a block in `--json` is several times its text; a cap counted on
+  content would let JSON overshoot by that factor. The cut falls between
+  blocks in reading order, and pages or days past it are not printed. stderr
+  names the blocks withheld, the page or day and section the cut fell in, and
+  the later pages or days; `--json` carries the same as `withheld` and `cut`.
+  `--from-block UUID` continues from the block the note names, with its
+  ancestors as context. A first draft suggested `--heading` for that, and
+  review broke it three ways: a heading name that repeats on the page, a
+  heading rewritten by `--resolve-refs`, and a section larger than the cap,
+  where the follow-up read stopped at the same block again. The same draft
+  listed pages past the cut with a placeholder each; on short journal days
+  the placeholders alone outgrew the cap. A block that does not fit, alone
+  or with its ancestors, ends the chain with the `--max-chars` it needs
+  (`cut.needs`) rather than naming itself again, and a page named twice is
+  refused, since its uuids would be too. Only blocks are cut: page headers
+  and backlinks always print, and when they alone exceed the cap the note
+  says so. Recorded use had reads over 30 KB, three of them cut with
+  `head -N` wherever line N happened to fall.
+  See [#26](https://github.com/muellerei/logseq-cli/issues/26).
 - `get-todos --match REGEX` filters by what a task says, case-insensitive,
   on the task text without its properties, `SCHEDULED`/`DEADLINE` lines and
   `LOGBOOK`, so a property value cannot match a task that does not say it. It
