@@ -17,7 +17,6 @@ view must not be able to disagree with its source.
 import pathlib
 import re
 
-import pytest
 
 from logseq_cli.cli import cli
 

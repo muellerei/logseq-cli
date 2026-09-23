@@ -533,7 +533,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
         if as_json:
             output({"uuid": block_id, "status": "unchanged", "content": old_content}, True)
         else:
-            click.echo(f"No change (block already has status or no marker found).")
+            click.echo("No change (block already has status or no marker found).")
         return
 
     # The marker swap is the whole change, so the preview shows both markers and
