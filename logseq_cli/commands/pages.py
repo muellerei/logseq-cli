@@ -11,6 +11,7 @@ from logseq_cli.helpers import (
     apply_block_properties,
     check_block_ids,
     check_property_pairs,
+    content_or_file,
     count_blocks,
     extract_page_links,
     find_backlinks,
@@ -472,9 +473,12 @@ Note:
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
+  --content-file FILE is --content read from a file ('-' reads stdin), with
+  the same rules; no shell quoting stands between the text and the command.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
-@click.option("--content", required=True, help="Content to add")
+@click.option("--content", default=None, help="Content to add; this or --content-file is required")
+@click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--create/--no-create", default=True, help="Create page if it doesn't exist")
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
@@ -483,9 +487,10 @@ Note:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_note_content(ctx, page, content, create, under_heading, properties, dry_run, keep_ids, as_json):
+def add_note_content(ctx, page, content, content_file, create, under_heading, properties, dry_run, keep_ids, as_json):
     """Add content to any page."""
     api = ctx.obj["api"]
+    content = content_or_file(content, content_file)
 
     # Validate property pairs up-front so a bad pair fails before any write.
     try:

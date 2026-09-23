@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--content-file FILE` on `update-block`, `insert-block`, `add-note-content`
+  and `add-journal-content`, where only `add-journal-block` had it. A call
+  reaching for it on `update-block` failed with "No such option", and the way
+  left, `--content "$(cat FILE)"`, puts the shell back between the text and
+  the CLI. On these commands it is `--content` read from a file (`-` reads
+  stdin) and nothing more: the text goes through the same path, the one-block
+  rule from #47 included, and a test holds that the same text sent both ways
+  makes the same calls. `add-journal-block` keeps its own meaning, the file as
+  one tree. The either/or is decided in one place for the four; `add-journal-block`
+  keeps its own check, since its `--content` is repeatable, and answers with
+  the same words.
+  See [#49](https://github.com/muellerei/logseq-cli/issues/49).
+
+### Fixed
+
+- `insert-block --tree-file` named the wrong option when it could not read the
+  file: `--content-file not found: tree.md`, an option `insert-block` did not
+  have. It reads through the function written for `add-journal-block`, whose
+  messages named that command's option. They name the option given now, and
+  so do the refusal of `--content` together with `--tree-file`, which named
+  `--tree`, and the answer to `insert-block` with nothing to insert, which
+  left `--tree-file` out.
+- `--content-file -` read stdin in the locale's encoding and kept its line
+  endings, while a file was read as UTF-8 with them translated. Under
+  `LC_ALL=C`, as in a cron job or an agent's subshell, bytes that are not
+  UTF-8 went on to Logseq as lone surrogates; under a Latin-1 locale UTF-8
+  text arrived as mojibake; and `a\r\nb` from a pipe kept its `\r` where the
+  same file lost it. stdin is now read the way a file is: UTF-8 or refused,
+  `\r\n` and `\r` as `\n`. A BOM at the start, which some Windows editors
+  write, is dropped from both; it had stayed in front of the first line, so a
+  first `- ` was no bullet and a first `# title` was not recognised as the
+  page title. Affects `add-journal-block --content-file`, `insert-block
+  --tree-file` and, since #49, every `--content-file`.
+
 ## [0.14.0] - 2026-09-23
 
 ### Added
