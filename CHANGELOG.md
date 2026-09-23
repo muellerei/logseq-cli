@@ -224,6 +224,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effect, without naming a cause nobody checked.
   See [#23](https://github.com/muellerei/logseq-cli/issues/23).
 
+- `move-block --dry-run` previewed moves the real run refuses: a target that
+  does not exist, and one inside the source's own subtree. It read the source
+  only and answered "Would move" with exit 0. It now runs the same checks as
+  the move, so a preview that passes is one the move will not refuse up front.
+  Found in review of the entry above.
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and

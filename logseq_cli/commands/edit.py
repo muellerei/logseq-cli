@@ -12,6 +12,7 @@ from logseq_cli.helpers import (
     append_in_page,
     apply_block_properties,
     check_block_ids,
+    check_move,
     check_property_pairs,
     contains_hierarchical_content,
     count_blocks,
@@ -743,7 +744,8 @@ Note:
   dead refs) and deletes the original.
   --under nests the block as the target's FIRST child; --before puts it directly
   in front of the target as a sibling. Children always move along.
-  A target inside the block's own subtree is refused before anything moves.
+  A target inside the block's own subtree is refused before anything moves,
+  and --dry-run refuses it (and a missing target) the same way.
   Logseq answers every move with null, so the move is verified by re-reading
   and reported as an error if it did not take.
 """)
@@ -768,6 +770,7 @@ def move_block_cmd(ctx, block_id, under, before, dry_run, as_json):
 
     position = f"under {target[:8]}..." if under else f"before {target[:8]}..."
     if dry_run:
+        check_move(api, block_id, target)
         planned = count_blocks([source])
         content = source.get("content", "") if isinstance(source, dict) else ""
         if as_json:

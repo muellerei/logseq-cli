@@ -338,3 +338,28 @@ class TestSubtreeTargetIsRefusedUpFront:
         assert r.exit_code == 1
         assert "did not take effect" in r.output
         assert "subtree" not in r.output
+
+
+class TestDryRunPredictsTheRefusal:
+    """A dry run must not promise a move the real run refuses."""
+
+    def test_subtree_target(self):
+        g = _Graph({"page a": [(A, [(B, [])])]})
+        r = _run(g, "--id", A, "--before", B, "--dry-run")
+        assert r.exit_code == 1
+        assert "own subtree" in r.output
+        assert "Would move" not in r.output
+
+    def test_missing_target(self):
+        g = _Graph({"page a": [(A, [])]})
+        r = _run(g, "--id", A, "--under", C, "--dry-run")
+        assert r.exit_code == 1
+        assert "not found" in r.output
+        assert "Would move" not in r.output
+
+    def test_valid_move_is_still_previewed(self):
+        g = _Graph({"page a": [(A, []), (B, [])]})
+        r = _run(g, "--id", B, "--before", A, "--dry-run")
+        assert r.exit_code == 0, r.output
+        assert "Would move 1 block(s)" in r.output
+        assert g.moves == []
