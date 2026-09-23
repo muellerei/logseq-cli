@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `find-block --uuid-only` prints bare uuids, one per line, for use in
+  `$(...)`. With no match it exits 1 and says so on stderr, where the plain
+  form prints "No blocks found." and exits 0: an empty `$U` would otherwise
+  flow into the next write. It excludes `--json` and `--with-children`. In two
+  days of recorded use, `find-block | grep uuid | head -1 | awk` appeared 8
+  times; `--first` already existed and saved only the `head -1`.
+- `find-block --exactly-one` fails unless exactly one block matches, and lists
+  the matches when there are several. The recorded pipelines looked up a block
+  to write to, and `--first` (like `head -1`) picks one of several matches
+  with the rest named only on stderr, which a `$(...)` does not show. The same
+  refusal to guess already guards the `--where-content` selectors of the write
+  commands. It excludes `--first` and `--limit`.
+- `add-journal-block` and `add-journal-content` print the uuid of the block
+  they wrote (the root, for a tree) on a line of its own, as `add-note-content`
+  and `insert-block` already did. The same recorded use had 18
+  `add-journal-block` calls without `--json`, four of them followed by a
+  `find-block` only to recover that uuid. The `Added N block(s)` line is
+  unchanged. Where a content preview follows, the uuid line now comes first,
+  in `insert-block` too: the preview repeats the content, which may itself
+  contain a line reading `uuid: ...`.
+  See [#25](https://github.com/muellerei/logseq-cli/issues/25).
 - `scripts/check-links.py` checks the relative links and heading anchors across
   the Markdown files. Every one of them claims a file and a heading exist, and
   nothing verified that, so a rename broke them without any sign. The anchor
