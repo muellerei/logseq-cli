@@ -215,7 +215,8 @@ def _logseq_block_id(content):
     would agree with it whatever it got wrong. A code block runs from a line
     starting with ``` or ~~~ (after spaces, tabs, form feeds) to the next
     such line; an opener nothing closes hides nothing. Of two id:: lines the
-    last wins.
+    last wins. The value is trimmed of whitespace but a trailing ``\r``, and
+    a value with spaces in it is taken whole (``id:: a b c``, #56).
     """
     lines = content.split("\n")
     code, opener = set(), None
@@ -228,7 +229,7 @@ def _logseq_block_id(content):
                 opener = None
     found = ""
     for i, line in enumerate(lines):
-        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +(\S+)[ \t]*", line)
+        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +[^\S\r\n]*(\S(?:[^\r\n]*\S)?)[^\S\r\n]*", line)
         if m and i not in code:
             found = m.group(1)
     return found

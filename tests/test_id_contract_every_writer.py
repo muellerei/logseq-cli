@@ -6,7 +6,7 @@ against 0.10.15, the page file read again after each write:
 - ``updateBlock`` with a foreign ``id:: <uuid>`` line: the block carries that
   uuid afterwards, the old one answers ``null``, every ``((ref))`` to it
   dangles. ``createPage`` + ``appendBlockInPage`` with such a line: the value
-  becomes the new block's uuid.
+  becomes the new block's uuid. ``id:: a b c`` is taken as the uuid as well.
 - ``getBlock`` hands out the block's own ``id::`` line in its content, and
   writing it back unchanged through ``updateBlock`` keeps the uuid. A block
   read and written back has to keep working.
@@ -67,16 +67,35 @@ class TestTheApiRefusesAnUndecidedIdLine:
         lambda api: api.insert_block(TARGET, f"x\nid:: {FOREIGN}"),
         lambda api: api.append_block_in_page("P", f"x\nid:: {FOREIGN}"),
         lambda api: api.update_block(TARGET, f"x\nid:: {FOREIGN}"),
+        lambda api: api.update_block(TARGET, "x\nid:: a b c"),
         lambda api: api.update_block(TARGET, f"x\ncustom-id:: {FOREIGN}"),
         lambda api: api.insert_batch_block(TARGET, [{"content": "ok", "children": [
             {"content": f"x\nid:: {FOREIGN}"}]}]),
-    ], ids=["insertBlock", "appendBlockInPage", "updateBlock",
+    ], ids=["insertBlock", "appendBlockInPage", "updateBlock", "updateBlock, multi-word",
             "updateBlock, custom-id", "insertBatchBlock"])
     def test_refused(self, write):
         api = self._api()
         with pytest.raises(IdLineError):
             write(api)
         api.call.assert_not_called()
+
+    @pytest.mark.parametrize("line", [
+        f"id:: \t{FOREIGN}", f"id:: {FOREIGN}\u00a0", f"id:: {FOREIGN}\f",
+        f"id:: {FOREIGN}\v", f"id:: {FOREIGN}\u3000", f"id:: {FOREIGN}\t",
+    ], ids=["tab before", "no-break space", "form feed", "vertical tab",
+            "ideographic space", "tab after"])
+    def test_whitespace_logseq_trims_off_the_value_hides_nothing(self, line):
+        # Each measured: Logseq took the uuid despite it (0.10.15).
+        api = self._api()
+        with pytest.raises(IdLineError):
+            api.insert_block(TARGET, f"x\n{line}")
+        api.call.assert_not_called()
+
+    def test_a_trailing_carriage_return_leaves_the_line_text(self):
+        # Measured the other way: Logseq does not take this one.
+        api = self._api()
+        api.insert_block(TARGET, f"x\nid:: {FOREIGN}\r")
+        api.call.assert_called_once()
 
     def test_an_update_may_carry_the_blocks_own_id(self):
         # What getBlock hands out, written back: the uuid stays (measured).
@@ -140,6 +159,13 @@ class TestUpdateBlock:
         assert r.exit_code == 0, r.stderr
         assert "dropped" not in r.stderr
         assert api.graph.get_block(OWN)["content"] == f"own, edited\nid:: {OWN}"
+
+    def test_a_multi_word_value_is_an_id_too(self):
+        api = _graph()
+        r = _run(["update-block", "--id", TARGET, "--content", "new\nid:: a b c"], api)
+        assert r.exit_code == 0, r.stderr
+        assert "will be dropped" in r.stderr
+        assert api.graph.get_block(TARGET)["content"] == "new"
 
     @pytest.mark.parametrize("extra", [["--dry-run", "--json"], ["--json"]],
                              ids=["dry run", "write"])
@@ -276,3 +302,20 @@ class TestReplaceText:
                   "--replace", "mine"], api)
         assert r.exit_code == 0, r.stderr
         assert api.graph.get_block(OWN)["content"] == f"mine\nid:: {OWN}"
+
+
+class TestTheWritersThatHadIt:
+    def test_insert_block_drops_a_multi_word_id(self):
+        api = _graph()
+        r = _run(["insert-block", "--page", "Page B", "--content", "x\nid:: a b c"], api)
+        assert r.exit_code == 0, r.stderr
+        assert "will be dropped" in r.stderr
+        assert api.graph.tree("Page B")[-1][0] == "x"
+        assert "a b c" not in " ".join(_contents(api.graph))
+
+    def test_keep_ids_refuses_a_multi_word_id(self):
+        api = _graph()
+        r = _run(["insert-block", "--page", "Page B", "--keep-ids", "--json",
+                  "--content", "x\nid:: a b c"], api)
+        assert r.exit_code == 1, (r.stdout, r.stderr)
+        assert json.loads(r.stderr)["invalid_ids"] == ["a b c"]

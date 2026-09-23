@@ -91,15 +91,21 @@ def property_line_mask(lines: list) -> list:
 # Every spelling counts, or one of them would slip past the checks and still
 # set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
 # space is text to Logseq (measured as "k::v", #39) and must not be dropped.
-# After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
-# as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
+# Logseq trims the value: a tab after the space, and a tab, form feed,
+# vertical tab, no-break space or ideographic space after the value, still
+# leave the line the block's id. Only a trailing "\r" does not (all measured,
+# 0.10.15, #56). What is left is the value, spaces inside included: Logseq
+# takes "id:: a b c" as the block's uuid too (measured, #56). A rule that
+# stopped at the first space, or at a no-break space, let such a line past
+# every check here.
 #
 # An id:: line inside a code block is code to Logseq, not the block's id
 # (measured, #43), so only the lines property_line_mask passes count. That
 # holds only as long as the check, the removal and the write see the same
 # blocks: the commands check and clean the parsed outline they write, never
 # the raw text, where a fence opened on a bullet line reads differently.
-_ID_PROPERTY_RE = re.compile(rf'^{_INDENT}(?:id|custom[-_]id):: +(\S+)[ \t]*$',
+_TRIM = r'[^\S\r\n]*'  # whitespace Logseq trims off the value, but not "\r"
+_ID_PROPERTY_RE = re.compile(rf'^{_INDENT}(?:id|custom[-_]id):: +{_TRIM}(\S(?:[^\r\n]*\S)?){_TRIM}$',
                              re.MULTILINE | re.IGNORECASE)
 
 

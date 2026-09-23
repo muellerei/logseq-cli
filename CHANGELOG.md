@@ -106,6 +106,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines is refused on `update-block`, `create-page` and `add-journal-entry`,
   before anything is written, rather than written as an empty block.
   See [#56](https://github.com/muellerei/logseq-cli/issues/56).
+- An `id::` value with a space in it (`id:: a b c`) got past every id check.
+  So did one with whitespace around it that Logseq trims off: a tab after
+  the space, or a no-break space, form feed, vertical tab or ideographic
+  space after the value. The CLI neither dropped nor refused such a line, and
+  Logseq takes it as the block's uuid all the same (each case measured on
+  0.10.15; with spaces inside, the block afterwards stood twice in the page
+  file, one of the two entities without a page). The value is now read the
+  way Logseq reads it, trimmed except for a trailing `\r`, which Logseq does
+  not take. So the line is dropped like any other, and `--keep-ids` refuses
+  a value that is not a valid uuid.
+  See [#56](https://github.com/muellerei/logseq-cli/issues/56).
 
 ## [0.14.0] - 2026-09-23
 
