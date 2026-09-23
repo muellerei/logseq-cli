@@ -974,16 +974,21 @@ def require_content(content: str, option: str = "--content") -> str:
 def read_content_file(path: str, option: str = "--content-file") -> str:
     """Read block content from a file, for ``--content-file``.
 
-    The file is read as UTF-8 and returned verbatim (minus a trailing newline),
-    so tab-indented hierarchies and flush top-level bullets survive unchanged.
-    Unlike ``--content``, no shell quoting sits between the text and the CLI,
-    which is why this is the safe path for content with apostrophes, quotes or
-    umlauts.
+    The file is read as UTF-8 and returned as written (minus a trailing
+    newline), so tab-indented hierarchies and flush top-level bullets survive
+    unchanged. Unlike ``--content``, no shell quoting sits between the text and
+    the CLI, which is why this is the safe path for content with apostrophes,
+    quotes or umlauts. Two things are not text and go: a BOM, and the ``\\r``
+    of a CRLF or CR line ending.
 
     ``-`` reads stdin instead, the convention every Unix tool shares: content
     that is already in a pipe would otherwise need a temporary file, which is
     the one detour this option exists to remove. A file literally named ``-``
     is then unreachable — the convention wins, and ``./-`` still names the file.
+    stdin is read as bytes and decoded here, like the file: ``sys.stdin``
+    decodes by the locale and keeps ``\\r``, so under ``LC_ALL=C`` invalid
+    bytes went on as lone surrogates, and a pipe wrote what the same file
+    did not.
 
     Raises :class:`click.BadParameter` for a missing, unreadable, non-UTF-8 or
     effectively empty file, so the caller fails before any write. ``option``
@@ -991,23 +996,25 @@ def read_content_file(path: str, option: str = "--content-file") -> str:
     here too.
     """
     if path == "-":
-        raw = sys.stdin.read()
-        if not raw.strip():
-            raise click.BadParameter(f"{option} is empty: stdin")
-        return raw.rstrip("\n")
-
+        where = "stdin"
+        data = sys.stdin.buffer.read()
+    else:
+        where = path
+        try:
+            data = Path(path).read_bytes()
+        except FileNotFoundError:
+            raise click.BadParameter(f"{option} not found: {path}")
+        except IsADirectoryError:
+            raise click.BadParameter(f"{option} is a directory: {path}")
+        except OSError as e:
+            raise click.BadParameter(f"{option} cannot be read: {path} ({e})")
     try:
-        raw = Path(path).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise click.BadParameter(f"{option} not found: {path}")
-    except IsADirectoryError:
-        raise click.BadParameter(f"{option} is a directory: {path}")
+        raw = data.decode("utf-8-sig")
     except UnicodeDecodeError as e:
-        raise click.BadParameter(f"{option} is not valid UTF-8: {path} ({e})")
-    except OSError as e:
-        raise click.BadParameter(f"{option} cannot be read: {path} ({e})")
+        raise click.BadParameter(f"{option} is not valid UTF-8: {where} ({e})")
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
     if not raw.strip():
-        raise click.BadParameter(f"{option} is empty: {path}")
+        raise click.BadParameter(f"{option} is empty: {where}")
     return raw.rstrip("\n")
 
 
