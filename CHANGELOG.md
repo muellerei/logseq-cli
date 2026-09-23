@@ -58,6 +58,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Whether a line in a block is a property line was decided by two patterns,
+  and neither agreed with Logseq. `PROPERTY_LINE_RE` (used by `replace-text`,
+  `parse_hierarchical_content` and `get-todos`) accepted no `.` in a key, no
+  `k::` with an empty value and, in `replace-text`, no indentation. Logseq
+  writes `logseq.order-list-type:: number` itself for every block of a
+  numbered list, so `replace-text --find number`
+  rewrote that line like text. The renderer behind `--format markdown` had
+  its own pattern, which took `std::cout << 1` and `k::v` for properties.
+
+  There is now one rule, and it is the rule Logseq reads by, measured against
+  Logseq 0.10.15 by writing 31 kinds of line into page files and reading
+  `:block/properties` back. A key ends at whitespace or at one of the
+  characters #21 measured for the writer; `/` alone reads, as a namespace.
+  It may not start with `#`, and `::` is followed by a space or the end of
+  the line; a tab does not count. Between ``` fences a line is code, not a
+  property, so `replace-text` now replaces in a fenced example instead of
+  answering "No matches", and `get-todos --match` sees it. The writer's
+  forbidden set is derived from the same characters, so `set-property` and
+  the readers cannot drift apart. `id::` lines, which have a rule of their own
+  for every spelling of the key, now need the same space: `id::x` is text to
+  Logseq and is no longer dropped as an id.
+
+  Two changes follow from the wider rule. `parse_hierarchical_content`
+  merged a bulleted property line into whatever block came last, which the
+  narrow rule had kept rare; with umlauts accepted, `- Priorität:: hoch`
+  after a nested detail would have landed inside that detail. A bulleted
+  property line now merges only when it sits deeper than the block above,
+  the shape an agent writes for that block's property (`- ## Plan` /
+  `\t- collapsed:: true`); at the same level or above it is a block of its
+  own, as Logseq reads `- k:: v`. A continuation line without a bullet
+  still always merges. And `--format markdown` drops the bullet only for the
+  page's own properties, its first block; other properties-only blocks, an
+  empty numbered-list item among them, keep it. `get-backlinks
+  --with-context`, which leaves out properties-only blocks as context, now
+  keeps a block reading `std::cout << x [[P]]` and leaves out one reading
+  `a.b:: [[P]]`.
+  See [#39](https://github.com/muellerei/logseq-cli/issues/39).
+
 - `get-todos` left the marker in `content` for `CANCELED` and `WAIT` tasks,
   both markers `set-todo-status` writes itself, and left a bare `TODO` with
   no text as `"TODO"`. The strip was a hand-kept list that had drifted from

@@ -7,12 +7,12 @@ import click
 from logseq_cli.datalog import edn_string
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
-    PROPERTY_LINE_RE,
     find_blocks_by_content,
     journal_day_to_date,
     next_occurrence,
     parse_date_keyword,
     parse_repeater,
+    property_line_mask,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 from logseq_cli.render import BLOCK_REF_RE
@@ -203,7 +203,8 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
         # a ":LOGBOOK:" fragment instead of what it says.
         content_lines = []
         in_logbook = False
-        for line in content.split("\n"):
+        raw_lines = content.split("\n")
+        for line, is_property in zip(raw_lines, property_line_mask(raw_lines)):
             stripped = line.strip()
             if stripped == ":LOGBOOK:":
                 in_logbook = True
@@ -213,7 +214,7 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                 continue
             if in_logbook:
                 continue
-            if PROPERTY_LINE_RE.match(line.lstrip()):
+            if is_property:
                 continue
             if re.match(r"^\s*(SCHEDULED|DEADLINE):\s*<", line):
                 continue

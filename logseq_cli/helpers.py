@@ -526,6 +526,7 @@ def parse_hierarchical_content(content: str) -> list:
     root = []
     stack = [(root, -1)]  # (children_list, indent_level)
     last_node = None
+    last_indent = -1
 
     for line in lines:
         if not line.strip():
@@ -551,15 +552,22 @@ def parse_hierarchical_content(content: str) -> list:
 
         stripped = raw.strip()
         # strip leading '- ' bullet marker
-        if stripped.startswith("- "):
+        bulleted = stripped.startswith("- ")
+        if bulleted:
             stripped = stripped[2:]
 
-        # A property line is never its own block: in Logseq it belongs to the
-        # block whose content precedes it. Merge it into the last created node
-        # regardless of indentation, so pasted outlines carrying
-        # collapsed:: true / id:: ... keep their structure instead of gaining
-        # a bogus content block.
-        if PROPERTY_LINE_RE.match(stripped) and last_node is not None:
+        # A property line without a bullet continues the block above it, as in
+        # Logseq's files, so pasted outlines carrying collapsed:: true / id::
+        # ... keep their structure instead of gaining a bogus content block.
+        # A bulleted one merges only when it sits deeper than that block: the
+        # shape agents write for a property of the block above
+        # ("- ## Plan" / "\t- collapsed:: true", a 22-block plan insert on
+        # 2026-08-10). At the same level or above, Logseq reads "- k:: v" as a
+        # block of its own (measured, 0.10.15), and merging it would move it
+        # into whatever block came last, e.g. "- Priorität:: hoch" after a
+        # nested detail (#39).
+        if (PROPERTY_LINE_RE.match(stripped) and last_node is not None
+                and (not bulleted or indent > last_indent)):
             last_node["content"] += "\n" + stripped
             continue
 
@@ -572,14 +580,45 @@ def parse_hierarchical_content(content: str) -> list:
         stack[-1][0].append(node)
         stack.append((node["children"], indent))
         last_node = node
+        last_indent = indent
 
     return root
 
 
 # A block's content carries its property lines verbatim (id:: <uuid>, key:: val).
-# Shared by replace-text in cli.py (must never rewrite them) and
-# parse_hierarchical_content (must never turn them into blocks).
-PROPERTY_LINE_RE = re.compile(r'^[A-Za-z0-9_?!*+<>=-]+:: ')
+# This is the one rule for what counts as one; every reader that tells
+# property lines from text goes through it or through property_line_mask,
+# which also knows code fences. (No list of readers here: it would drift.)
+#
+# It is the rule Logseq reads by, measured against 0.10.15 by writing lines
+# into a page file and reading :block/properties back. A key ends at
+# whitespace or at one of _PROPERTY_KEY_STOP, may not start with '#', and '::'
+# is followed by a space or the end of the line (a tab does not count). So
+# 'logseq.order-list-type:: number', which Logseq writes for numbered lists,
+# 'k::' and an indented '  k:: v' are properties; 'std::cout', 'k::v' and
+# 'a,b:: x' are text. The stop characters are the ones #21 measured for the
+# writer, so what set-property writes and what this reads cannot disagree;
+# '/' alone differs, see _PROPERTY_KEY_FORBIDDEN.
+_PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
+PROPERTY_LINE_RE = re.compile(rf'^[ \t]*(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)')
+
+
+def property_line_mask(lines: list) -> list:
+    """For each line of a block's content, whether Logseq reads it as a property.
+
+    PROPERTY_LINE_RE judges one line alone; between ``` fences the same text is
+    code, not a property (measured, 0.10.15). Readers that walk a block's lines
+    take this mask, so a --find inside a fenced example is replaced and a
+    get-todos --match sees it.
+    """
+    mask, in_fence = [], False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            mask.append(False)
+            continue
+        mask.append(not in_fence and bool(PROPERTY_LINE_RE.match(line)))
+    return mask
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
@@ -593,8 +632,9 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # and custom-id / custom_id are renamed to id (extract-properties, measured in
 # #21). A copied block also carries the line indented, as it sits in the file.
 # Every spelling counts, or one of them would slip past the checks below and
-# still set the uuid.
-_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: *(\S+) *$',
+# still set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
+# space is text to Logseq (measured as "k::v", #39) and must not be dropped.
+_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+) *$',
                              re.MULTILINE | re.IGNORECASE)
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot
@@ -1499,7 +1539,7 @@ def coerce_property_value(value: str):
 # it makes a namespaced keyword, and "a/b" survives only as "b". So is the
 # parser's third rename, "custom-id" to "id": measured, it makes the value the
 # block's uuid on re-read, even when the value is no uuid at all.
-_PROPERTY_KEY_FORBIDDEN = re.compile(r'[:,;/\\\[\](){}|^"@~`]')
+_PROPERTY_KEY_FORBIDDEN = re.compile(rf'[/{_PROPERTY_KEY_STOP}]')
 _PROPERTY_KEYS_READ_AS_ID = {"custom-id"}
 
 
