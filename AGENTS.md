@@ -55,7 +55,25 @@ logseq-cli get-page --name "Page Name" --json
 
 # Logseq-compatible markdown (for export)
 logseq-cli get-page --name "Page Name" --format markdown --no-backlinks
+
+# Large page: outline first (headings + uuids, nested as the sections are),
+# then one section
+logseq-cli get-page --name "Page Name" --outline
+logseq-cli get-page --name "Page Name" --heading "## Log"
+
+# Cut to size; stderr names what was withheld and the block to continue at
+logseq-cli get-page --name "Page Name" --max-chars 20000
+logseq-cli get-page --name "Page Name" --max-chars 20000 --from-block <uuid>
 ```
+
+Do not cut a read with `head`: the cut lands mid-block and nothing says what
+is missing. `--max-chars` cuts between blocks and reports the rest. It counts
+what is printed, so `--json` reaches it several times sooner. Repeat the
+command with `--from-block` and the uuid from the note until the note names
+no `--from-block`. A note that names the `--max-chars` a block needs instead
+ends the chain: raise the cap, or read that block alone with
+`get-block --id <uuid> --no-children`. The same
+two flags work on `get-journal-range`.
 
 ### 2. Write to Journal
 

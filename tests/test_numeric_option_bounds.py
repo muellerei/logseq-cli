@@ -16,6 +16,8 @@ The minimum differs per option and that is deliberate, not an oversight:
   --refs-limit``, so their boundary is ``< 0``.
 - ``0`` is meaningless for ``find-block --limit`` and ``get-journal-range
   --tail/--limit`` — no caller wants zero matches — so theirs is ``< 1``.
+  ``--max-chars`` on ``get-page`` and ``get-journal-range`` likewise: zero
+  characters is no read at all.
 - ``suggest-connections --max-suggestions 0`` returned an empty list announced
   as "No connections found above confidence threshold", blaming the graph for
   what the flag did: refused as well.
@@ -68,6 +70,7 @@ REQUIRED_ARGS = {
     "find-block": ["--content", "x"],
     "get-backlinks": ["--name", "Alice"],
     "get-journal-range": ["--from", "2026-09-01", "--to", "2026-09-02"],
+    "get-page": ["--name", "x"],
     "init": ["--dry-run"],
 }
 
@@ -108,7 +111,7 @@ class TestTheScanItself:
         and a later change to ``default=None`` would drop the option out of
         this scan without failing anything.
         """
-        assert len(_bounded_options()) >= 8, (
+        assert len(_bounded_options()) >= 10, (
             f"only {len(_bounded_options())} bounded options found; the type "
             "detection probably stopped matching"
         )

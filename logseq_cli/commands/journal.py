@@ -40,11 +40,13 @@ from logseq_cli.helpers import (
     uuid_fields,
     without_block_ids,
 )
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (
     blocks_to_markdown,
+    bound,
     count_unresolved_refs,
     extract_section,
+    first_uuids,
     resolve_refs_in_blocks,
 )
 
@@ -142,6 +144,11 @@ Notes:
   Output grows with the range - a month of journals is large. Narrow it with
   --tail N (newest N days), --limit N (oldest N days) and/or --heading "## Log".
   --tail/--limit apply BEFORE fetching, so skipped days cost no API calls.
+  --max-chars cuts the blocks so the output fits, measured in the format
+  printed (a block in --json is several times its text), oldest day first,
+  between blocks. Days past the cut are not printed; stderr names them and the block
+  to continue from with --from-block, or, for a block that does not fit, the
+  --max-chars it needs.
   Parallel pool (default 5 workers, 1-16 via LOGSEQ_CLI_RANGE_WORKERS).
   Always pass --resolve-refs if downstream parses ((uuid)) refs.
   Per-day errors embed as {error: "..."} per entry; range continues.
@@ -152,11 +159,13 @@ Notes:
 @click.option("--tail", "tail", default=None, type=int, help="Only the newest N journal days of the range, 1 or greater (applied before fetching)")
 @click.option("--limit", "limit", default=None, type=int, help="Only the oldest N journal days of the range, 1 or greater (applied before fetching)")
 @click.option("--heading", default=None, help="Return only the section under this heading per day (e.g. '## Log')")
+@click.option("--max-chars", "max_chars", type=int, default=None, help="Cut the blocks so the output fits in N characters, 1 or greater, oldest day first. The cut falls between blocks; what is withheld is reported on stderr and, with --json, as 'withheld'/'cut' fields on the day it fell in. Day headers are not cut")
+@click.option("--from-block", "from_block", default=None, help="Start at this block, as named by a --max-chars note: days and blocks before it are skipped, its ancestors kept as context")
 @click.option("--format", "output_format", type=click.Choice(["text", "markdown"]), default="text", help="Output format: text (default) or markdown")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, heading, output_format, as_json):
+def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, heading, max_chars, from_block, output_format, as_json):
     """Get full block content for all journal pages in a date range (inclusive).
 
     Returns one entry per journal day, with blocks and page name.
@@ -178,6 +187,8 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
         fail("--limit must be 1 or greater.", as_json)
     if tail is not None and limit is not None:
         fail("--tail and --limit are mutually exclusive.", as_json)
+    if max_chars is not None and max_chars < 1:
+        fail("--max-chars must be 1 or greater.", as_json)
 
     start = datetime.datetime.combine(parse_date_keyword(from_date), datetime.time())
     end = datetime.datetime.combine(parse_date_keyword(to_date), datetime.time())
@@ -261,6 +272,46 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
             err=True,
         )
 
+    def _render(entries):
+        if as_json:
+            return json_text(entries) + "\n"
+        out = []
+        for entry in entries:
+            err = entry.get("error")
+            withheld = entry.get("withheld")
+            if output_format == "markdown":
+                out.append(f"# {entry['page']}\n\n")
+                if err:
+                    out.append(f"!! ERROR: {err}\n\n")
+                elif entry["blocks"]:
+                    starts = entry["blocks"][0].get("uuid") == first_uuid.get(entry["page"])
+                    out.append(blocks_to_markdown(entry["blocks"], page_start=starts) + "\n")
+                elif withheld:
+                    out.append(f"({withheld} block(s) withheld by --max-chars)\n\n")
+                else:
+                    out.append("(empty)\n\n")
+            else:
+                out.append(f"=== {entry['page']} ===\n\n")
+                if err:
+                    out.append(f"!! ERROR: {err}\n")
+                elif entry["blocks"]:
+                    out.append(process_blocks(entry["blocks"]) + "\n")
+                elif withheld:
+                    out.append(f"({withheld} block(s) withheld by --max-chars)\n")
+                else:
+                    out.append("(empty)\n")
+                out.append("\n")
+        return "".join(out)
+
+    first_uuid = first_uuids(entries)
+    try:
+        entries, note = bound(entries, _render, max_chars, from_block, "day")
+    except LookupError as exc:
+        fail(str(exc), as_json)
+    if note:
+        click.echo(note, err=True)
+
+    # After the cap: the warning speaks about what is printed.
     if not resolve_refs:
         total_refs = sum(count_unresolved_refs(e.get("blocks", [])) for e in entries)
         if total_refs > 0:
@@ -270,28 +321,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
                 err=True,
             )
 
-    if as_json:
-        output(entries, True)
-    else:
-        for entry in entries:
-            err = entry.get("error")
-            if output_format == "markdown":
-                click.echo(f"# {entry['page']}\n")
-                if err:
-                    click.echo(f"!! ERROR: {err}\n")
-                elif entry["blocks"]:
-                    click.echo(blocks_to_markdown(entry["blocks"]))
-                else:
-                    click.echo("(empty)\n")
-            else:
-                click.echo(f"=== {entry['page']} ===\n")
-                if err:
-                    click.echo(f"!! ERROR: {err}")
-                elif entry["blocks"]:
-                    click.echo(process_blocks(entry["blocks"]))
-                else:
-                    click.echo("(empty)")
-                click.echo()
+    click.echo(_render(entries), nl=False)
 
 @cli.command("add-journal-entry", epilog="""\b
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
