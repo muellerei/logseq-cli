@@ -1136,20 +1136,29 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str, *, keep_ids: bo
     return new
 
 
-def _child_uuids_in_order(api, parent_id) -> list:
-    """Child UUIDs of a block addressed by its numeric id, in order.
+def _sibling_uuids_in_order(api, block: dict) -> list:
+    """UUIDs of ``block`` and its siblings, in order.
 
     ``getBlock`` reports a parent as ``{"id": <int>}`` with no UUID, but it also
-    accepts that id as its argument, so the parent's child list is reachable in
-    one read without walking the page tree.
+    accepts that id as its argument, so a nested block's sibling list is
+    reachable in one read without walking the page tree.
+
+    That does not hold at the top level. There the parent is the page, and
+    ``getBlock`` answers ``null`` for a page id (measured, 0.10.15), so the
+    order comes from the page tree. ``getPageBlocksTree`` in turn refuses a
+    numeric id ("Expected string, got: number") and needs the page name first.
     """
+    parent_id = (block.get("parent") or {}).get("id")
     if parent_id is None:
         return []
-    parent = api.get_block(parent_id, include_children=True) or {}
-    return [
-        c.get("uuid") for c in (parent.get("children") or [])
-        if isinstance(c, dict) and c.get("uuid")
-    ]
+    if parent_id == (block.get("page") or {}).get("id"):
+        page = api.get_page(parent_id) or {}
+        children = api.get_page_blocks_tree(page["name"]) if page.get("name") else None
+    else:
+        children = (api.get_block(parent_id, include_children=True) or {}).get("children")
+    if not isinstance(children, list):
+        return []
+    return [c.get("uuid") for c in children if isinstance(c, dict) and c.get("uuid")]
 
 
 def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool = False) -> list:
@@ -1228,6 +1237,32 @@ def resolve_single_block(api, content: str, page: str = None, use_regex: bool = 
     return uuid
 
 
+def check_move(api, src_uuid: str, target_uuid: str) -> None:
+    """Refuse a move Logseq would not carry out, before anything is written.
+
+    Shared by the move and its dry run, so a preview cannot promise a move the
+    real run refuses. The subtree case is the one refusal Logseq is known for,
+    and it gives it by doing nothing, so this is the only place it can be named.
+    """
+    src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
+    target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
+    if src_uuid == target_uuid:
+        raise click.ClickException("Source and target are the same block.")
+
+    source = api.get_block(src_uuid, include_children=True)
+    if not source:
+        raise click.ClickException(
+            f"Source block {src_uuid[:8]}... not found. Nothing was moved.")
+    if not api.get_block(target_uuid, include_children=False):
+        raise click.ClickException(
+            f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
+    if target_uuid in _collect_child_uuids(source):
+        raise click.ClickException(
+            f"Target {target_uuid[:8]}... lies inside the subtree of "
+            f"{src_uuid[:8]}...; a block cannot be moved into its own subtree. "
+            "Nothing was moved.")
+
+
 def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = False) -> None:
     """Move ``src_uuid`` to ``target_uuid``, then prove it landed.
 
@@ -1243,22 +1278,16 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
 
     ``moveBlock`` answers ``null`` for a successful move, a non-existent target
     AND a refused one (Logseq declines to move a block into its own subtree, and
-    says so only by doing nothing), so the response proves nothing. The move is
-    verified by re-reading: the block must have changed parent, and for a child
-    move it must appear among the target's children. See the note above
-    :func:`require_insert` for when this read can be dropped.
+    says so only by doing nothing), so the response proves nothing. The subtree
+    case is therefore refused here before the call, where it can be named, and
+    the move itself is verified by re-reading: for a child move the block must
+    appear among the target's children, for ``before`` directly in front of the
+    target. See the note above :func:`require_insert` for when this read can be
+    dropped.
     """
     src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
     target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
-    if src_uuid == target_uuid:
-        raise click.ClickException("Source and target are the same block.")
-
-    if not api.get_block(src_uuid, include_children=False):
-        raise click.ClickException(
-            f"Source block {src_uuid[:8]}... not found. Nothing was moved.")
-    if not api.get_block(target_uuid, include_children=False):
-        raise click.ClickException(
-            f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
+    check_move(api, src_uuid, target_uuid)
     api.move_block(src_uuid, target_uuid, {"before": True} if before else {"children": True})
 
     landed = api.get_block(target_uuid, include_children=True) or {}
@@ -1266,7 +1295,7 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
         # The block must sit directly in front of the target under the same
         # parent. Checking only "same parent" would pass a move that did
         # nothing, since source and target often already share one.
-        siblings = _child_uuids_in_order(api, (landed.get("parent") or {}).get("id"))
+        siblings = _sibling_uuids_in_order(api, landed)
         try:
             ok = siblings.index(src_uuid) + 1 == siblings.index(target_uuid)
         except ValueError:
@@ -1279,9 +1308,8 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
     if not ok:
         raise click.ClickException(
             f"Move of {src_uuid[:8]}... did not take effect. Logseq reports no error "
-            "for this, so the graph was re-read to check. A block cannot be moved "
-            "into its own subtree; check that the target is not a descendant of the "
-            "source. Nothing was removed."
+            "for this, so the graph was re-read to check; the block is not where it "
+            "was sent. Nothing was removed."
         )
 
 
