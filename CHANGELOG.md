@@ -42,6 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `add-block-ref` wrote a ref to a block that does not exist. Only
+  `--dry-run` looked the source up, and it warned and exited 0; the real call
+  wrote `((uuid))` for a mistyped uuid, exit 0, and the ref rendered as
+  nothing. Measured against 0.10.15, a plain lookup is not enough either:
+  once the page holding a dead ref is read from its file again, `getBlock`
+  answers that uuid with a placeholder, a block without a page. The source is
+  now looked up before the page or the heading is written, `--dry-run`
+  included, and anything but a block on a page is refused. The ref carries
+  the uuid Logseq hands back: `" <uuid>"` from a copy wrote `(( <uuid>))`,
+  which Logseq does not read as a reference, and a uuid in capitals is found
+  as well. Input that was no uuid at all could create the heading before a
+  later check refused it with "Nothing was written"; it is refused first now,
+  exit 1 as a missing block rather than exit 2.
+  See [#70](https://github.com/muellerei/logseq-cli/issues/70).
 - `add-journal-block --upsert-heading` dropped the properties of the block it
   replaced: it called `updateBlock` with the new text alone, and measured
   against 0.10.15, a `prio:: 1` line was gone afterwards (the `id::` line
