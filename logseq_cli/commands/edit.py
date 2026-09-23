@@ -378,7 +378,8 @@ Notes:
   --first puts the block at the HEAD of the child list instead of appending it
   last; it only applies together with --child-of.
   id:: lines (in --tree or --content) are dropped unless --keep-ids is given,
-  and the command says so. Use --keep-ids when moving or restoring an outline.
+  and the command says so; text that is nothing but id:: lines is refused.
+  Use --keep-ids when moving or restoring an outline.
   It restores an id that survives only as a ((ref)) target, and refuses,
   before writing anything, an id a block or page still has (the copy case:
   drop --keep-ids) and a second id:: line in one block.

@@ -10,6 +10,7 @@ since #30. Measured against 0.10.15, the page file read again:
   the caller's line is gone from the file (#66). A key only the text sets
   lands as written.
 """
+import json
 from unittest.mock import patch
 
 import pytest
@@ -87,3 +88,59 @@ class TestUpdateBlockLetsTheNewTextWin:
         assert r.exit_code == 0, r.output
         assert "keeps: owner::" in r.output and "prio::" not in r.output.split("keeps:")[1]
         assert _content(graph) == "old\nprio:: 1\nowner:: bob"
+
+
+# --- add-journal-block --upsert-heading (#67) ---------------------------------
+
+HEADING = "8f2a3b4c-5d6e-4f70-8a9b-0c1d2e3f4a81"
+DAY = "2026-01-05"
+
+
+def _journal(content):
+    graph = PageGraph({DAY: [{"uuid": HEADING, "content": "## Log", "children": [
+        {"uuid": BLOCK, "content": content}]}]})
+    return graph, page_graph_api(graph)
+
+
+def _upsert(api, *content):
+    return _run(["add-journal-block", "--date", DAY, "--under-heading", "## Log",
+                 "--upsert-heading", "### X", "--content", *content], api)
+
+
+def _matched(graph):
+    return graph.page_named(DAY)["blocks"][0]["children"][0]
+
+
+class TestUpsertKeepsProperties:
+    @pytest.mark.parametrize("content", ["### X new", "- ### X new\n\t- kid"],
+                             ids=["flat", "tree"])
+    def test_the_replaced_block_keeps_them(self, content):
+        graph, api = _journal(f"### X\nprio:: 1\nid:: {BLOCK}")
+        r = _upsert(api, content)
+        assert r.exit_code == 0, r.output
+        block = _matched(graph)
+        assert block["uuid"] == BLOCK
+        assert block["content"].split("\n") == ["### X new", "prio:: 1", f"id:: {BLOCK}"]
+
+    def test_a_key_the_new_text_sets_is_its_own(self):
+        graph, api = _journal("### X\nprio:: 1")
+        r = _upsert(api, "### X new\nprio:: 2")
+        assert r.exit_code == 0, r.output
+        assert _matched(graph)["content"].split("\n") == ["### X new", "prio:: 2"]
+
+
+class TestUpsertThatWouldEmptyTheBlock:
+    """#67: the first root replaces the matched block's text. One that was
+    nothing but its id would leave the block without its heading."""
+
+    @pytest.mark.parametrize("extra", [[], ["--json"]], ids=["text", "json"])
+    @pytest.mark.parametrize("siblings", ["", "\n- more"], ids=["alone", "with a sibling"])
+    def test_refused_before_any_write(self, extra, siblings):
+        graph, api = _journal("### X\nprio:: 1")
+        r = _upsert(api, f"- id:: {FOREIGN}\n\t- kid{siblings}", *extra)
+        assert r.exit_code == 1
+        assert "will be dropped" not in r.stderr
+        assert "nothing but id:: lines" in r.stderr
+        if extra:
+            assert json.loads(r.stderr)["dropped_ids"] == [FOREIGN]
+        assert _matched(graph) == {"uuid": BLOCK, "content": "### X\nprio:: 1", "children": []}

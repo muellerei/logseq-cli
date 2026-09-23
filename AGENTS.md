@@ -330,7 +330,10 @@ Every command that writes a block's text applies this. `insert-block`
 (`--tree` and `--content`), `add-note-content`, `add-journal-block`,
 `add-journal-content`, `create-page --content` and the deprecated
 `add-journal-entry` remove the `id::` lines from the content and say how many
-ids they dropped, on stderr. `update-block` keeps the block's own `id::` line,
+ids they dropped, on stderr. Text that is nothing but `id::` lines is refused
+before anything is written, since nothing would be left to write; one empty
+block among others is written, as a copied block that held only its id was
+empty. `update-block` keeps the block's own `id::` line,
 the one `get-block` returns, so a block read and written back keeps its uuid;
 a line naming another uuid is dropped with a note, since it would become this
 block's uuid. `copy-block` drops the source's lines without a word: the copy
@@ -354,7 +357,8 @@ with new ids, or use `move-block`). An id that survives only as the target of a
 `((ref))` elsewhere is restored: that is the restore case, a deleted block
 written back from a copy, and the refs resolve again.
 `add-journal-block` rejects the flag with `--upsert-heading`, which rewrites a
-block that already exists (that block keeps its uuid), and with
+block that already exists (that block keeps its uuid and, as with
+`update-block`, its properties), and with
 `--no-preserve`, which joins the lines and turns `id::` into plain text.
 
 ### 6. Connection Errors

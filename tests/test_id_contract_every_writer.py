@@ -319,3 +319,57 @@ class TestTheWritersThatHadIt:
                   "--content", "x\nid:: a b c"], api)
         assert r.exit_code == 1, (r.stdout, r.stderr)
         assert json.loads(r.stderr)["invalid_ids"] == ["a b c"]
+
+
+class TestTextThatWasOnlyIdsWritesNothing:
+    """#67: the tree writers drop id:: lines as update-block does, and text
+    that was nothing but them left an empty block, or with --upsert-heading
+    emptied the block it replaced, at exit 0."""
+
+    @pytest.mark.parametrize("args", [
+        ["add-journal-block", *DATE],
+        ["add-journal-block", *DATE, "--content", f"id:: {TEXT_ID}"],
+        ["add-journal-block", *DATE, "--under-heading", "## Log", "--upsert-heading", "own"],
+        ["add-journal-content", *DATE],
+        ["add-note-content", "--page", "Page B"],
+        ["insert-block", "--page", "Page B"],
+        ["insert-block", "--child-of", TARGET],
+    ], ids=["add-journal-block", "add-journal-block, two values", "--upsert-heading",
+            "add-journal-content", "add-note-content", "insert-block --page",
+            "insert-block --child-of"])
+    def test_refused_before_any_write(self, args):
+        api = _graph()
+        before = _contents(api.graph)
+        r = _run([*args, "--content", f"id:: {FOREIGN}"], api)
+        assert r.exit_code != 0
+        assert "nothing but id:: lines" in r.stderr
+        assert "will be dropped" not in r.stderr  # no note ahead of the refusal
+        assert _contents(api.graph) == before
+        assert api.create_page.call_count == 0
+
+    def test_under_json_the_refusal_is_the_error_object(self):
+        r = _run(["add-note-content", "--page", "Page B", "--json",
+                  "--content", f"id:: {FOREIGN}"], _graph())
+        assert r.exit_code == 1
+        assert json.loads(r.stderr)["dropped_ids"] == [FOREIGN]
+
+    def test_upsert_leaves_the_block_it_would_replace(self):
+        api = page_graph_api(PageGraph({"2026-01-05": [{"content": "## Log", "children": [
+            {"uuid": TARGET, "content": "### X\nprio:: 1"}]}]}))
+        r = _run(["add-journal-block", *DATE, "--under-heading", "## Log",
+                  "--upsert-heading", "### X", "--content", f"id:: {FOREIGN}"], api)
+        assert r.exit_code != 0
+        assert api.graph.get_block(TARGET)["content"] == "### X\nprio:: 1"
+
+    @pytest.mark.parametrize("content, written", [
+        (f"- text\n- id:: {FOREIGN}", [("text", []), ("", [])]),
+        (f"- id:: {FOREIGN}\n\t- kid", [("", [("kid", [])])]),
+    ], ids=["beside text", "above text"])
+    def test_an_empty_block_among_others_is_written(self, content, written):
+        # A copied outline may hold a block that was nothing but its id; it
+        # stays an empty block, as it was. Only a write with nothing left is
+        # refused.
+        api = _graph()
+        r = _run(["add-note-content", "--page", "Page B", "--content", content], api)
+        assert r.exit_code == 0, r.stderr
+        assert api.graph.tree("Page B")[1:] == written

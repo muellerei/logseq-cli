@@ -42,6 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `add-journal-block --upsert-heading` dropped the properties of the block it
+  replaced: it called `updateBlock` with the new text alone, and measured
+  against 0.10.15, a `prio:: 1` line was gone afterwards (the `id::` line
+  stays, Logseq writes it back itself). The replacement now carries them the
+  way `update-block` does, a key the new text sets included (#66).
+  On the same path, text that was nothing but `id::` lines was dropped to
+  nothing and overwrote the matched block with an empty text, reporting
+  "updated"; `add-journal-block`, `add-journal-content`, `add-note-content`
+  and `insert-block` wrote an empty block in that case. Each refuses it now
+  before anything is written, as `update-block`, `create-page` and
+  `add-journal-entry` already did, here under `--json` as an error object
+  with `dropped_ids`; so does an
+  upsert whose first root was nothing but its id, which would have emptied
+  the block's heading. An empty block among others is still written: a
+  copied block that held only its id was empty.
+  See [#67](https://github.com/muellerei/logseq-cli/issues/67).
 - `update-block` kept a property's old value over the one `--content` sets.
   It passes the block's properties back so the update does not drop them
   (#30), and measured against 0.10.15, Logseq lets a passed value win over a

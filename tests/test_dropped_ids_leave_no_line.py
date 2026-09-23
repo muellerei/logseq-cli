@@ -108,8 +108,6 @@ def test_the_echo_reads_back_as_the_outline_written():
 # --keep-ids a uuid another block has went out with keepUUID.
 FLAT_WRITTEN_LATER = {
     "carriage return": (["--content", f"Restored\nid:: {ID}\r"], True),
-    # Joined, "id::\n<uuid>" becomes the id line "id:: <uuid>".
-    "joined by --no-preserve": (["--no-preserve", "--content", f"id::\n{ID}"], False),
 }
 
 
@@ -128,6 +126,19 @@ def test_a_flat_value_is_checked_as_written(name):
             r = split_runner().invoke(cli, base + ["--keep-ids"])
         assert r.exit_code == 1
         assert "already belong" in r.stderr
+
+
+def test_a_value_joined_into_an_id_line_is_checked_as_joined():
+    # Joined by --no-preserve, "id::\n<uuid>" becomes the id line
+    # "id:: <uuid>": checked as the text before joining, it was text, and
+    # went out as an id. With nothing besides it, it is refused (#67).
+    api = page_graph_api(PageGraph({"Page A": [{"uuid": ID, "content": "original"}]}))
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
+        r = split_runner().invoke(cli, ["add-journal-block", "--top-level", *DATE,
+                                        "--no-preserve", "--content", f"id::\n{ID}"])
+    assert r.exit_code == 1
+    assert "nothing but id:: lines" in r.stderr
+    assert not [c for c in _contents(api.graph) if ID in c]
 
 
 # The text is prepared once and written as prepared. Stripping the title

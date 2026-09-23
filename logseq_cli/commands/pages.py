@@ -543,7 +543,8 @@ Examples:
 Note:
   Counterpart of add-journal-block --under-heading for non-journal pages.
   Heading is created if missing.
-  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  id:: lines are dropped unless --keep-ids is given, and the command says so;
+  text that is nothing but id:: lines is refused.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
   A code block stays one block: from a ``` or ~~~ line to the next such line
   without a bullet, every line is code. Without a bullet the fence goes on
