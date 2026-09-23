@@ -59,6 +59,12 @@ ambiguous match. Distinct from a failure: nothing broke, and no data was
 touched.
 _Avoid_: error, rejection
 
+**Note**:
+A line on stderr, starting `Note:`, that tells the caller something without
+refusing: what the tool changed on the way, what it left out of the output, or
+what Logseq will make of the text. A Refusal may still follow it.
+_Avoid_: hint, info
+
 **Strict Insert**:
 The contract that a write either lands where it was asked to land or is
 refused. It exists because Logseq answers some failed writes with HTTP 200 and

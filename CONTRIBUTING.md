@@ -141,7 +141,8 @@ logseq-cli/
   stderr under that flag, where Click writes a usage dump that no caller can
   parse. This applies to what a command checks itself; the shared parsers in
   `helpers.py` (dates, tree JSON, `--content-file`) still raise `BadParameter`,
-  so an unparseable `--from` exits 2 while a reversed range exits 1. That is a
+  so an unparseable `--from` exits 2 while a reversed range exits 1, and the
+  either/or of `--content` and `--content-file` raises `UsageError`. That is a
   known inconsistency, not a pattern to copy.
 - **German + English.** `smart-query` keywords support both languages.
 - **References name symbols, not line numbers.** A comment pointing at
