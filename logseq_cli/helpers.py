@@ -354,6 +354,18 @@ def parse_date_range(range_str: str) -> tuple:
     )
 
 
+def bullet_lines(content: str, prefix: str) -> list:
+    """One block's text as lines of an outline, its bullet after ``prefix``.
+
+    The further lines sit under the bullet, two spaces in, blank ones too:
+    the layout Logseq writes to the page file (measured, #75). Logseq reads
+    them back at column 0 as well, but a reader cannot tell which block such
+    a line belongs to, and a property line there looks like the page's own.
+    """
+    first, *rest = content.split("\n")
+    return [f"{prefix}- {first}", *(f"{prefix}  {line}" for line in rest)]
+
+
 def process_blocks(blocks, indent: int = 0) -> str:
     """Recursively format blocks as indented text."""
     lines = []
@@ -361,7 +373,7 @@ def process_blocks(blocks, indent: int = 0) -> str:
     for block in blocks:
         content = block.get("content", "")
         if content:
-            lines.append(f"{prefix}- {content}")
+            lines.extend(bullet_lines(content, prefix))
         children = block.get("children", [])
         if children:
             lines.append(process_blocks(children, indent + 1))
@@ -570,13 +582,11 @@ def outline_text(tree: list) -> str:
 
     For showing what a command writes after it has changed the parsed tree
     (dropped id:: lines): derived from that tree, the preview cannot disagree
-    with the write. A block's further lines sit under its bullet, indented.
+    with the write.
     """
     def walk(blocks, depth):
         for block in blocks:
-            first, *rest = (block.get("content") or "").split("\n")
-            yield "\t" * depth + "- " + first
-            yield from ("\t" * depth + "  " + line for line in rest)
+            yield from bullet_lines(block.get("content") or "", "\t" * depth)
             yield from walk(block.get("children") or [], depth + 1)
     return "\n".join(walk(tree or [], 0))
 
