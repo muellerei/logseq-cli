@@ -42,6 +42,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A page alias was read and written as a page of its own. Logseq's HTTP API
+  does not resolve an alias, so `get-page --name <alias>` answered an empty
+  page with exit 0, `get-properties` `{}`, `get-page-stats` 0 blocks, and
+  `find-block --page` found nothing; `add-note-content --page <alias>`
+  and `set-property` wrote to a file of the alias's own, which Logseq does not
+  show under that name, and reported success. Every command with a page name
+  now means the page Logseq would open: a name whose page is empty or a
+  placeholder, and that a page names in its own `alias::` property, means
+  that page, as `get-redirect-page-name` decides in Logseq's UI. Measured on
+  Logseq 0.10.15 with a file graph, 2026-09-23; on the unsupported DB version
+  an alias is not followed. Under `--json` a result that names the page keeps
+  the name given in `page`, and `alias_of` names the page used. Where it differs from
+  Logseq, it says so: an alias two pages claim is refused with both named,
+  where Logseq takes the first, and `delete-page` and `rename-page` refuse an
+  alias and name the page, since they cannot be undone. `:block/alias` alone
+  was not enough to find the page: it links a whole alias group, and an alias
+  that once got a file matched too. The reasoning is in
+  [ADR 0002](docs/adr/0002-a-page-name-means-what-logseq-means.md).
+  See [#63](https://github.com/muellerei/logseq-cli/issues/63).
 - `replace-text` without `--regex` read backslashes in `--replace` as escapes,
   while `--find` was matched literally: `--replace 'C:\new'` wrote a line
   break, and the read-back check agreed, since the block held what had been
