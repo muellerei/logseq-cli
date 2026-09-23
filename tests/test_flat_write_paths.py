@@ -26,7 +26,8 @@ def _dead_api():
     api.get_page.return_value = {"name": "journal"}
     api.get_page_blocks_tree.return_value = [
         {"uuid": "head", "content": "## Log", "children": []}]
-    api.get_block.return_value = {"uuid": "head", "content": "## Log", "children": []}
+    api.get_block.return_value = {"uuid": "head", "content": "## Log", "children": [],
+                                  "page": {"id": 1}}
     api.insert_block.return_value = None
     api.append_block_in_page.return_value = None
     api.create_page.return_value = None
@@ -88,6 +89,7 @@ class TestAddBlockRef:
                 "--under-heading", "## Log"])
         assert r.exit_code == 1
         assert "Added block-ref" not in r.output
+        assert "did not create the block-ref" in r.output
 
     def test_successful_ref_reports_its_uuid(self):
         api = _live_api("ref-uuid")
