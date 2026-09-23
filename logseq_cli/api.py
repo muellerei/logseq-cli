@@ -3,6 +3,12 @@ import os
 import time
 import requests
 
+# Every write of block text is checked here, whichever command sent it: text
+# written as one block must come back from the page file as that block (#47).
+# The commands check first, for their own way out in the message; this is the
+# net no write path can go around.
+from logseq_cli.blocktext import refuse_split_block, refuse_split_property, refuse_split_tree
+
 
 # Methods that are pure reads and safe to cache.
 # Deliberately absent: logseq.Editor.getPageProperties. It is declared in
@@ -215,12 +221,14 @@ class LogseqAPI:
         # so customUUID works here as it does there, and is refused the same way
         # for a placeholder's uuid. --keep-ids writes go through insertBatchBlock
         # instead (#31).
+        refuse_split_block(content, command="logseq-cli", where="The text")
         args = [page_name, content]
         if options:
             args.append(options)
         return self.call("logseq.Editor.appendBlockInPage", args)
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
+        refuse_split_block(content, command="logseq-cli", where="The text")
         return self.call(
             "logseq.Editor.insertBlock", [block_uuid, content, options or {}]
         )
@@ -240,6 +248,7 @@ class LogseqAPI:
         ``before: false`` does not change that, so appending means anchoring on
         the last existing child with ``sibling: true``.
         """
+        refuse_split_tree(batch, command="logseq-cli", single_label="The text")
         return self.call(
             "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}]
         )
@@ -254,7 +263,8 @@ class LogseqAPI:
             "logseq.Editor.moveBlock", [src_uuid, target_uuid, options or {}]
         )
 
-    def update_block(self, block_uuid: str, content: str, properties: dict = None):
+    def update_block(self, block_uuid: str, content: str, properties: dict = None, *,
+                     replacing: str = None):
         """Replace a block's content, optionally carrying its properties along.
 
         Block properties live *inside* the content (``prio:: 1`` as a line of
@@ -269,7 +279,12 @@ class LogseqAPI:
         and writing it back turned ``due-date::`` into ``duedate::`` and
         ``zip:: 01234`` into ``zip:: 1234`` (measured, Logseq 0.10.15). ``id::`` is part of the map and is written
         back unchanged, so block references stay intact.
+
+        ``replacing`` is the text this replaces, for a caller that changes a
+        block rather than writing one: a line it already had passes the check
+        every write here goes through (#47).
         """
+        refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         args = [block_uuid, content]
         if properties:
             args.append({"properties": properties})
@@ -284,6 +299,7 @@ class LogseqAPI:
 
     def upsert_block_property(self, block_uuid: str, key: str, value):
         """Set or update a property on a block."""
+        refuse_split_property(key, value)
         return self.call("logseq.Editor.upsertBlockProperty", [block_uuid, key, value])
 
     def remove_block_property(self, block_uuid: str, key: str):

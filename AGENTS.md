@@ -230,6 +230,26 @@ logseq-cli add-note-content --page "Notes" \
 # -> "Example" with the code on it, then a block holding only the sh code
 ```
 
+Text the CLI writes as ONE block must come back from the page file as that
+block. Logseq's file parser takes a `- ` or `#` line after the first (indented
+too) and a code fence nothing closes as block boundaries, and rebuilds the page
+the next time it reads the file: the lines become blocks of their own, and an
+unclosed fence swallows the blocks after it. So every such write is refused
+before anything is written, with the line and the way to write it: flat
+`--content`, a JSON `--tree` node, `update-block`, `create-page --content`,
+also `copy-block`, `replace-text` and the heading of `--under-heading`. Inside
+a closed code block these lines are fine. Indent sub-bullets to write children,
+or pass `--content` several times (`add-journal-block`) for blocks side by
+side. `--json` gives `{"reason": "splits_into_blocks", "line": N, "kind": ...}`
+with exit code 2.
+
+A property value (`set-property`, `set-block-property`, `--property`) is one
+line: Logseq writes it into the block as `key:: value`, so a line break in it
+is refused. A change to part of a block (`replace-text`, `set-todo-status`)
+may leave as many such lines as the block had, and change their text, since
+Logseq's own editor makes such blocks; it may not add one. `update-block`
+replaces the whole text and gets no such pass.
+
 ### 4. Destructive Operations
 
 `--dry-run` is available on every write, not only the ones that cascade:

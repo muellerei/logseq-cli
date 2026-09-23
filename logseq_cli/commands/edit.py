@@ -3,11 +3,11 @@ import sys
 
 import click
 
+from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
     BlockIdError,
-    MultilineContentError,
     append_in_page,
     apply_block_properties,
     check_block_ids,
@@ -33,7 +33,6 @@ from logseq_cli.helpers import (
     property_line_mask,
     read_content_file,
     refs_refusal,
-    reject_unsupported_multiline,
     require_content,
     require_insert,
     resolve_single_block,
@@ -54,8 +53,10 @@ Note:
   Existing block properties survive the update: they are read first and written
   back, so changing the text no longer drops them.
   Use set-todo-status to change TODO/DOING/DONE markers.
-  --content is ONE block: newline bullets stay raw text, indented or not.
-  Children go in via insert-block --child-of UUID.
+  --content is ONE block, so a line Logseq would read as a block of its own is
+  refused: a "- " or "# " line after the first (indented too), or a code fence
+  nothing closes. In a closed code block such lines are fine. Children go in
+  via insert-block --child-of UUID.
   --where-content selects the block by text instead of UUID; it aborts unless
   exactly one block matches, since overwriting the wrong block loses its text.
   Scope it with --page and check with --dry-run.
@@ -71,13 +72,12 @@ Note:
 @handle_connection_error
 def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run, as_json):
     """Update the content of an existing block."""
-    # Guard: unlike insert-block / add-journal-block this command has no tree
-    # path — it replaces ONE block's content, so newline bullets (indented or
-    # flush) would land as raw text inside the block instead of becoming children.
-    try:
-        reject_unsupported_multiline(content, command="update-block", accepts_tree=False)
-    except MultilineContentError as e:
-        raise click.UsageError(str(e))
+    # This command has no tree path: it replaces ONE block's content, so a
+    # line that Logseq reads as a block of its own is refused (#47). Unlike
+    # set-todo-status and replace-text, which change part of a block, it gets
+    # no pass for such a line the block already had: the whole text is the
+    # caller's, and a line in it is written because the caller sent it.
+    refuse_split_block(content, command="update-block")
 
     api = ctx.obj["api"]
     require_content(content)
@@ -210,6 +210,9 @@ Example:
 Note:
   ALWAYS run with --dry-run first to preview matches. Prefer set-todo-status
   for TODO->DONE transitions and update-block for block content edits.
+  A replacement that gives a block a line Logseq would read as a block of its
+  own ("- " or "# " at a line start, an unclosed code fence) is refused before
+  any block is written; it may change such lines the block had, not add one.
 """)
 @click.option("--page", "--name", required=True, help="Page name to search in")
 @click.option("--find", "find_text", required=True, help="Text to find")
@@ -254,13 +257,20 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
                     "old": content,
                     "new": new_content,
                 })
-                if not dry_run:
-                    api.update_block(uuid, new_content)
             children = block.get("children", [])
             if children:
                 scan_blocks(children)
 
     scan_blocks(blocks)
+
+    # Every replacement is checked before the first is written, so a refusal
+    # leaves no block half done (#47). Lines a block already had may stay.
+    for r in replacements:
+        refuse_split_block(r["new"], command="replace-text", replacing=r["old"],
+                           where=f"The block {r['id'][:8]}.. after the replacement")
+    if not dry_run:
+        for r in replacements:
+            api.update_block(r["id"], r["new"], replacing=r["old"])
 
     # updateBlock answers null whether it wrote or not (verified against a live
     # graph), so the write cannot be checked from its return value. Counting the
@@ -323,6 +333,10 @@ Notes:
   before writing anything, an id a block or page still has (the copy case:
   drop --keep-ids) and a second id:: line in one block.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
+  Text written as ONE block (--content without indentation, a --tree node)
+  is refused if Logseq would read a line of it as a block of its own: a "- "
+  or "# " line after the first, or a code fence nothing closes. In a closed
+  code block such lines are fine.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -366,6 +380,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         if not tree:
             click.echo("Tree input is empty.", err=True)
             sys.exit(1)
+        refuse_split_tree(tree, command="insert-block --tree", label="The --tree node",
+                          single_label="The --tree node")
 
         # An id:: in the tree names a UUID the block is meant to keep; the
         # contract (announce, or check and keep) lives in check_block_ids.
@@ -464,6 +480,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     hierarchical = contains_hierarchical_content(content)
     tree = (parse_hierarchical_content(content) if hierarchical
             else [{"content": content, "children": []}])
+    refuse_split_tree(tree, command="insert-block")
     try:
         note = check_block_ids(api, tree, keep_ids)
     except BlockIdError as e:
@@ -585,6 +602,13 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
       logseq-cli add-block-ref --source-id UUID --journal-date 2026-04-23 --under-heading "## Tasks"
     """
     api = ctx.obj["api"]
+    under_heading = resolve_heading(load_config(), under_heading)
+    refuse_split_heading(under_heading, command="add-block-ref")
+    source_id = source_id.strip("()")
+    ref_content = f"(({source_id}))"
+    # The reference is block text like any other, checked before the page or
+    # the heading is written (#47).
+    refuse_split_block(ref_content, command="add-block-ref", where="The reference")
 
     if not journal_date and not page:
         # Default: today's journal
@@ -609,10 +633,6 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
             if not dry_run:
                 api.create_page(page, {"journal?": True})
 
-    source_id = source_id.strip("()")
-    ref_content = f"(({source_id}))"
-
-    under_heading = resolve_heading(load_config(), under_heading)
 
     if dry_run:
         # A block-ref is only worth anything if its source exists; a typo'd UUID
@@ -686,6 +706,9 @@ Note:
   Copies block + all children. With --remove: original is deleted (move).
   The copy gets new UUIDs, so --remove refuses while ((block-refs)) point
   into the original, even from within it; move-block keeps the UUIDs.
+  A source block Logseq would not read back as one block (a "- " or "# " line
+  after the first, a code fence nothing closes) is refused before anything is
+  copied; move-block moves it as it is.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
@@ -702,6 +725,11 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     source = api.get_block(block_id, include_children=True)
     if not source:
         fail("Block not found.", as_json=as_json, id=block_id)
+
+    # The copy is new text, so it must come back from the file as the blocks
+    # written, like any write (#47); checked for the whole subtree first.
+    refuse_split_tree([source], command="copy-block", label="The source block",
+                      single_label="The source block")
 
     # Checked before the copy is written: refusing afterwards would leave a
     # copy behind that nobody asked to keep.

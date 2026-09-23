@@ -4,6 +4,7 @@ import sys
 
 import click
 
+from logseq_cli.blocktext import refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -533,6 +534,12 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     if old_marker.upper() not in _TODO_MARKERS:
         old_marker = ""
 
+    # Checked before the preview, which would otherwise show what the write
+    # refuses: a marker put in front of an opening fence leaves the code block
+    # open (#47). Lines the block already had may stay.
+    refuse_split_block(new_content, command="set-todo-status", where="The block",
+                       replacing=old_content)
+
     if dry_run:
         if as_json:
             output({"uuid": block_id, "old_marker": old_marker, "new_marker": status,
@@ -547,7 +554,8 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
             click.echo(f"  now: {preview}")
         return
 
-    api.update_block(block_id, new_content)
+    # Only the marker changes; lines the block already had are not ours to refuse.
+    api.update_block(block_id, new_content, replacing=old_content)
 
     if as_json:
         output({"uuid": block_id, "old": old_content, "new": new_content, "status": status}, True)

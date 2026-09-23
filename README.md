@@ -225,12 +225,12 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches. The block's properties are kept as written, values as their original text; the one change is Logseq's own spelling of a key (`created_at` is stored and written back as `created-at`) |
+| `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: a `- ` or `# ` line after the first (indented too) or a code fence nothing closes is refused, since Logseq would read it as a block of its own: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches. The block's properties are kept as written, values as their original text; the one change is Logseq's own spelling of a key (`created_at` is stored and written back as `created-at`) |
 | `remove-block --id UUID [--ignore-refs] [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count. Refuses while `((block-refs))` from elsewhere point into the block or its children, and lists them; `--ignore-refs` removes anyway |
 | `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"] [--dry-run]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING`. `--dry-run` also verifies the source block exists — a ref to a missing UUID renders as nothing |
 | `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs] [--dry-run]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates. `--dry-run` shows the old and new marker |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
-| `insert-block --content TEXT (--page NAME \| --after UUID \| --before UUID \| --child-of UUID)` | Insert one block at a position: appended to a page, as a sibling after or before a block, or as a child. `--property K=V` sets properties on it, repeatable |
+| `insert-block --content TEXT (--page NAME \| --after UUID \| --before UUID \| --child-of UUID)` | Insert one block at a position: appended to a page, as a sibling after or before a block, or as a child. `--property K=V` sets properties on it, repeatable. Without indentation `--content` is one block, and a line Logseq would read as a block of its own is refused before anything is written: a `- ` or `# ` line after the first, or a code fence nothing closes (fine inside a closed code block). The same holds for every write of one block's text: a `--tree` node, `add-journal-block`, `update-block`, `create-page --content` |
 | `insert-block --tree "<tab-or-json>" [--quiet]` | `--quiet` prints only the confirmation line, not one uuid line per block |
 | `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
@@ -656,6 +656,7 @@ See `examples/` directory:
 logseq-cli/
 ├── logseq_cli/
 │   ├── api.py        # HTTP API client (requests.post against Logseq)
+│   ├── blocktext.py  # How Logseq reads a block's lines: code blocks, block boundaries
 │   ├── config.py     # Config file discovery, loading and lookup
 │   ├── datalog.py    # EDN/datalog query building (value quoting, keywords)
 │   ├── helpers.py    # Date parsing, block processing, backlink search

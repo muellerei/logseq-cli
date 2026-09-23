@@ -114,6 +114,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Text written as one block could come back from the page file as several, or
+  take in the blocks after it. Logseq writes a block's text under one bullet,
+  and its file parser reads some lines as block boundaries (measured, 0.10.15):
+  after the first line, a `- ` line (indented too, `-` alone) becomes a child
+  block and a `# ` line (any number of `#`) a block next to it, with a space,
+  tab, form feed or carriage return around the mark (so a CRLF text's `-\r`
+  counts); a code fence
+  nothing closes, on any line, runs on into the blocks after it up to the next
+  code block on the page and swallows them with their uuids. The database keeps
+  the block as sent until the file is read again, so the command reported
+  success and the damage came later. `insert-block --content` did not check at
+  all, although its code and this changelog said it did; `update-block` and
+  `add-journal-block` checked only `- ` lines, and refused them inside a code
+  block too, where Logseq keeps them. Now every write of block text is checked
+  for all three, outside a closed code block: each command checks all it would
+  write before the first write, the heading of `--under-heading` included, and `LogseqAPI` checks every write it sends, so
+  no command can go around it (`copy-block`, `replace-text`,
+  `create-page --content` and the reference of `add-block-ref` included). A
+  property value with a line break is refused too: Logseq writes it into the
+  block as `key:: value`, where each line after the break is a line of the
+  block (`v\n- x` put `x` into a child block). A refusal names the line, what Logseq
+  would make of it and the way to write it, exits 2, and under `--json` gives
+  `reason: splits_into_blocks` with `line` and `kind`. A change to part of an
+  existing block (`set-todo-status`, `replace-text`) may leave as many such
+  lines as the block had, since Logseq's own editor makes them, but not add
+  one; `set-todo-status` refuses, in the preview too, to put a marker in front
+  of an opening fence, which would leave the code block open.
+  `add-journal-block` checks the text as it is written, so a value
+  `--no-preserve` joins into one line is no longer refused for the lines it
+  had. See [#47](https://github.com/muellerei/logseq-cli/issues/47).
 - A code block written in outline text (`add-note-content`,
   `add-journal-content`, indented `--content`, `--tree` as text) was cut into a
   block per line: `` ```js ``, `a()`, `` ``` ``. None of them was a code block,
