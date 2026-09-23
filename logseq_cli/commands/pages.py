@@ -15,12 +15,14 @@ from logseq_cli.helpers import (
     find_backlinks,
     find_heading,
     find_or_create_heading,
+    incoming_block_refs,
     insert_block_tree_with_uuids,
     insert_formatted_content_with_uuids,
     is_journal_date,
     parse_hierarchical_content,
     parse_property_pairs,
     process_blocks,
+    refs_refusal,
     require_insert,
     strip_title_heading,
     uuid_fields,
@@ -578,15 +580,17 @@ Examples:
 Note:
   Destructive. Interactively (TTY) it prompts; non-interactively it REQUIRES
   --force and fails otherwise — --json alone is not a confirmation.
-  Backlinks ((uuid)) pointing to deleted blocks become dangling.
+  Refuses while ((block-refs)) from other pages point into it, and lists
+  them; --force does not override that, --ignore-refs does.
 """)
 @click.option("--page", "--name", required=True, help="Page name to delete")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt (required when non-interactive)")
+@click.option("--ignore-refs", is_flag=True, help="Delete even though ((block-refs)) from other pages point into it")
 @click.option("--dry-run", is_flag=True, help="Show what would be deleted, without deleting")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def delete_page(ctx, page, force, dry_run, as_json):
+def delete_page(ctx, page, force, ignore_refs, dry_run, as_json):
     """Delete a page from the graph."""
     api = ctx.obj["api"]
 
@@ -614,11 +618,22 @@ def delete_page(ctx, page, force, dry_run, as_json):
              f"deleted ({read_error}). The page was left untouched.",
              as_json=as_json, page=page)
 
+    # Asked by page, not by the uuids read above: that read may have failed,
+    # and --force proceeds without it. By the name Logseq resolved, not the
+    # one typed; see incoming_block_refs.
+    refs = incoming_block_refs(api, page=page_data.get("name") or page)
+    if refs and not ignore_refs:
+        fail(refs_refusal(refs, f"page '{page}' from other pages"),
+             as_json=as_json, page=page, refs=refs)
+
     if dry_run:
         if as_json:
-            output({"page": page, "blocks": block_count, "dry_run": True}, True)
+            output({"page": page, "blocks": block_count, "refs_broken": len(refs),
+                    "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would delete page '{page}' ({block_count} block(s))")
+            if refs:
+                click.echo(f"  incoming block refs that would dangle: {len(refs)}")
         return
 
     # Confirmation gate. Prompt only when stdin is an interactive terminal;
@@ -641,12 +656,15 @@ def delete_page(ctx, page, force, dry_run, as_json):
     # Only --force reaches this with an unknown count (see the guard above).
     # "unknown" is the honest word for it: the delete happened, the size did
     # not get measured, and reporting 0 would misdescribe what was removed.
-    result = {"page": page, "status": "deleted", "blocks": block_count}
+    result = {"page": page, "status": "deleted", "blocks": block_count,
+              "refs_broken": len(refs)}
     if as_json:
         output(result, True)
     else:
         size = "unknown" if block_count is None else f"{block_count} block(s)"
         click.echo(f"Deleted page '{page}' ({size})")
+        if refs:
+            click.echo(f"  {len(refs)} incoming block ref(s) now point at nothing")
 
 @cli.command("get-page-stats", epilog="""\b
 Example:

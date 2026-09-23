@@ -214,6 +214,13 @@ To relocate a block, prefer `move-block` over `copy-block --remove`: it moves th
 block itself, so its UUID and every `((block-ref))` pointing at it survive, and
 nothing is deleted.
 
+`remove-block`, `delete-page` and `copy-block --remove` refuse while
+`((block-refs))` from elsewhere point into what they would delete, and list
+where each one comes from (page, block uuid, target). `--force` does not
+override this; `--ignore-refs` does, and only after the refs have been dealt
+with or deliberately given up. Refs from inside the deleted set do not count,
+except for `copy-block --remove`: the copy carries them under new uuids.
+
 ### 5. `id::` in Written Content
 
 An `id::` line inside written content names the UUID that block is meant to
