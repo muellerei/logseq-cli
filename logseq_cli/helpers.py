@@ -1009,6 +1009,26 @@ def read_content_file(path: str) -> str:
     return raw.rstrip("\n")
 
 
+def content_or_file(content, content_file, *, required=True):
+    """The text of ``--content`` or of ``--content-file``, whichever was given.
+
+    One place for the either/or, so the commands that use it answer both,
+    neither and a bad file the same way. ``insert-block`` passes
+    ``required=False``: ``--tree`` is its other source, and it words "neither"
+    itself. The file's text is
+    returned as if it had been passed as ``--content``: what the command does
+    with it is unchanged. ``add-journal-block`` does not use this, since its
+    ``--content-file`` means a tree, not ``--content``.
+    """
+    if content_file is None:
+        if content is None and required:
+            raise click.UsageError("Missing option '--content' (or '--content-file').")
+        return content
+    if content is not None:
+        raise click.UsageError("Specify either --content or --content-file, not both.")
+    return read_content_file(content_file)
+
+
 def block_uuid_from_result(result):
     """Extract a block UUID from a Logseq insert/append API result.
 

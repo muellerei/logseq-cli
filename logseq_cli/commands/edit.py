@@ -14,6 +14,7 @@ from logseq_cli.helpers import (
     check_move,
     check_property_pairs,
     contains_hierarchical_content,
+    content_or_file,
     count_blocks,
     find_heading,
     find_or_create_heading,
@@ -60,18 +61,22 @@ Note:
   --where-content selects the block by text instead of UUID; it aborts unless
   exactly one block matches, since overwriting the wrong block loses its text.
   Scope it with --page and check with --dry-run.
+  --content-file FILE is --content read from a file ('-' reads stdin), with
+  the same rules; no shell quoting stands between the text and the command.
 """)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
 @click.option("--page", "--name", "page", default=None, help="With --where-content: restrict the search to this page")
 @click.option("--regex", "use_regex", is_flag=True, help="With --where-content: interpret it as a regex")
-@click.option("--content", required=True, help="New content for the block")
+@click.option("--content", default=None, help="New content for the block; this or --content-file is required")
+@click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--dry-run", is_flag=True, help="Show the block that would be overwritten, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def update_block(ctx, block_id, where_content, page, use_regex, content, dry_run, as_json):
+def update_block(ctx, block_id, where_content, page, use_regex, content, content_file, dry_run, as_json):
     """Update the content of an existing block."""
+    content = content_or_file(content, content_file)
     # This command has no tree path: it replaces ONE block's content, so a
     # line that Logseq reads as a block of its own is refused (#47). Unlike
     # set-todo-status and replace-text, which change part of a block, it gets
@@ -321,7 +326,7 @@ Examples:
 Notes:
   --tree accepts tab-indented text OR JSON (auto-detected). Use it instead of
   N×insert-block for hierarchies — single API roundtrip.
-  --content, --tree and --tree-file are mutually exclusive.
+  --content (or --content-file), --tree and --tree-file are mutually exclusive.
   --tree-file reads the same tab-indented text (or JSON) from a file, so
   apostrophes/quotes/umlauts need no shell quoting.
   --child-of UUID also accepts hierarchical --content (same tab-indent format).
@@ -337,6 +342,8 @@ Notes:
   is refused if Logseq would read a line of it as a block of its own: a "- "
   or "# " line after the first, or a code fence nothing closes. In a closed
   code block such lines are fine.
+  --content-file FILE is --content read from a file ('-' reads stdin), with
+  the same rules; no shell quoting stands between the text and the command.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -344,7 +351,8 @@ Notes:
 @click.option("--child-of", default=None, help="UUID of parent block (insert as child)")
 @click.option("--first", "as_first", is_flag=True, help="With --child-of: insert as FIRST child instead of appending last")
 @click.option("--top-level", is_flag=True, help="With --page and --tree: insert at page top-level")
-@click.option("--content", default=None, help="Content for the new block")
+@click.option("--content", default=None, help="Content for the new block; one of --content, --content-file, --tree, --tree-file is required")
+@click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
@@ -354,9 +362,10 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, content, tree_input, tree_file, properties, keep_ids, dry_run, quiet, as_json):
+def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, content, content_file, tree_input, tree_file, properties, keep_ids, dry_run, quiet, as_json):
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
+    content = content_or_file(content, content_file, required=False)
 
     # --tree-file is --tree from a file; resolve it before any other validation
     # so the rest of the command sees a single tree_input.
@@ -374,7 +383,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     if tree_input is not None:
         if content is not None:
-            click.echo("Specify either --content or --tree, not both.", err=True)
+            click.echo("Specify either --content (or --content-file) or --tree, not both.", err=True)
             sys.exit(1)
         tree = parse_tree_input(tree_input)
         if not tree:
@@ -457,7 +466,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         return
 
     if content is None:
-        click.echo("Specify --content or --tree.", err=True)
+        click.echo("Specify --content, --content-file or --tree.", err=True)
         sys.exit(1)
     require_content(content)
 

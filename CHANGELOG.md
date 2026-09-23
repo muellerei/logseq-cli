@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--content-file FILE` on `update-block`, `insert-block`, `add-note-content`
+  and `add-journal-content`, where only `add-journal-block` had it. A call
+  reaching for it on `update-block` failed with "No such option", and the way
+  left, `--content "$(cat FILE)"`, puts the shell back between the text and
+  the CLI. On these commands it is `--content` read from a file (`-` reads
+  stdin) and nothing more: the text goes through the same path, the one-block
+  rule from #47 included, and a test holds that the same text sent both ways
+  makes the same calls. `add-journal-block` keeps its own meaning, the file as
+  one tree. The either/or is decided in one place, so both, neither and a bad
+  file are answered the same way on all five.
+  See [#49](https://github.com/muellerei/logseq-cli/issues/49).
+
 ## [0.14.0] - 2026-09-23
 
 ### Added
