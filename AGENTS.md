@@ -322,13 +322,22 @@ are dropped and the blocks land under fresh UUIDs. Every `((uuid))` elsewhere in
 the graph that pointed at the originals then dangles, and Logseq rewrites such
 references as plain text.
 
-This holds for `insert-block` (`--tree` and `--content`), `add-note-content`,
-`add-journal-block` and `add-journal-content`; not for `create-page --content`
-or the deprecated `add-journal-entry`. Each removes the `id::` lines from the
-content and says how many ids it dropped, on stderr. An `id::` line inside a
-code block (between two lines that start with ```` ``` ```` or `~~~`) is code, as
-it is to Logseq, and is written as is. Pass
-`--keep-ids` when you are **moving or restoring** an outline:
+Every command that writes a block's text applies this. `insert-block`
+(`--tree` and `--content`), `add-note-content`, `add-journal-block`,
+`add-journal-content`, `create-page --content` and the deprecated
+`add-journal-entry` remove the `id::` lines from the content and say how many
+ids they dropped, on stderr. `update-block` keeps the block's own `id::` line,
+the one `get-block` returns, so a block read and written back keeps its uuid;
+a line naming another uuid is dropped with a note, since it would become this
+block's uuid. `copy-block` drops the source's lines without a word: the copy
+gets uuids of its own, and refs stay with the original. `replace-text` refuses
+a replacement that turns a line into an `id::` line, before any block is
+written (`--json`: `{"reason": "id_line", "line": N}`, exit code 2). A value
+with spaces in it (`id:: a b c`) counts as well: Logseq takes it as the uuid.
+An `id::` line inside a code block (between two lines that start with
+```` ``` ```` or `~~~`) is code, as it is to Logseq, and is written as is. Pass
+`--keep-ids` when you are **moving or restoring** an outline (`insert-block`,
+`add-note-content`, `add-journal-block`, `add-journal-content`):
 
 ```bash
 logseq-cli insert-block --child-of UUID --tree-file outline.md --keep-ids

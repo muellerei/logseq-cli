@@ -4,10 +4,17 @@ import time
 import requests
 
 # Every write of block text is checked here, whichever command sent it: text
-# written as one block must come back from the page file as that block (#47).
-# The commands check first, for their own way out in the message; this is the
-# net no write path can go around.
-from logseq_cli.blocktext import refuse_split_block, refuse_split_property, refuse_split_tree
+# written as one block must come back from the page file as that block (#47),
+# and an id:: line reaches Logseq only where a command decided to keep it
+# (#56). The commands check first, for their own way out in the message; this
+# is the net no write path can go around.
+from logseq_cli.blocktext import (
+    refuse_id_lines,
+    refuse_id_lines_tree,
+    refuse_split_block,
+    refuse_split_property,
+    refuse_split_tree,
+)
 
 
 # Methods that are pure reads and safe to cache.
@@ -222,6 +229,7 @@ class LogseqAPI:
         # for a placeholder's uuid. --keep-ids writes go through insertBatchBlock
         # instead (#31).
         refuse_split_block(content, command="logseq-cli", where="The text")
+        refuse_id_lines(content)
         args = [page_name, content]
         if options:
             args.append(options)
@@ -229,6 +237,7 @@ class LogseqAPI:
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
         refuse_split_block(content, command="logseq-cli", where="The text")
+        refuse_id_lines(content)
         return self.call(
             "logseq.Editor.insertBlock", [block_uuid, content, options or {}]
         )
@@ -249,6 +258,11 @@ class LogseqAPI:
         the last existing child with ``sibling: true``.
         """
         refuse_split_tree(batch, command="logseq-cli", single_label="The text")
+        # With keepUUID the id:: lines are the point of the call, vetted by
+        # check_block_ids. Without it Logseq drops them (measured), so none
+        # should arrive: one that does was decided on by no command.
+        if not (options or {}).get("keepUUID"):
+            refuse_id_lines_tree(batch)
         return self.call(
             "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}]
         )
@@ -285,6 +299,7 @@ class LogseqAPI:
         every write here goes through (#47).
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
+        refuse_id_lines(content, own=block_uuid, replacing=replacing)
         args = [block_uuid, content]
         if properties:
             args.append({"properties": properties})

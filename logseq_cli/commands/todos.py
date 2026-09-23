@@ -4,7 +4,7 @@ import sys
 
 import click
 
-from logseq_cli.blocktext import refuse_split_block
+from logseq_cli.blocktext import property_line_mask, refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -13,7 +13,6 @@ from logseq_cli.helpers import (
     next_occurrence,
     parse_date_keyword,
     parse_repeater,
-    property_line_mask,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 from logseq_cli.render import BLOCK_REF_RE

@@ -24,7 +24,7 @@ Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled
 logseq-cli/
 ├── logseq_cli/
 │   ├── api.py        # HTTP API client (thin wrapper around Logseq's API)
-│   ├── blocktext.py  # How Logseq reads a block's lines: code blocks, block boundaries
+│   ├── blocktext.py  # How Logseq reads a block's lines: code blocks, block boundaries, property and id:: lines
 │   ├── config.py     # Config file discovery, loading and lookup
 │   ├── datalog.py    # EDN/datalog query building (value quoting, keywords)
 │   ├── helpers.py    # Date parsing, block processing, content formatting
