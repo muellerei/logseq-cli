@@ -456,13 +456,16 @@ class TestInsertBlockTreeFile:
             "insert-block", "--child-of", "p", "--content", "x", "--tree-file", str(f)])
         assert result.exit_code != 0
         assert "not both" in result.output
+        assert "--tree-file" in result.output
         api.insert_block.assert_not_called()
 
     def test_missing_file_fails_before_any_write(self, api, tmp_path):
         result = CliRunner().invoke(cli, [
             "insert-block", "--child-of", "p", "--tree-file", str(tmp_path / "gone.md")])
         assert result.exit_code != 0
-        assert "not found" in result.output
+        # It names the option given, not --content-file, which this command
+        # did not have when the message was written for add-journal-block.
+        assert "--tree-file not found" in result.output
         api.insert_block.assert_not_called()
 
     def test_dry_run_does_not_write(self, api, tmp_path):
@@ -477,6 +480,12 @@ class TestInsertBlockTreeFile:
 
 # ---------- stdin via "-" ---------------------------------------------------
 
+def _stdin(text):
+    """stdin as a process gets it: bytes underneath, which is what is read."""
+    import io
+    return io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="utf-8", newline="\n")
+
+
 class TestContentFromStdin:
     """``--content-file -`` reads stdin, the convention every Unix tool shares.
 
@@ -485,20 +494,17 @@ class TestContentFromStdin:
     """
 
     def test_dash_reads_stdin(self, monkeypatch):
-        import io
-        monkeypatch.setattr("sys.stdin", io.StringIO("- a\n\t- b\n"))
+        monkeypatch.setattr("sys.stdin", _stdin("- a\n\t- b\n"))
         assert read_content_file("-") == "- a\n\t- b"
 
     def test_stdin_keeps_utf8_and_indentation(self, monkeypatch):
-        import io
         monkeypatch.setattr(
-            "sys.stdin", io.StringIO("**09:00** Größe geprüft\n\t- Alice' Hinweis\n"))
+            "sys.stdin", _stdin("**09:00** Größe geprüft\n\t- Alice' Hinweis\n"))
         assert read_content_file("-") == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
 
     def test_empty_stdin_is_rejected(self, monkeypatch):
         """Same guard as an empty file: fail before any write, not after."""
-        import io
-        monkeypatch.setattr("sys.stdin", io.StringIO("   \n"))
+        monkeypatch.setattr("sys.stdin", _stdin("   \n"))
         with pytest.raises(click.BadParameter) as exc:
             read_content_file("-")
         assert "empty" in str(exc.value).lower()
@@ -509,10 +515,9 @@ class TestContentFromStdin:
         Documented rather than worked around: the convention wins, and a caller
         who really wants that file can write ``./-``.
         """
-        import io
         (tmp_path / "-").write_text("from the file", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr("sys.stdin", io.StringIO("from stdin\n"))
+        monkeypatch.setattr("sys.stdin", _stdin("from stdin\n"))
         assert read_content_file("-") == "from stdin"
 
     def test_end_to_end_through_add_journal_block(self):
@@ -534,3 +539,42 @@ class TestContentFromStdin:
                 input="piped entry\n")
         assert result.exit_code == 0, result.output
         assert "1 block" in result.output
+
+
+# ---------- a file and stdin are read the same way --------------------------
+
+class TestStdinReadLikeAFile:
+    """The path branch decoded strictly as UTF-8 and translated line endings;
+    stdin took the locale's encoding and kept them. Under ``LC_ALL=C`` invalid
+    bytes went on as lone surrogates, under a Latin-1 locale UTF-8 arrived as
+    mojibake, and ``a\\r\\nb`` from a pipe kept its ``\\r`` where the same file
+    lost it. A BOM, which editors on Windows write, stayed in front of the
+    first line on both, so a first "- " was no bullet."""
+
+    def _stdin(self, monkeypatch, data: bytes):
+        import io
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data), encoding="latin-1", newline="\n"))
+
+    def test_stdin_is_utf8_whatever_the_locale(self, monkeypatch):
+        self._stdin(monkeypatch, "Größe\n".encode("utf-8"))
+        assert read_content_file("-") == "Größe"
+
+    def test_invalid_utf8_on_stdin_is_refused(self, monkeypatch):
+        self._stdin(monkeypatch, b"Gr\xf6\xdfe")
+        with pytest.raises(click.BadParameter) as exc:
+            read_content_file("-")
+        assert "UTF-8" in str(exc.value)
+
+    @pytest.mark.parametrize("raw", [b"a\r\nb\r\n", b"a\rb\r"])
+    def test_line_endings_as_from_a_file(self, monkeypatch, tmp_path, raw):
+        f = tmp_path / "crlf.md"
+        f.write_bytes(raw)
+        self._stdin(monkeypatch, raw)
+        assert read_content_file("-") == read_content_file(str(f)) == "a\nb"
+
+    def test_a_bom_is_not_text(self, monkeypatch, tmp_path):
+        raw = "﻿- a\n".encode("utf-8")
+        f = tmp_path / "bom.md"
+        f.write_bytes(raw)
+        self._stdin(monkeypatch, raw)
+        assert read_content_file(str(f)) == read_content_file("-") == "- a"
