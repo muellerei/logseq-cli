@@ -206,6 +206,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the deprecated `add-journal-entry` are not covered.
   See [#22](https://github.com/muellerei/logseq-cli/issues/22).
 
+- `move-block --before` reported failure for every top-level target, whether
+  the move had happened or not, and blamed a cause that did not apply: "A block
+  cannot be moved into its own subtree". `moveBlock` answers null either way,
+  so the move is checked by reading the sibling order around the target. That
+  read asked `getBlock` for the target's parent, and for a top-level block the
+  parent is the page, for which `getBlock` answers null (measured, Logseq
+  0.10.15). The order is now read from the page tree in that case. Measured
+  on the same version, `before` does move a block in front of a top-level
+  target, from the same page, from a nested position and from another page.
+  The unit tests had missed it because their stand-in answered `getBlock` for
+  any parent id; the new one answers the way the API does.
+
+  The subtree case, the one refusal Logseq is known for, is now checked before
+  the call, for `--under` as well as `--before`, and reported with its reason.
+  A move that still does not show up afterwards is reported as not taking
+  effect, without naming a cause nobody checked.
+  See [#23](https://github.com/muellerei/logseq-cli/issues/23).
+
+- `move-block --dry-run` previewed moves the real run refuses: a target that
+  does not exist, and one inside the source's own subtree. It read the source
+  only and answered "Would move" with exit 0. It now runs the same checks as
+  the move, so a preview that passes is one the move will not refuse up front.
+  Found in review of the entry above.
+
 ### Changed
 
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and
