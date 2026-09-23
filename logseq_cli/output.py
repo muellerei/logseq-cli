@@ -88,10 +88,19 @@ def handle_connection_error(func):
     return wrapper
 
 
+def json_text(data) -> str:
+    """``data`` as the JSON every command prints, without the final newline.
+
+    Split out for the reads that measure their output before printing it
+    (``--max-chars``): they must measure the same text :func:`output` prints.
+    """
+    return json.dumps(data, indent=2, default=str)
+
+
 def output(data, as_json: bool, human_formatter=None):
     """Output data as JSON or human-readable text."""
     if as_json:
-        click.echo(json.dumps(data, indent=2, default=str))
+        click.echo(json_text(data))
     elif human_formatter:
         click.echo(human_formatter(data))
     else:
