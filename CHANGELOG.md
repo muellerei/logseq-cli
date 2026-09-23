@@ -42,6 +42,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `add-journal-block --upsert-heading` dropped the properties of the block it
+  replaced: it called `updateBlock` with the new text alone, and measured
+  against 0.10.15, a `prio:: 1` line was gone afterwards (the `id::` line
+  stays, Logseq writes it back itself). The replacement now carries them the
+  way `update-block` does, a key the new text sets included (#66).
+  On the same path, text that was nothing but `id::` lines was dropped to
+  nothing and overwrote the matched block with an empty text, reporting
+  "updated"; `add-journal-block`, `add-journal-content`, `add-note-content`
+  and `insert-block` wrote an empty block in that case. Each refuses it now
+  before anything is written, as `update-block`, `create-page` and
+  `add-journal-entry` already did, here under `--json` as an error object
+  with `dropped_ids`; so does an
+  upsert whose first root was nothing but its id, which would have emptied
+  the block's heading. An empty block among others is still written: a
+  copied block that held only its id was empty.
+  See [#67](https://github.com/muellerei/logseq-cli/issues/67).
+- `update-block` kept a property's old value over the one `--content` sets.
+  It passes the block's properties back so the update does not drop them
+  (#30), and measured against 0.10.15, Logseq lets a passed value win over a
+  line of the new text with the same key and drops that line:
+  `--content $'x\nprio:: 2'` on a block with `prio:: 1` left `prio:: 1`, exit
+  0. A key the new text sets as a property line is now left out of what goes
+  back, compared as Logseq stores keys (`due_date` is `due-date`), a line in
+  a code block included, since `updateBlock` takes it out of the code block
+  (#68). `id` and `custom-id` always go back: the block's uuid is not the
+  text's to set. The test stand-in modelled the opposite and follows the measurement now.
+  See [#66](https://github.com/muellerei/logseq-cli/issues/66).
 - A page alias was read and written as a page of its own. Logseq's HTTP API
   does not resolve an alias, so `get-page --name <alias>` answered an empty
   page with exit 0, `get-properties` `{}`, `get-page-stats` 0 blocks, and

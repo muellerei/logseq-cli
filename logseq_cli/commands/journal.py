@@ -10,9 +10,11 @@ from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, withou
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
+    BESIDES_IDS,
     BlockIdError,
     append_in_page,
     check_block_ids,
+    collect_block_ids,
     contains_hierarchical_content,
     content_or_file,
     count_blocks,
@@ -27,6 +29,7 @@ from logseq_cli.helpers import (
     insert_block_at,
     insert_tree_at_page_end,
     journal_day_to_date,
+    kept_properties,
     normalize_heading,
     normalize_indentation,
     note_quote_breaks,
@@ -436,6 +439,9 @@ Examples:
 Notes:
   Default heading from LOGSEQ_JOURNAL_HEADING env (e.g. "## Log").
   --upsert-heading replaces a placeholder block under --under-heading without needing UUID.
+  The replaced block keeps its properties, as with update-block; a property
+  line in the new text is the new value of its key. A first block that is
+  nothing but id:: lines is refused: it would empty the replaced block.
   Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
   --content-file reads the whole file as ONE tree: flush "- " lines become
   sibling roots, tab-indented lines their children. No shell quoting, so
@@ -444,7 +450,8 @@ Notes:
   read a line of it as a block of its own: a "- " or "# " line after the
   first, or a code fence nothing closes. In a closed code block such lines are
   fine. Indent sub-bullets for children, pass --content again for siblings.
-  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  id:: lines are dropped unless --keep-ids is given, and the command says so;
+  text that is nothing but id:: lines is refused.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
@@ -575,11 +582,22 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
         trees = [tree_without_block_ids(t) if t is not None else None for t in trees]
         # The text is what flat values send, and what the previews show.
         contents = tuple(outline_text(t) if t is not None else without_block_ids(c)
                          for c, t in zip(contents, trees))
+        # The first root replaces the matched block's text. One that was
+        # nothing but its id would empty it, heading and all (#67). Refused
+        # before the heading is looked up: that lookup may create it. The
+        # upsert takes one value; a flat one is the whole content, which
+        # check_block_ids refused already.
+        if (upsert_heading and len(trees) == 1 and trees[0]
+                and not trees[0][0]["content"].strip()):
+            fail(f"The first block of the content {BESIDES_IDS}: with --upsert-heading "
+                 "it replaces the matched block's text, which would be left empty. "
+                 "Nothing was written.", as_json=as_json,
+                 dropped_ids=collect_block_ids(blocks[:1]))
+        click.echo(note, err=True)
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -704,33 +722,28 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         if found_uuid:
             root_uuid = found_uuid
-            if tree is not None:
-                if tree:
-                    # The first root replaces the matched block; its children
-                    # nest under it. Any further roots are siblings after it —
-                    # dropping them would lose content while still reporting
-                    # count_blocks(tree) as written.
-                    #
-                    # Both inserts run strict and n counts the UUIDs actually
-                    # returned, plus 1 for the update. Using count_blocks(tree)
-                    # here would report the intended size even when a write
-                    # silently failed, which is the exact "text is gone and
-                    # nothing says so" case require_insert exists to prevent.
-                    api.update_block(found_uuid, tree[0]["content"])
-                    n = 1
-                    kids = tree[0].get("children", [])
-                    if kids:
-                        n += len(insert_block_tree_with_uuids(
-                            api, kids, found_uuid, strict=True, _written=n))
-                    if len(tree) > 1:
-                        n += len(insert_block_tree_as_siblings(
-                            api, tree[1:], found_uuid, _written=n))
-                else:
-                    api.update_block(found_uuid, content)
-                    n = 1
-            else:
-                api.update_block(found_uuid, content)
-                n = 1
+            # The first root of a tree replaces the matched block; its
+            # children nest under it. Any further roots are siblings after it —
+            # dropping them would lose content while still reporting
+            # count_blocks(tree) as written.
+            text = tree[0]["content"] if tree else content
+            # The matched block keeps its properties, as with update-block (#67).
+            _, kept = kept_properties(api, found_uuid, text)
+            api.update_block(found_uuid, text, properties=kept or None)
+            # Both inserts run strict and n counts the UUIDs actually
+            # returned, plus 1 for the update. Using count_blocks(tree)
+            # here would report the intended size even when a write
+            # silently failed, which is the exact "text is gone and
+            # nothing says so" case require_insert exists to prevent.
+            n = 1
+            if tree:
+                kids = tree[0].get("children", [])
+                if kids:
+                    n += len(insert_block_tree_with_uuids(
+                        api, kids, found_uuid, strict=True, _written=n))
+                if len(tree) > 1:
+                    n += len(insert_block_tree_as_siblings(
+                        api, tree[1:], found_uuid, _written=n))
             status = "updated"
         elif heading_uuid:
             if tree is not None:
@@ -845,7 +858,8 @@ Example:
 Note:
   Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
   it now auto-detects hierarchy.
-  id:: lines are dropped unless --keep-ids is given, and the command says so.
+  id:: lines are dropped unless --keep-ids is given, and the command says so;
+  text that is nothing but id:: lines is refused.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
   A code block stays one block: from a ``` or ~~~ line to the next such line
   without a bullet, every line is code. Without a bullet the fence goes on

@@ -63,6 +63,11 @@ class TestReadContentFile:
 
 # ---------- CLI fixture -----------------------------------------------------
 
+# The matched block of --upsert-heading; a real uuid, since the upsert reads
+# its properties by it.
+CAROL = "00000000-0000-4000-8000-0000000000f1"
+
+
 @pytest.fixture
 def api(monkeypatch):
     """Journal page with a '## Log' heading that already has one child.
@@ -74,7 +79,7 @@ def api(monkeypatch):
     """
     mock = fake_api([f"u{i}" for i in range(1, 40)])
     mock.graph.children["head"] = [
-        {"uuid": "fl", "content": "### [[Carol]]", "children": []}]
+        {"uuid": CAROL, "content": "### [[Carol]]", "children": []}]
     monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kwargs: mock)
     mock.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     mock.get_page.return_value = {"name": "journal"}
@@ -117,7 +122,7 @@ class TestAddJournalBlockContentFile:
         # what matters is the resulting shape, not the number of round-trips.
         # skip the pre-existing "### [[Carol]]" the fixture puts under the
         # heading; only the three roots written by this call are of interest
-        roots = [c for c in api.graph.children["head"] if c["uuid"] != "fl"]
+        roots = [c for c in api.graph.children["head"] if c["uuid"] != CAROL]
         assert [r["content"] for r in roots] == [
             "### Daily Summary", "### Response Tracking", "### Open TODOs"]
         for root in roots:

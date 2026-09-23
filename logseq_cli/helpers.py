@@ -738,14 +738,20 @@ def invalid_block_ids(tree: list) -> list:
 
 
 class BlockIdError(ValueError):
-    """``--keep-ids`` cannot be honoured. ``field`` names the offending ``ids``
-    in a JSON error (``ambiguous_ids``, ``repeated_ids``, ``invalid_ids`` or
-    ``existing_ids``)."""
+    """The id:: contract refuses the content: ``--keep-ids`` cannot be
+    honoured, or without it nothing but ids was sent. ``field`` names the
+    offending ``ids`` in a JSON error (``ambiguous_ids``, ``repeated_ids``,
+    ``invalid_ids``, ``existing_ids`` or ``dropped_ids``)."""
 
     def __init__(self, message: str, field: str, ids: list):
         super().__init__(message)
         self.field = field
         self.ids = ids
+
+
+# The one wording for text that dropping its id:: lines left empty (#56, #67).
+BESIDES_IDS = "holds nothing but id:: lines, and those are dropped"
+NOTHING_BESIDES_IDS = f"The content {BESIDES_IDS}: nothing is left to write. Nothing was written."
 
 
 def uuids_in_use(api, ids: list) -> list:
@@ -814,6 +820,13 @@ def without_foreign_block_ids(content: str, own: str) -> tuple:
         "moves a block with its uuid.")
 
 
+def _tree_texts(tree: list):
+    """The content of every node in ``tree``, DFS pre-order."""
+    for block in tree:
+        yield block.get("content", "")
+        yield from _tree_texts(block.get("children") or [])
+
+
 def check_block_ids(api, tree: list, keep_ids: bool):
     """Apply the ``id::`` contract to ``tree`` before any of it is written.
 
@@ -822,7 +835,9 @@ def check_block_ids(api, tree: list, keep_ids: bool):
     in silence again (#1 fixed insert-block --tree alone, and the others kept
     the defect). The writers without --keep-ids decide their own contract, and
     LogseqAPI refuses a line none of them decided on (#56). Returns a note for
-    stderr when ids would be dropped, or ``None``. With ``keep_ids`` raises :class:`BlockIdError` for
+    stderr when ids would be dropped, or ``None``. Without ``keep_ids`` raises
+    :class:`BlockIdError` when dropping them leaves no text at all. With
+    ``keep_ids`` raises it for
     an id that cannot become a block id, and for one a block already has:
     that is the copy case, and insertBatchBlock would give the uuid to a second
     block without a word (measured), leaving two blocks one uuid.
@@ -831,6 +846,12 @@ def check_block_ids(api, tree: list, keep_ids: bool):
     if not ids:
         return None
     if not keep_ids:
+        # Text that was nothing but its ids leaves nothing to write, and an
+        # empty block, or with --upsert-heading an emptied one, is no success
+        # (#67). One empty block among others stays: a copied block that held
+        # only its id was empty.
+        if not any(without_block_ids(t).strip() for t in _tree_texts(tree)):
+            raise BlockIdError(NOTHING_BESIDES_IDS, "dropped_ids", ids)
         return dropped_ids_note(len(ids))
     several = blocks_with_several_ids(tree)
     if several:
@@ -1040,8 +1061,7 @@ def require_text_besides_ids(content: str) -> str:
     nothing the caller meant left to write, and writing an empty block, or
     emptying the one updated, reports a success that is none."""
     if not content.strip():
-        raise click.BadParameter("--content holds nothing but id:: lines, and "
-                                 "those are dropped: nothing is left to write")
+        raise click.BadParameter(f"--content {BESIDES_IDS}: nothing is left to write")
     return content
 
 
@@ -1914,11 +1934,16 @@ def normalize_property_key(key: str) -> str:
     # surrogates (PEP 383). They cannot be written to the file as given.
     if any("\ud800" <= c <= "\udfff" for c in key):
         raise refuse("contains bytes that are not valid UTF-8")
-    canonical = key.lower().replace("_", "-")
+    canonical = stored_property_key(key)
     if canonical in _PROPERTY_KEYS_READ_AS_ID:
         raise refuse("Logseq reads it as the block's id",
                      "Writing it would replace the uuid that ((refs)) to the block point at")
     return canonical
+
+
+def stored_property_key(key: str) -> str:
+    """``key`` as Logseq stores it: lower-cased, ``_`` read as ``-`` (#21)."""
+    return key.lower().replace("_", "-")
 
 
 def note_renamed_property_key(key: str, stored: str) -> None:
@@ -1997,6 +2022,35 @@ def stored_properties(api, uuid: str) -> tuple:
     if not isinstance(entity, dict):
         return {}, {}
     return entity.get("properties") or {}, entity.get("properties-text-values") or {}
+
+
+def kept_properties(api, uuid: str, content: str) -> tuple:
+    """The properties a replacement of block ``uuid``'s text with ``content``
+    passes back, as ``(values, texts)`` like :func:`stored_properties`.
+
+    Properties are lines of the text, so replacing it drops them unless their
+    text goes back through ``updateBlock``'s ``opts.properties`` (#30). Only
+    what has a text goes back: a markdown heading ("## Title") shows up as
+    heading 2 among the values but comes from the "##", not from a line.
+
+    A key ``content`` sets itself is left out: Logseq lets the passed value
+    win and drops the caller's line (measured, 0.10.15, #66); with ``_`` for
+    ``-`` both lines stay and the passed one, written last, wins. Keys compare
+    as Logseq stores them. Every line counts, one in a code block too:
+    ``updateBlock`` takes such a line out of the code block as a property
+    (measured, #68), unlike a file read, so property_line_mask is not the rule.
+
+    ``id`` and ``custom-id`` always go back. The block's uuid is not the
+    text's to set (#56), and a foreign ``id::`` line in a code block, which
+    the id rules read as code, would otherwise leave the block and become its
+    uuid (#68).
+    """
+    values, texts = stored_properties(api, uuid)
+    own = {stored_property_key(m.group(1))
+           for m in map(PROPERTY_LINE_RE.match, content.split("\n")) if m}
+    own -= _PROPERTY_KEYS_READ_AS_ID
+    texts = {k: v for k, v in texts.items() if k not in own}
+    return {k: v for k, v in values.items() if k in texts}, texts
 
 
 def apply_block_properties(api, block_uuid: str, pairs) -> dict:
