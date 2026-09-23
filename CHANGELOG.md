@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as well. Input that was no uuid at all could create the heading before a
   later check refused it with "Nothing was written"; it is refused first now,
   exit 1 as a missing block rather than exit 2.
+- README and AGENTS.md promised every error as a JSON object on stderr under
+  `--json`. Most are, but a refused option (exit 2) and a write Logseq
+  dropped still come as a plain `Error:` line; both now say so, and name the
+  exit status as the signal to rely on.
   See [#70](https://github.com/muellerei/logseq-cli/issues/70).
 - `add-journal-block --upsert-heading` dropped the properties of the block it
   replaced: it called `updateBlock` with the new text alone, and measured

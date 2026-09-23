@@ -6,8 +6,8 @@
 Read and write a Logseq graph from a shell — pages, journals, blocks,
 properties and graph analysis, without opening the app. It is built for a
 caller that is a script or an AI agent rather than a person at a prompt:
-`--json` on every command, payload on stdout, errors as JSON on stderr,
-non-zero exit on failure, `--dry-run` on everything that writes, and output
+`--json` on every command, payload on stdout, errors on stderr (mostly
+as JSON), non-zero exit on failure, `--dry-run` on everything that writes, and output
 bounded so it fits in a context window.
 
 No vendor coupling — a plain Python package with `click` and `requests`.
@@ -337,7 +337,8 @@ logseq-cli get-journal-summary --range "this week" --no-content
 # 5. delete-block works as an alias for remove-block
 logseq-cli delete-block --id "$UUID" --dry-run
 
-# 6. Errors are JSON when --json is set — always on stderr, never on stdout
+# 6. Errors go to stderr, never stdout; under --json mostly as a JSON object,
+#    some as a plain "Error:" line, so rely on the exit status
 logseq-cli get-properties --page "Missing Page" --json 2>err.json
 ```
 
