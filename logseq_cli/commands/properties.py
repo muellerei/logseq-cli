@@ -2,6 +2,7 @@ import re
 
 import click
 
+from logseq_cli.blocktext import refuse_split_property
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.helpers import (
@@ -140,6 +141,8 @@ Note:
   refused before anything is read: whitespace, a leading '#', or any of
   : , ; / \\ [ ] ( ) { } | ^ " @ ~ `
   "custom-id" is refused as well: Logseq reads it as the block's uuid.
+  A value is one line: a line break in it is refused, since Logseq would read
+  each line after it as a line of the block (a block, a property, its id).
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
@@ -159,6 +162,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
         fail(str(e), as_json=as_json, page=page, property=key)
     note_renamed_property_key(key, stored)
     key = stored
+    refuse_split_property(key, value)
 
     # Get page blocks to find the first block (properties block)
     blocks = api.get_page_blocks_tree(page)
@@ -285,6 +289,8 @@ Example:
 Note:
   Keys follow the same rule as set-property: stored lower-case with '_' as
   '-', and refused if Logseq would not read them back as a property.
+  A value is one line: a line break in it is refused, since Logseq would read
+  each line after it as a line of the block (a block, a property, its id).
 """)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
@@ -303,6 +309,7 @@ def set_block_property(ctx, block_id, key, value, dry_run, as_json):
         fail(str(e), as_json=as_json, block=block_id, property=key)
     note_renamed_property_key(key, stored)
     key = stored
+    refuse_split_property(key, value)
 
     # Sent as typed unless it is a number that prints back the same (#35)
     value = coerce_property_value(value)

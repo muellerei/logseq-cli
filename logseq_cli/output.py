@@ -13,6 +13,7 @@ import requests
 from logseq_cli.api import DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
+from logseq_cli.blocktext import SplitBlockError
 
 
 def handle_connection_error(func):
@@ -75,6 +76,18 @@ def handle_connection_error(func):
                 str(e),
                 as_json=as_json,
                 reason="config_error",
+            )
+        except SplitBlockError as e:
+            # Refused before the write: the text would not come back from the
+            # page file as the block written (#47). A usage error, like the
+            # other refusals of --content, with the line for an agent to fix.
+            fail(
+                str(e),
+                as_json=as_json,
+                exit_code=2,
+                reason="splits_into_blocks",
+                line=e.line,
+                kind=e.kind,
             )
         except InvalidKeywordError as e:
             # The connection is healthy and no query was sent; the input was

@@ -78,7 +78,8 @@ class TestSetTodoStatusDryRun:
         result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DONE"])
         assert result.exit_code == 0
-        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a1", "DONE Write the report")
+        api.update_block.assert_called_once_with("00000000-0000-4000-8000-0000000000a1", "DONE Write the report",
+                                                 replacing="TODO Write the report")
 
     def test_missing_block_still_fails_under_dry_run(self, api):
         api.get_block.return_value = None

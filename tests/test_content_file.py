@@ -5,10 +5,10 @@ Two problems this solves, both hit in real journal use:
 1. Shell quoting. ``--content "$(cat file)"`` breaks on an apostrophe in the
    text, and the reflex fix (stripping special characters) mangles umlauts.
    Reading the file directly removes the shell from the path entirely.
-2. Multiple flush ``- `` roots. ``add-journal-block --content`` rejects those
-   via ``has_flush_newline_bullets`` because inline they would silently become
-   one block with raw newline bullets. From a file the whole text is parsed as
-   a tree, so flush roots are legitimate siblings and the guard must not fire.
+2. Multiple flush ``- `` roots. ``add-journal-block --content`` refuses those,
+   because inline they would be one block that Logseq splits when it reads the
+   page file again (#47). From a file the whole text is parsed as a tree, so
+   flush roots are legitimate siblings and the check must not fire.
 """
 import json as _json
 from unittest.mock import MagicMock
@@ -124,13 +124,13 @@ class TestAddJournalBlockContentFile:
             assert len(api.graph.children[root["uuid"]]) == 2
 
     def test_guard_does_not_fire_for_file_input(self, api, tmp_path):
-        """Flush bullets from a file must not raise the --content UsageError."""
+        """Flush bullets from a file must not be refused like --content."""
         f = tmp_path / "flat.md"
         f.write_text("- one\n- two\n- three", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--content-file", str(f)])
         assert result.exit_code == 0, result.output
-        assert "with no indentation" not in result.output
+        assert "becomes a block of its own" not in result.output
         assert "Added 3 block(s)" in result.output
 
     def test_guard_still_fires_for_inline_content(self, api):
@@ -138,7 +138,7 @@ class TestAddJournalBlockContentFile:
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--content", "Head\n- one\n- two"])
         assert result.exit_code != 0
-        assert "with no indentation" in result.output
+        assert "becomes a block of its own" in result.output
         assert "--content-file" in result.output
 
     def test_single_root_with_children(self, api, tmp_path):
