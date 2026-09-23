@@ -19,6 +19,7 @@ through both, rather than by writing the expected tab runs out twice.
 """
 
 
+from logseq_cli.helpers import outline_text, process_blocks
 from logseq_cli.render import blocks_to_markdown, blocks_with_ids
 
 
@@ -52,7 +53,7 @@ class TestPropertiesBlockKeepsItsShape:
     def test_mixed_block_is_not_a_properties_block(self):
         """One prose line is enough to make it ordinary content."""
         content = "type:: note\nthis is prose"
-        assert blocks_to_markdown([_block(content)]) == f"- {content}"
+        assert blocks_to_markdown([_block(content)]) == "- type:: note\n  this is prose"
 
 
 class TestIndentation:
@@ -108,3 +109,45 @@ class TestRoundTrip:
         assert blocks_to_markdown(tree) == (
             "type:: note\nstatus:: open\n- first note\n\t- detail"
         )
+
+
+class TestFurtherLinesSitUnderTheirBullet:
+    """A block's second and later lines sit under its bullet, indented (#75)."""
+
+    # Measured: the file Logseq 0.10.15 wrote for this tree. Blank lines
+    # inside a block get the indent too.
+    TREE = [
+        _block("top line one\ntop line two\nk1:: v1", children=[
+            _block("child one\nchild cont\nk2:: v2", children=[
+                _block("grand\n```\ncode a\n\ncode b\n```\nafter fence")]),
+            _block("child two\n\nafter blank")]),
+        _block("last"),
+    ]
+    LOGSEQ_FILE = (
+        "- top line one\n  top line two\n  k1:: v1\n"
+        "\t- child one\n\t  child cont\n\t  k2:: v2\n"
+        "\t\t- grand\n\t\t  ```\n\t\t  code a\n\t\t  \n\t\t  code b\n\t\t  ```\n"
+        "\t\t  after fence\n"
+        "\t- child two\n\t  \n\t  after blank\n"
+        "- last"
+    )
+
+    def test_markdown_is_the_file_logseq_writes(self):
+        assert blocks_to_markdown(self.TREE) == self.LOGSEQ_FILE
+
+    def test_page_properties_stay_as_they_are(self):
+        tree = [_block(PROPERTIES), _block("a\nb")]
+        assert blocks_to_markdown(tree) == PROPERTIES + "\n- a\n  b"
+
+    def test_read_on_from_a_properties_only_block_indents_it(self):
+        """Mid-page (``--from-block``) it is a bulleted block like any other."""
+        out = blocks_to_markdown([_block(PROPERTIES)], page_start=False)
+        assert out == "- type:: note\n  status:: open"
+
+    def test_three_renderers_agree(self):
+        """``outline_text`` shows what a write will be; the reads lay out a
+        block's lines the same way. They part only on an empty block, which
+        the reads skip and a write keeps."""
+        tree = self.TREE
+        assert outline_text(tree) == blocks_to_markdown(tree)
+        assert process_blocks(tree) == outline_text(tree).replace("\t", "  ")

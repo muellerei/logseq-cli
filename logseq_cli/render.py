@@ -14,7 +14,7 @@ them, and a helper three modules import is not private to any of them.
 import re
 
 from logseq_cli.blocktext import PROPERTY_LINE_RE
-from logseq_cli.helpers import normalize_heading
+from logseq_cli.helpers import bullet_lines, normalize_heading
 
 
 BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
@@ -101,7 +101,7 @@ def blocks_to_markdown(blocks, indent=0, page_start=True):
                 # Properties block: no bullet prefix, matches Logseq file format
                 lines.append(content)
             else:
-                lines.append(f"{prefix}- {content}")
+                lines.extend(bullet_lines(content, prefix))
         children = block.get("children", [])
         if children:
             lines.append(blocks_to_markdown(children, indent + 1))
