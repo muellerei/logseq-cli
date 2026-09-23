@@ -567,6 +567,10 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # at all, the env var wins over the config's default_heading.
         under_heading = resolve_heading(load_config(), under_heading)
         refuse_split_heading(under_heading, command="add-journal-block")
+    # Before the journal page is looked up and created: that is a write.
+    if upsert_heading and not under_heading:
+        click.echo("Error: --upsert-heading requires --under-heading", err=True)
+        sys.exit(1)
 
     # After the checks that can refuse, and on the text as written: dropped
     # id:: lines are gone from it.
@@ -663,10 +667,6 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # --- upsert-heading: find-or-replace child block under a heading ---
     if upsert_heading:
-        if not under_heading:
-            click.echo("Error: --upsert-heading requires --under-heading", err=True)
-            sys.exit(1)
-
         if dry_run:
             position_desc = f"upsert '{upsert_heading}' under '{under_heading}'"
             if as_json:

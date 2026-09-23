@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first `- ` was no bullet and a first `# title` was not recognised as the
   page title. Affects `add-journal-block --content-file`, `insert-block
   --tree-file` and, since #49, every `--content-file`.
+- `add-journal-block --upsert-heading` without a heading (with `--top-level`,
+  or with none configured) created the journal page when it was missing and
+  only then refused. The check now comes first, so a refused run writes
+  nothing; with several `--content` values, where `--upsert-heading` is not
+  used, it is refused the same way instead of being passed over.
 
 ## [0.14.0] - 2026-09-23
 
