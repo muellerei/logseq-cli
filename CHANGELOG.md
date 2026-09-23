@@ -114,6 +114,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `set-todo-status` joined the first two lines of a block whose marker stood
+  alone on its line: it looked for the marker by splitting the whole text at
+  whitespace, and a line break is whitespace, so `TODO\nnotes` became
+  `DONE notes`. A code block under a bare `TODO` lost the line break before
+  its fence, which left the closing fence without an opener and, since #47,
+  had the write refused. Only the first line changes now.
 - Text written as one block could come back from the page file as several, or
   take in the blocks after it. Logseq writes a block's text under one bullet,
   and its file parser reads some lines as block boundaries (measured, 0.10.15):
