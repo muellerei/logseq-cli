@@ -21,13 +21,41 @@ class TestCoercePropertyValue:
         assert coerce_property_value("42") == 42
         assert isinstance(coerce_property_value("42"), int)
 
-    def test_float_string_becomes_float(self):
-        assert coerce_property_value("3.14") == 3.14
-        assert isinstance(coerce_property_value("3.14"), float)
-
-    def test_negative_and_zero(self):
-        assert coerce_property_value("-7") == -7
+    def test_zero_becomes_int(self):
         assert coerce_property_value("0") == 0
+        assert isinstance(coerce_property_value("0"), int)
+
+    def test_surrounding_whitespace_is_ignored_like_the_parser_does(self):
+        # --property "prio = 5" hands over " 5"; Logseq reads that line as 5.
+        assert coerce_property_value(" 5") == 5
+        assert coerce_property_value("5 ") == 5
+
+    def test_largest_exact_integer_becomes_int(self):
+        assert coerce_property_value("9007199254740991") == 9007199254740991
+
+    # #35: a value is sent as a number only where Logseq's parser makes one AND
+    # printing that number gives back the typed text. Everything else is sent
+    # as typed, because the file shows whatever upsertBlockProperty receives.
+    # Measured against Logseq 0.10.15; the comments say what the file would
+    # have shown had the value gone out as a number, or why it stays text.
+    @pytest.mark.parametrize("typed", [
+        "01234",             # leading zero: 1234 in the file
+        "00",
+        "1.50",              # 1.5
+        "3.14",              # parser keeps text
+        "-7",                # parser keeps text
+        "+5",                # 5
+        "1e3",               # 1000
+        "1_0",               # 10
+        "\u0665",           # Arabic-Indic five: 5
+        "9007199254740992",  # parser keeps text above 2^53-1
+        "9007199254740993",  # ...2992: JSON carries it as a double
+        "nan", "inf", "-inf", "1e400",  # floats JSON cannot carry
+        "1" * 5000,          # past Python's int() digit limit: must not raise
+    ])
+    def test_value_is_sent_as_typed(self, typed):
+        assert coerce_property_value(typed) == typed
+        assert isinstance(coerce_property_value(typed), str)
 
     def test_plain_string_unchanged(self):
         assert coerce_property_value("hello") == "hello"
