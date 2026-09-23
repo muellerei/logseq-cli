@@ -743,8 +743,9 @@ Note:
   dead refs) and deletes the original.
   --under nests the block as the target's FIRST child; --before puts it directly
   in front of the target as a sibling. Children always move along.
-  A block cannot be moved into its own subtree; Logseq refuses that silently, so
-  the move is verified by re-reading and reported as an error if it did not take.
+  A target inside the block's own subtree is refused before anything moves.
+  Logseq answers every move with null, so the move is verified by re-reading
+  and reported as an error if it did not take.
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to move")
 @click.option("--under", default=None, help="UUID of the new parent (block becomes its first child)")
