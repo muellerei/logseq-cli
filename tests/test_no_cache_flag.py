@@ -14,7 +14,6 @@ These tests drive the real CLI and count outgoing requests, because the claim
 is about what goes to the network, not about an attribute.
 """
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest

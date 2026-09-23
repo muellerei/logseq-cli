@@ -13,7 +13,6 @@ a thousand blocks from filling a terminal, and it is invisible in the count
 line above the list, so a silent change of it misleads twice.
 """
 
-import pytest
 
 from logseq_cli.commands.query import _print_results
 

@@ -9,7 +9,7 @@ Thanks for your interest in contributing to logseq-cli!
 git clone https://github.com/muellerei/logseq-cli.git
 cd logseq-cli
 
-# Install in editable mode, with the test dependencies
+# Install in editable mode, with pytest and ruff
 pip install -e ".[dev]"
 
 # Verify installation
@@ -64,6 +64,7 @@ logseq-cli/
 3. **Run the test suite, and add to it.**
    ```bash
    python3 -m pytest -q
+   ruff check .
    ```
    Tests mock the API (`unittest.mock` + `CliRunner`); `tests/conftest.py` has a
    `FakeGraph` for the write paths, needed wherever a command verifies its write

@@ -53,7 +53,7 @@ class TestWithChildren:
         # the grandchild must sit deeper than the child, so the tree shape is
         # readable rather than a flat dump
         def indent_of(needle):
-            line = next(l for l in r.output.splitlines() if needle in l)
+            line = next(ln for ln in r.output.splitlines() if needle in ln)
             return len(line) - len(line.lstrip())
         assert indent_of("=> state matches") > indent_of("**Implementation:**")
 

@@ -437,7 +437,6 @@ class TestContentSearchFallback:
 
     def test_zero_hits_falls_back_to_page_name_search(self):
         # Content search returns [], so the page-name fallback runs.
-        call = {"n": 0}
 
         def _post(url, json=None, headers=None, timeout=None):
             method = json.get("method") if json else None

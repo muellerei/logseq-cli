@@ -12,7 +12,6 @@ rather than from what was actually there.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli

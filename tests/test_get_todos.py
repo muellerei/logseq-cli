@@ -45,8 +45,8 @@ class TestGetTodosPageInline:
         # Each TODO line should mention its page directly
         # Find the lines containing the first todo
         lines = result.output.splitlines()
-        line_with_first = next((l for l in lines if "first task" in l), "")
-        line_with_second = next((l for l in lines if "second task" in l), "")
+        line_with_first = next((ln for ln in lines if "first task" in ln), "")
+        line_with_second = next((ln for ln in lines if "second task" in ln), "")
         assert "Project Beta" in line_with_first, f"page missing inline: {line_with_first!r}"
         assert "Project Alpha" in line_with_second, f"page missing inline: {line_with_second!r}"
 
@@ -395,7 +395,7 @@ class TestGetTodosBlockReferences:
         runner = CliRunner()
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, ["get-todos"])
-        line = next(l for l in result.output.splitlines() if "also on" in l)
+        line = next(ln for ln in result.output.splitlines() if "also on" in ln)
         assert "Wednesday; 2026-09-14" in line, (
             f"occurrences are not separably delimited: {line!r}")
 

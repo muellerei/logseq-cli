@@ -18,7 +18,6 @@ blank block but erases the text of an existing one.
 """
 import pytest
 import click
-from click.testing import CliRunner
 
 from tests.conftest import split_runner, fake_api
 from logseq_cli.cli import cli

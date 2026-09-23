@@ -21,7 +21,6 @@ The commands are decorated at import time and cannot be undecorated, so the
 assertions run against a function defined here: the decorator is applied to a
 local function, and what comes back has to point at this module.
 """
-import functools
 
 from logseq_cli.cli import cli
 from logseq_cli.output import handle_connection_error
