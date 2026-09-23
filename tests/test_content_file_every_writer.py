@@ -144,5 +144,5 @@ def test_the_file_text_is_passed_on_verbatim(tmp_path):
 def test_insert_block_with_nothing_to_insert_names_every_source():
     result, _ = _run(["insert-block", "--child-of", B1])
     assert result.exit_code != 0
-    for option in ("--content", "--content-file", "--tree"):
+    for option in ("--content", "--content-file", "--tree", "--tree-file"):
         assert option in result.output

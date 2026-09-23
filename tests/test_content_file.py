@@ -456,13 +456,16 @@ class TestInsertBlockTreeFile:
             "insert-block", "--child-of", "p", "--content", "x", "--tree-file", str(f)])
         assert result.exit_code != 0
         assert "not both" in result.output
+        assert "--tree-file" in result.output
         api.insert_block.assert_not_called()
 
     def test_missing_file_fails_before_any_write(self, api, tmp_path):
         result = CliRunner().invoke(cli, [
             "insert-block", "--child-of", "p", "--tree-file", str(tmp_path / "gone.md")])
         assert result.exit_code != 0
-        assert "not found" in result.output
+        # It names the option given, not --content-file, which this command
+        # did not have when the message was written for add-journal-block.
+        assert "--tree-file not found" in result.output
         api.insert_block.assert_not_called()
 
     def test_dry_run_does_not_write(self, api, tmp_path):
