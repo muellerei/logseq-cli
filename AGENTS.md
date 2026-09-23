@@ -302,6 +302,10 @@ logseq-cli replace-text --page "Page" --find "X" --replace "Y" --dry-run
 logseq-cli replace-text --page "Page" --find "X" --replace "Y"
 ```
 
+`--replace` is written as given. With `--regex` it is a template, as `--find`
+is a pattern: `\1` or `\g<name>` inserts a group, and a literal backslash is
+doubled.
+
 To relocate a block, prefer `move-block` over `copy-block --remove`: it moves the
 block itself, so its UUID and every `((block-ref))` pointing at it survive, and
 nothing is deleted.

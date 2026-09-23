@@ -42,6 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `replace-text` without `--regex` read backslashes in `--replace` as escapes,
+  while `--find` was matched literally: `--replace 'C:\new'` wrote a line
+  break, and the read-back check agreed, since the block held what had been
+  computed. `x\dy` ended in a traceback and `\g<0>` inserted the match. The
+  replacement is now written as given. With `--regex` it stays a template,
+  since group references are what `--regex` is for, and an invalid pattern or
+  group reference is an error message before any block is written, where it
+  was a traceback. `\g<0>` without `--regex` now writes those characters.
+  See [#60](https://github.com/muellerei/logseq-cli/issues/60).
 - `insert-block --tree-file` named the wrong option when it could not read the
   file: `--content-file not found: tree.md`, an option `insert-block` did not
   have. It reads through the function written for `add-journal-block`, whose
