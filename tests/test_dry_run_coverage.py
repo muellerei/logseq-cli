@@ -587,8 +587,13 @@ class TestEveryWriteHasADryRun:
         module = importlib.import_module(module_name)
         source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
+        # Sliced by line number from one split: ast.get_source_segment splits
+        # the whole file again for every function, which on helpers.py cost
+        # most of a second. Top-level functions start at column 0, so the
+        # text is the same.
+        lines = source.splitlines(keepends=True)
         return {
-            node.name: ast.get_source_segment(source, node)
+            node.name: "".join(lines[node.lineno - 1:node.end_lineno])
             for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
@@ -625,17 +630,43 @@ class TestEveryWriteHasADryRun:
                 func.__name__, "")
         return bodies
 
+    @classmethod
+    @functools.lru_cache(maxsize=None)
+    def _writing_helpers(cls):
+        """Functions in helpers.py that write, directly or through each other.
+
+        A command may write only through a helper: since #31 every
+        ``--keep-ids`` write of insert-block goes through one, and a scan for
+        ``api.<call>(`` in the command body alone lost the command. Derived
+        from the source to a fixed point, so a new writing helper counts
+        without being listed.
+        """
+        functions = cls._module_functions("logseq_cli.helpers")
+        calls = cls._mutating_calls()
+        writers = {name for name, source in functions.items()
+                   if any(f"api.{call}(" in source for call in calls)}
+        while True:
+            more = {name for name, source in functions.items()
+                    if name not in writers
+                    and any(f"{w}(" in source for w in writers)}
+            if not more:
+                return writers
+            writers |= more
+
     def _writing_commands(self):
         from logseq_cli.cli import cli as root
 
         bodies = self._command_bodies()
+        calls = self._mutating_calls()
+        helpers = self._writing_helpers()
         writing = {}
         for name, command in root.commands.items():
             func = command.callback
             while hasattr(func, "__wrapped__"):
                 func = func.__wrapped__
             source = bodies.get(func.__name__, "")
-            if any(f"api.{call}(" in source for call in self._mutating_calls()):
+            if (any(f"api.{call}(" in source for call in calls)
+                    or any(f"{h}(api" in source for h in helpers)):
                 writing[name] = command
         return writing
 
@@ -643,12 +674,15 @@ class TestEveryWriteHasADryRun:
     # because the thing guarded against is a scan that finds *fewer* commands
     # than it should, and a sample of five cannot see that — nor can a set
     # derived from the scan, which would assert that the scan equals itself.
+    # move-block joined when the scan learned to follow writing helpers
+    # (#31): it moves only through move_block_verified, and was a writer the
+    # body scan never saw.
     _KNOWN_WRITERS = {
         "add-block-ref", "add-journal-block", "add-journal-content",
         "add-journal-entry", "add-note-content", "copy-block", "create-page",
-        "delete-block", "delete-page", "insert-block", "remove-block",
-        "remove-property", "rename-page", "replace-text", "set-block-property",
-        "set-property", "set-todo-status", "update-block",
+        "delete-block", "delete-page", "insert-block", "move-block",
+        "remove-block", "remove-property", "rename-page", "replace-text",
+        "set-block-property", "set-property", "set-todo-status", "update-block",
     }
 
     def test_the_scan_finds_the_known_writers(self):

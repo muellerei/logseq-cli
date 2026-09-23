@@ -24,7 +24,7 @@ from logseq_cli.helpers import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_formatted_content_with_uuids,
-    insert_options,
+    insert_block_at,
     move_block_verified,
     parse_date_keyword,
     parse_hierarchical_content,
@@ -319,8 +319,9 @@ Notes:
   last; it only applies together with --child-of.
   id:: lines (in --tree or --content) are dropped unless --keep-ids is given,
   and the command says so. Use --keep-ids when moving or restoring an outline.
-  It refuses, before writing anything, an id a block still has (the copy
-  case: drop --keep-ids) and one that survives only as a ((ref)) target.
+  It restores an id that survives only as a ((ref)) target, and refuses,
+  before writing anything, an id a block or page still has (the copy case:
+  drop --keep-ids) and a second id:: line in one block.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -332,7 +333,7 @@ Notes:
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
 @click.option("--tree-file", "tree_file", default=None, help="Read the tree (tab-indented text or JSON) from a file. Mutually exclusive with --tree and --content.")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
-@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline; an id only a ((ref)) still holds is restored, so the ref resolves again. Refused before any write: an id a block or page still has, a repeated or malformed one, two in one block")
 @click.option("--dry-run", is_flag=True, help="Show what would be inserted (block count + position) without writing")
 @click.option("--quiet", is_flag=True, help="With --tree: print only the confirmation line, not one uuid line per block")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
@@ -500,7 +501,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"after {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = api.insert_block(clean_id, content, insert_options(content, keep_ids, sibling=True, before=False))
+            result = insert_block_at(api, clean_id, content, sibling=True, before=False, keep_ids=keep_ids)
             new_uuid = require_insert(result, f"a block after {clean_id[:8]}...")
             position = f"after {clean_id[:8]}..."
     elif before:
@@ -511,7 +512,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"before {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = api.insert_block(clean_id, content, insert_options(content, keep_ids, sibling=True, before=True))
+            result = insert_block_at(api, clean_id, content, sibling=True, before=True, keep_ids=keep_ids)
             new_uuid = require_insert(result, f"a block before {clean_id[:8]}...")
             position = f"before {clean_id[:8]}..."
     elif child_of:
@@ -526,9 +527,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            opts = (insert_options(content, keep_ids, sibling=False, before=True) if as_first
-                    else insert_options(content, keep_ids, sibling=False))
-            result = api.insert_block(clean_id, content, opts)
+            result = insert_block_at(api, clean_id, content, sibling=False, before=as_first,
+                                     keep_ids=keep_ids)
             new_uuid = require_insert(result, f"a {where} of {clean_id[:8]}...")
             position = f"{where} of {clean_id[:8]}..."
 

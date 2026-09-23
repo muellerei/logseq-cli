@@ -458,8 +458,9 @@ Note:
   Counterpart of add-journal-block --under-heading for non-journal pages.
   Heading is created if missing.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
-  --keep-ids refuses, before writing anything, an id a block still has, one
-  only a ((ref)) still holds, and one repeated in the content.
+  --keep-ids restores an id only a ((ref)) still holds; it refuses, before
+  writing anything, an id a block or page still has, one repeated in the
+  content, and a second id:: line in one block.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", required=True, help="Content to add")
@@ -467,7 +468,7 @@ Note:
 @click.option("--under-heading", default=None, help="Insert content under this heading; create heading if missing")
 @click.option("--property", "properties", multiple=True, help="Set KEY=VALUE property on the created (root) block; repeatable. KEY follows set-property's rule: lower-cased, '_' read as '-', refused if Logseq would drop it")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show target page, heading and block count, without writing")
-@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline; an id only a ((ref)) still holds is restored, so the ref resolves again. Refused before any write: an id a block or page still has, a repeated or malformed one, two in one block")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
