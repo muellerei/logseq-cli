@@ -7,7 +7,10 @@ script, 5 of those to filter the content by regex, all 6 guessing the shape
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from logseq_cli.cli import cli
+from logseq_cli.commands.todos import _TODO_MARKERS
 from tests.conftest import split_runner
 
 
@@ -89,3 +92,31 @@ class TestJsonShape:
                       "page", "uuid", "journal_day", "scheduled", "deadline", "repeating",
                       "next_due", "references", "references_withheld"):
             assert field in epilog, field
+
+
+class TestMarkerIsStrippedForEveryMarker:
+    """content promised "without its marker", but the strip was a hand-kept list
+    that missed CANCELED and WAIT, both written by set-todo-status: --match
+    "^ship" missed "CANCELED ship it" and --match cancel hit them all. The
+    block's own :block/marker now says what to strip."""
+
+    @pytest.mark.parametrize("marker", sorted(_TODO_MARKERS | {"CANCELLED", "IN-PROGRESS"}))
+    def test_marker_is_not_part_of_the_content(self, marker):
+        api = MagicMock()
+        api.datascript_query.return_value = [
+            [{"content": f"{marker} ship it", "marker": marker, "uuid": "u1"},
+             {"original-name": "Page A", "name": "page a"}]]
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--no-follow-refs", "--status", marker,
+                                            "--match", "^ship", "--json"])
+        todos = json.loads(r.stdout)["todos"]
+        assert [t["content"] for t in todos] == ["ship it"]
+
+    def test_a_bare_marker_leaves_no_text(self):
+        api = MagicMock()
+        api.datascript_query.return_value = [
+            [{"content": "TODO", "marker": "TODO", "uuid": "u1"},
+             {"original-name": "Page A", "name": "page a"}]]
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--no-follow-refs", "--json"])
+        assert json.loads(r.stdout)["todos"][0]["content"] == ""
