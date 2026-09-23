@@ -1237,6 +1237,32 @@ def resolve_single_block(api, content: str, page: str = None, use_regex: bool = 
     return uuid
 
 
+def check_move(api, src_uuid: str, target_uuid: str) -> None:
+    """Refuse a move Logseq would not carry out, before anything is written.
+
+    Shared by the move and its dry run, so a preview cannot promise a move the
+    real run refuses. The subtree case is the one refusal Logseq is known for,
+    and it gives it by doing nothing, so this is the only place it can be named.
+    """
+    src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
+    target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
+    if src_uuid == target_uuid:
+        raise click.ClickException("Source and target are the same block.")
+
+    source = api.get_block(src_uuid, include_children=True)
+    if not source:
+        raise click.ClickException(
+            f"Source block {src_uuid[:8]}... not found. Nothing was moved.")
+    if not api.get_block(target_uuid, include_children=False):
+        raise click.ClickException(
+            f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
+    if target_uuid in _collect_child_uuids(source):
+        raise click.ClickException(
+            f"Target {target_uuid[:8]}... lies inside the subtree of "
+            f"{src_uuid[:8]}...; a block cannot be moved into its own subtree. "
+            "Nothing was moved.")
+
+
 def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = False) -> None:
     """Move ``src_uuid`` to ``target_uuid``, then prove it landed.
 
@@ -1261,21 +1287,7 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
     """
     src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
     target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
-    if src_uuid == target_uuid:
-        raise click.ClickException("Source and target are the same block.")
-
-    source = api.get_block(src_uuid, include_children=True)
-    if not source:
-        raise click.ClickException(
-            f"Source block {src_uuid[:8]}... not found. Nothing was moved.")
-    if not api.get_block(target_uuid, include_children=False):
-        raise click.ClickException(
-            f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
-    if target_uuid in _collect_child_uuids(source):
-        raise click.ClickException(
-            f"Target {target_uuid[:8]}... lies inside the subtree of "
-            f"{src_uuid[:8]}...; a block cannot be moved into its own subtree. "
-            "Nothing was moved.")
+    check_move(api, src_uuid, target_uuid)
     api.move_block(src_uuid, target_uuid, {"before": True} if before else {"children": True})
 
     landed = api.get_block(target_uuid, include_children=True) or {}
