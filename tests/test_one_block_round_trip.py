@@ -278,15 +278,13 @@ def test_the_refusal_fits_the_input(args, where, way):
 
 
 @pytest.mark.parametrize("args", [
-    ["add-block-ref", "--source-id", "abc\n- x", "--journal-date", "2026-01-05",
-     "--under-heading", "## Refs"],
     ["set-block-property", "--id", ANCHOR, "--key", "k", "--value", "v\n- x"],
     ["set-property", "--page", "Page A", "--key", "k", "--value", "v\n# h"],
     # Not a block boundary, and still a line of its own in the block's text.
     ["set-block-property", "--id", ANCHOR, "--key", "note", "--value", "x\ncustom-id:: foo"],
     ["insert-block", "--page", "Page A", "--content", "ok", "--property", "k=v\n# h"],
     ["add-note-content", "--page", "New page", "--content", "ok", "--property", "k=v\n- x"],
-], ids=["add-block-ref", "set-block-property", "set-property", "value with an id line",
+], ids=["set-block-property", "set-property", "value with an id line",
         "insert-block --property",
         "add-note-content --property"])
 def test_other_text_is_checked_before_the_first_write(args):

@@ -337,7 +337,8 @@ class TestRenamePageDryRun:
 class TestAddBlockRefDryRun:
     def test_dry_run_names_source_page_and_heading(self, api):
         api.get_page.return_value = {"name": "Project Alpha"}
-        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it"}
+        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it",
+                                      "page": {"id": 1}}
         api.get_page_blocks_tree.return_value = [{"uuid": "h1", "content": "## Tasks"}]
         result = CliRunner().invoke(cli, ["add-block-ref", "--source-id", "src-uuid",
                                           "--page", "Project Alpha",
@@ -349,21 +350,10 @@ class TestAddBlockRefDryRun:
         assert "## Tasks" in result.output
         _assert_no_mutation(api)
 
-    def test_dry_run_warns_when_the_source_block_is_missing(self, api):
-        # A ref to a non-existent block renders as nothing; the live path never
-        # checks, so this is the preview's own contribution.
-        api.get_page.return_value = {"name": "Project Alpha"}
-        api.get_block.return_value = None
-        api.get_page_blocks_tree.return_value = []
-        result = CliRunner().invoke(cli, ["add-block-ref", "--source-id", "gone",
-                                          "--page", "Project Alpha", "--dry-run"])
-        assert result.exit_code == 0
-        assert "not found" in result.output
-        _assert_no_mutation(api)
-
     def test_dry_run_does_not_create_a_missing_heading(self, api):
         api.get_page.return_value = {"name": "Project Alpha"}
-        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it"}
+        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it",
+                                      "page": {"id": 1}}
         api.get_page_blocks_tree.return_value = [{"uuid": "h1", "content": "## Notes"}]
         result = CliRunner().invoke(cli, ["add-block-ref", "--source-id", "src-uuid",
                                           "--page", "Project Alpha",
@@ -378,7 +368,8 @@ class TestAddBlockRefDryRun:
     def test_dry_run_does_not_create_a_missing_journal_page(self, api):
         api.get_page.return_value = None
         api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
-        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it"}
+        api.get_block.return_value = {"uuid": "src-uuid", "content": "TODO Ship it",
+                                      "page": {"id": 1}}
         api.get_page_blocks_tree.return_value = []
         result = CliRunner().invoke(cli, ["add-block-ref", "--source-id", "src-uuid",
                                           "--journal-date", "2026-04-23",
@@ -389,6 +380,7 @@ class TestAddBlockRefDryRun:
 
     def test_without_dry_run_writes(self, api):
         api.get_page.return_value = {"name": "Project Alpha"}
+        api.get_block.return_value = {"uuid": "src-uuid", "page": {"id": 1}}
         api.get_page_blocks_tree.return_value = [{"uuid": "h1", "content": "## Tasks"}]
         api.insert_block.return_value = {"uuid": "new-uuid"}
         result = CliRunner().invoke(cli, ["add-block-ref", "--source-id", "src-uuid",

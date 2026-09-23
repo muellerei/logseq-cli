@@ -287,12 +287,11 @@ from one that was there.
 
 On the in-place writes the preview shows the state that would be replaced —
 the old marker, the property value about to be overwritten, or (for
-`rename-page`) the pages whose `[[links]]` would be rewritten. Two of them
-catch mistakes the live path cannot see at all: `set-block-property --dry-run`
-fails on an unknown UUID, and `add-block-ref --dry-run` warns when the source
-block does not exist, which would otherwise write a ref that renders as
-nothing. Every validation still applies under `--dry-run`, so a preview that
-exits 0 means the real call would too.
+`rename-page`) the pages whose `[[links]]` would be rewritten. One of them
+catches a mistake the live path cannot see at all: `set-block-property
+--dry-run` fails on an unknown UUID. Every validation still applies under
+`--dry-run`, so a preview that exits 0 means the real call would too;
+`add-block-ref` refuses a source uuid no block has either way.
 
 ```bash
 # Preview first

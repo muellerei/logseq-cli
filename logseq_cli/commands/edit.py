@@ -674,11 +674,20 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     api = ctx.obj["api"]
     under_heading = resolve_heading(load_config(), under_heading)
     refuse_split_heading(under_heading, command="add-block-ref")
-    source_id = source_id.strip("()")
+    source_id = source_id.strip().strip("()").strip()
+    # A ref to no block renders as nothing, and the TODO it carries over looks
+    # linked and is not (#70). Asked before the page or the heading is written.
+    # For the uuid of a dead ref Logseq keeps a placeholder once the file is
+    # read again, a block without a page; a page's uuid gets null (measured).
+    source_block = api.get_block(source_id, include_children=False)
+    if not (source_block and source_block.get("page")):
+        # repr: an invisible character copied along shows, as does a line break.
+        fail(f"No block has the uuid {source_id!r}: a ref to it would render as "
+             "nothing. Nothing was written.", as_json=as_json, source_id=source_id)
+    # The uuid as Logseq holds it: getBlock also finds one in capitals, and
+    # whatever else came with the input would make the ref no ref.
+    source_id = source_block["uuid"]
     ref_content = f"(({source_id}))"
-    # The reference is block text like any other, checked before the page or
-    # the heading is written (#47).
-    refuse_split_block(ref_content, command="add-block-ref", where="The reference")
 
     if not journal_date and not page:
         # Default: today's journal
@@ -713,12 +722,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
 
 
     if dry_run:
-        # A block-ref is only worth anything if its source exists; a typo'd UUID
-        # writes a ((...)) that renders as nothing. The live path cannot check
-        # this without an extra call, but the preview can afford one.
-        source_block = api.get_block(source_id, include_children=False)
-        source_content = (source_block.get("content", "")
-                          if isinstance(source_block, dict) else "")
+        source_content = source_block.get("content", "")
         # Look the heading up WITHOUT creating it — find_or_create_heading would
         # append it to the page and make the preview a write.
         heading_exists = (find_heading(api, page, under_heading) is not None
@@ -731,7 +735,8 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         if as_json:
             output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}),
                     "position": position, "under_heading": under_heading,
-                    "source_exists": bool(source_block),
+                    # Kept for callers that read it; a missing source fails above.
+                    "source_exists": True,
                     "source_content": source_content,
                     "would_create_page": would_create_page,
                     "would_create_heading": bool(under_heading) and not heading_exists,
@@ -739,12 +744,8 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         else:
             click.echo(f"[DRY RUN] Would add block-ref {position}")
             click.echo(f"  ref: {ref_content}")
-            if source_block:
-                preview = source_content[:60] + ("..." if len(source_content) > 60 else "")
-                click.echo(f"  source: {preview}")
-            else:
-                click.echo(f"  source: WARNING - block {source_id} not found; "
-                           f"the ref would render as nothing")
+            preview = source_content[:60] + ("..." if len(source_content) > 60 else "")
+            click.echo(f"  source: {preview}")
             click.echo(f"  target page: {page}"
                        f"{' (would be created)' if would_create_page else ''}")
             if under_heading:
