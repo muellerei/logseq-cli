@@ -46,6 +46,7 @@ logseq-cli/
 ├── tests/            # pytest suite (no fixtures beyond tests/conftest.py)
 ├── examples/         # Shell scripts for common workflows
 ├── AGENTS.md         # AI agent reference
+├── skills/logseq-cli/SKILL.md  # When an agent reaches for the tool; tests/test_skill.py holds it to the CLI
 └── pyproject.toml    # Package config
 ```
 
