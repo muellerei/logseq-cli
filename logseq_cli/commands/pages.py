@@ -458,6 +458,8 @@ Note:
   Counterpart of add-journal-block --under-heading for non-journal pages.
   Heading is created if missing.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
+  Each line is a block of its own, so a code block written over several lines
+  is split, and an id:: line in it counts as an id.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.

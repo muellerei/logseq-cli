@@ -425,6 +425,9 @@ Notes:
   sibling roots, tab-indented lines their children. No shell quoting, so
   apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
+  An id:: line inside a code block (``` or ~~~) is code and is written as is
+  where the fence stays in one block: flat --content. Outline text is one
+  block per line, so a fence there is split and its id:: line counts.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
@@ -821,6 +824,8 @@ Note:
   Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
   it now auto-detects hierarchy.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
+  Each line is a block of its own, so a code block written over several lines
+  is split, and an id:: line in it counts as an id.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
