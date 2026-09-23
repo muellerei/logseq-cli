@@ -6,13 +6,19 @@
 Read and write a Logseq graph from a shell — pages, journals, blocks,
 properties and graph analysis, without opening the app. It is built for a
 caller that is a script or an AI agent rather than a person at a prompt:
-`--json` on every command, payload on stdout, errors as JSON on stderr,
-non-zero exit on failure, `--dry-run` on everything that writes, and output
+`--json` on every command, payload on stdout, errors on stderr (mostly
+as JSON), non-zero exit on failure, `--dry-run` on everything that writes, and output
 bounded so it fits in a context window.
 
 No vendor coupling — a plain Python package with `click` and `requests`.
 See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
 [design notes](#design-notes) for the decisions behind the above.
+
+An agent that has not met the tool yet finds it through the skill in
+[`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md): when to reach for
+it rather than the Markdown files, and the three habits that prevent damage.
+It follows the [Agent Skills](https://agentskills.io) format, so
+`npx skills add muellerei/logseq-cli` installs it for most coding agents.
 
 > **Which Logseq.** This is a tool for **file-based (Markdown) graphs**, driven
 > over Logseq's local HTTP API — the 0.10.x line, tested against 0.10.15, and
@@ -337,7 +343,8 @@ logseq-cli get-journal-summary --range "this week" --no-content
 # 5. delete-block works as an alias for remove-block
 logseq-cli delete-block --id "$UUID" --dry-run
 
-# 6. Errors are JSON when --json is set — always on stderr, never on stdout
+# 6. Errors go to stderr, never stdout; under --json mostly as a JSON object,
+#    some as a plain "Error:" line, so rely on the exit status
 logseq-cli get-properties --page "Missing Page" --json 2>err.json
 ```
 
@@ -692,6 +699,7 @@ logseq-cli/
 │   │   └── meta.py         # init and doctor
 │   └── cli.py        # Entry point: imports every command module
 ├── examples/         # Shell scripts for scripting/cronjobs
+├── skills/logseq-cli/SKILL.md  # The skill agents find the tool by
 └── pyproject.toml
 ```
 

@@ -7,10 +7,16 @@ package (`click`, `requests`) with no vendor coupling.
 What makes it scriptable:
 
 - `--json` on **every** command; payload goes to stdout, nothing else does
-- errors go to **stderr**, as a JSON object when `--json` is set, so stdout can
-  be parsed unconditionally
-- non-zero exit on failure, including "not found"
+- errors go to **stderr**, so stdout can be parsed unconditionally; under
+  `--json` mostly as a JSON object, some (a refused option, a write Logseq
+  dropped) as a plain `Error:` line
+- non-zero exit on failure, including "not found": 1 for a failure, 2 for
+  input the tool refused. The exit status is the signal to rely on
 - `--dry-run` on every command that writes, showing the state it would replace
+
+This file is the reference for an agent that has chosen the tool. The one
+that decides whether to use it at all is the skill,
+[`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md), which points here.
 
 ## Setup Check
 
