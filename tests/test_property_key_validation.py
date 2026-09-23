@@ -12,13 +12,14 @@ The tables below are the parser's verdicts, measured by writing each key into a
 file on a throwaway page and reading the parsed properties back (Logseq 0.10.15).
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from logseq_cli.blocktext import PROPERTY_LINE_RE
 from logseq_cli.cli import cli
 from logseq_cli.helpers import normalize_property_key, parse_property_pairs
-from tests.conftest import split_runner
+from tests.conftest import PageGraph, page_graph_api, split_runner
 
 # Keys the parser drops entirely: the line is no property at all on re-read.
 DROPPED = [
@@ -107,14 +108,24 @@ class TestParsePropertyPairs:
         assert parse_property_pairs(["  k =v"]) == [("k", "v")]
 
 
-def _api():
-    api = MagicMock()
-    api.get_page_blocks_tree.return_value = [{"uuid": "first", "properties": {}}]
-    api.get_block.return_value = {"uuid": "blk", "properties": {}}
-    api.get_page.return_value = {"name": "Page A"}
-    api.append_block_in_page.return_value = {"uuid": "new"}
-    api.insert_block.return_value = {"uuid": "new"}
-    return api
+def _api(first=""):
+    """Page A, its first block ``first``, and a block ``blk`` after it."""
+    return page_graph_api(PageGraph({"Page A": [first, {"content": "text", "uuid": "blk"}]}))
+
+
+def _written(api):
+    """The ``(key, value)`` pairs that reached Logseq: through
+    upsertBlockProperty, or as a line of the property block set-property
+    saves (#80)."""
+    pairs = [c.args[1:] for c in api.upsert_block_property.call_args_list]
+    for call in api.update_block.call_args_list:
+        pairs += [(m.group(1), line[m.end():].strip()) for line in call.args[1].split("\n")
+                  if (m := PROPERTY_LINE_RE.match(line))]
+    return pairs
+
+
+def _written_keys(api):
+    return [key for key, _value in _written(api)]
 
 
 def _run(args, api):
@@ -159,8 +170,7 @@ class TestEveryWritePath:
         api = _api()
         r = _run(path("Mixed"), api)
         assert r.exit_code == 0, r.stderr
-        keys = [c.args[1] for c in api.upsert_block_property.call_args_list]
-        assert keys == ["mixed"]
+        assert _written_keys(api) == ["mixed"]
         assert "'Mixed'" in r.stderr and "'mixed'" in r.stderr
 
     @pytest.mark.parametrize("path", PATHS, ids=lambda p: p.__name__.strip("_"))
@@ -168,7 +178,7 @@ class TestEveryWritePath:
         api = _api()
         r = _run(path("a-b"), api)
         assert r.exit_code == 0, r.stderr
-        assert [c.args[1] for c in api.upsert_block_property.call_args_list] == ["a-b"]
+        assert _written_keys(api) == ["a-b"]
         assert "stored as" not in r.stderr
 
     @pytest.mark.parametrize("path", PATHS, ids=lambda p: p.__name__.strip("_"))
@@ -199,10 +209,16 @@ class TestRemoveProperty:
     same rename, "set --key Status" stored "status" and "remove --key Status"
     reported success while removing nothing."""
 
-    @pytest.mark.parametrize("args", [["--name", "Page A"], ["--id", "blk"]])
-    def test_removes_the_key_set_property_stored(self, args):
+    def test_removes_the_key_set_property_stored_from_the_page(self):
+        api = _api(first="due-date:: 2026-10-01\ntyp:: a")
+        r = _run(["remove-property", "--name", "Page A", "--key", "Due_Date"], api)
+        assert r.exit_code == 0, r.stderr
+        assert api.graph.tree("Page A")[0] == ("typ:: a", [])
+        assert "'Due_Date'" in r.stderr and "'due-date'" in r.stderr
+
+    def test_removes_the_key_set_property_stored_from_a_block(self):
         api = _api()
-        r = _run(["remove-property", *args, "--key", "Due_Date"], api)
+        r = _run(["remove-property", "--id", "blk", "--key", "Due_Date"], api)
         assert r.exit_code == 0, r.stderr
         assert [c.args[1] for c in api.remove_block_property.call_args_list] == ["due-date"]
         assert "'Due_Date'" in r.stderr and "'due-date'" in r.stderr
@@ -229,4 +245,4 @@ class TestEmptyValue:
         api = _api()
         r = _run(path("type", ""), api)
         assert r.exit_code == 0, r.stderr
-        assert [c.args[1:] for c in api.upsert_block_property.call_args_list] == [("type", "")]
+        assert _written(api) == [("type", "")]

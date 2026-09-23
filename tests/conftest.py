@@ -277,6 +277,14 @@ class PageGraph:
     * ``getPage`` names a ``file`` for a page built with text in a block; an
       alias, a page known only from a link and one ``createPage`` made empty
       have none.
+    * A page's properties are those of its property block (``preBlock?``),
+      taken when that block is saved (#80). ``updateBlock`` saves: the page's
+      first block becomes the property block when it then holds only property
+      lines, and stops being one otherwise; the same text again saves nothing.
+      ``upsertBlockProperty`` writes the line without that step, so the page
+      keeps its old properties. A block inserted with property text is none,
+      and removing the property block clears the page's properties. A page
+      read in from a file with one is built by ``with_property_block``.
     """
 
     def __init__(self, pages=None, *, placeholders=(), blockless=(), aliases=None):
@@ -297,7 +305,7 @@ class PageGraph:
 
     def _page(self, name, blocks):
         page = {"id": 1000 + len(self.pages), "uuid": self._fresh(), "name": name,
-                "blocks": blocks}
+                "blocks": blocks, "props": {}}
         self.pages.append(page)
         return page
 
@@ -350,6 +358,7 @@ class PageGraph:
 
     def _out(self, block, page, parent, children=True):
         return {"uuid": block["uuid"], "content": block["content"],
+                "preBlock?": bool(block.get("pre")),
                 "page": {"id": page["id"]},
                 "parent": {"id": parent["uuid"] if parent else page["id"]},
                 "children": [self._out(c, page, block) for c in block["children"]]
@@ -385,6 +394,44 @@ class PageGraph:
         page = self._page(name, [{"uuid": self._fresh(), "content": "", "children": []}])
         return self.get_page(page["name"])
 
+    def with_property_block(self, name, content, *rest):
+        """A page whose first block is its property block, as a file read in
+        makes it; ``rest`` are further top-level blocks."""
+        page = self._page(name, [{"uuid": self._fresh(), "content": content,
+                                  "children": [], "pre": True},
+                                 *(self._node(r) for r in rest)])
+        page["file"], page["props"] = True, self._property_texts(content)
+        return page
+
+    @staticmethod
+    def _property_texts(content):
+        """Each ``key:: value`` line's text under its stored key, or ``None``
+        when a line is anything else."""
+        texts = {}
+        for line in content.split("\n"):
+            m = re.fullmatch(r"[ \t]*([^\s:]+):: (.*)", line)
+            if not m:
+                return None
+            texts[m.group(1).lower().replace("_", "-")] = m.group(2)
+        return texts
+
+    def _saved(self, page, parent, i, block):
+        """What Logseq does to the page when ``block`` is saved."""
+        texts = self._property_texts(block["content"]) if block["content"].strip() else None
+        if parent is None and i == 0 and texts is not None:
+            block["pre"], page["props"] = True, texts
+        elif block.get("pre"):
+            block["pre"], page["props"] = False, {}
+
+    def upsert_block_property(self, uuid, key, value):
+        found = self.locate(uuid)
+        if found:
+            _, siblings, i, _ = found
+            lines = [ln for ln in siblings[i]["content"].split("\n")
+                     if not re.match(rf"[ \t]*{re.escape(key)}:: ", ln)]
+            siblings[i]["content"] = "\n".join([*filter(None, lines), f"{key}:: {value}"])
+        return None
+
     def insert_batch_block(self, anchor, batch, options=None):
         opts = options or {}
         keep = bool(opts.get("keepUUID"))
@@ -417,7 +464,9 @@ class PageGraph:
         found = self.locate(uuid)
         if not found:
             return None
-        _, siblings, i, _ = found
+        page, siblings, i, parent = found
+        if content == siblings[i]["content"] and not properties:
+            return None
         lines = content.split("\n")
         for key, value in (properties or {}).items():
             lines = [ln for ln in lines if not re.match(rf"[ \t]*{re.escape(key)}:: ", ln)]
@@ -426,6 +475,7 @@ class PageGraph:
         wanted = _logseq_block_id(siblings[i]["content"])
         if wanted:
             siblings[i]["uuid"] = wanted.lower()
+        self._saved(page, parent, i, siblings[i])
         return None
 
     def insert_block(self, target, content, options=None):
@@ -459,7 +509,9 @@ class PageGraph:
     def remove_block(self, uuid):
         found = self.locate(uuid)
         if found:
-            _, siblings, i, _ = found
+            page, siblings, i, _ = found
+            if siblings[i].get("pre"):
+                page["props"] = {}
             del siblings[i]
         return None
 
@@ -494,7 +546,12 @@ class PageGraph:
             # stored_properties' pull: each property line's text, under its
             # key as stored (lower-cased, "_" read as "-", #21), of two the
             # last. Enough for the writers here.
-            found = self.locate(re.search(r'#uuid "([^"]+)"', query).group(1))
+            uuid = re.search(r'#uuid "([^"]+)"', query).group(1)
+            page = next((p for p in self.pages if p["uuid"] == uuid), None)
+            if page is not None:
+                texts = dict(page["props"])
+                return [[{"properties": texts, "properties-text-values": texts}]] if texts else []
+            found = self.locate(uuid)
             if not found:
                 return []
             _, siblings, i, _ = found
@@ -522,7 +579,8 @@ def page_graph_api(graph):
     api = MagicMock()
     for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
-                 "remove_block", "move_block", "datascript_query", "update_block"):
+                 "remove_block", "move_block", "datascript_query", "update_block",
+                 "upsert_block_property"):
         getattr(api, name).side_effect = getattr(graph, name)
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []
