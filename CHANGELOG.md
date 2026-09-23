@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-todos` left the marker in `content` for `CANCELED` and `WAIT` tasks,
+  both markers `set-todo-status` writes itself, and left a bare `TODO` with
+  no text as `"TODO"`. The strip was a hand-kept list that had drifted from
+  the markers in use. It now removes the word the block's own
+  `:block/marker` names, so the list cannot drift again. Found in review of
+  `--match`, which made the difference visible: `--match "^ship"` missed
+  `CANCELED ship it`, and `--match cancel` hit every cancelled task.
+
 - The build now ships `logseq_cli.commands`. `pyproject.toml` lists packages
   explicitly, which was right while the package was flat and became wrong the
   moment it had a subpackage: setuptools does not infer one from an explicit

@@ -219,8 +219,11 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                 continue
             content_lines.append(line)
         clean_content = "\n".join(content_lines).strip()
-        # Strip leading marker from content (e.g. "TODO some task" -> "some task")
-        clean_content = re.sub(r"^(TODO|DOING|DONE|NOW|LATER|WAITING|CANCELLED)\s+", "", clean_content)
+        # Strip the leading marker ("TODO some task" -> "some task"). Which word
+        # that is comes from :block/marker, not from a list kept here: the list
+        # had drifted and missed CANCELED and WAIT.
+        if marker:
+            clean_content = re.sub(rf"^{re.escape(marker)}(?:\s+|$)", "", clean_content)
 
         record = {
             "marker": marker,
