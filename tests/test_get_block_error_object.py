@@ -7,7 +7,7 @@ the ``null`` and let the error object through as if it were a block: a mistyped
 ``--id`` went on to the write and reported success, and since property keys are
 read by uuid it ended in a traceback instead.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

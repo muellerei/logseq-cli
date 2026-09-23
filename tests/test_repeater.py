@@ -24,7 +24,6 @@ Derived rather than stored: Logseq keeps no "next occurrence" anywhere, and
 """
 import datetime
 
-import pytest
 
 from logseq_cli.helpers import parse_repeater, next_occurrence
 

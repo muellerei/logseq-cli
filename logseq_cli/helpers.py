@@ -2112,14 +2112,16 @@ def incoming_block_refs(api, *, uuids=None, page=None, count_inside=False) -> li
     if page is not None:
         target_clause = (f"[?p :block/name {page_name_literal(page)}]"
                          " [?t :block/page ?p] [?t :block/uuid ?tu]")
-        inside = lambda src, owner: owner.get("name") == page.lower()
+        def inside(src, owner):
+            return owner.get("name") == page.lower()
     else:
         wanted = {u.lower() for u in uuids or []}
         if not wanted:
             return []
         literal = " ".join(f'#uuid "{u}"' for u in sorted(wanted))
         target_clause = f"[?t :block/uuid ?tu] [(contains? #{{{literal}}} ?tu)]"
-        inside = lambda src, owner: src.lower() in wanted
+        def inside(src, owner):
+            return src.lower() in wanted
     query = (
         "[:find ?tu (pull ?b [:block/uuid :block/original-name :block/name"
         " {:block/page [:block/original-name :block/name]}])"

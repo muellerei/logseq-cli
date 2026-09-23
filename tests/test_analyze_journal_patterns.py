@@ -10,7 +10,6 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from logseq_cli.cli import cli
 from tests.conftest import split_runner

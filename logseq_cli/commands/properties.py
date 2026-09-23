@@ -202,7 +202,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
             if had:
                 click.echo(f"  was: {old_value}")
             else:
-                click.echo(f"  was: (not set)")
+                click.echo("  was: (not set)")
             click.echo(f"  now: {value}")
         return
 

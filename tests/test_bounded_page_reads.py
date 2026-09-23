@@ -85,7 +85,7 @@ class TestOutline:
 
     def test_each_line_carries_the_uuid_and_the_first_line_only(self):
         result, _ = _outline()
-        lines = [l for l in result.stdout.splitlines() if "\t" in l]
+        lines = [ln for ln in result.stdout.splitlines() if "\t" in ln]
         assert lines[0] == "h-intro\t\t# Intro"
         assert lines[3] == "h-auto\t\tauto"
         assert "collapsed::" not in result.stdout
@@ -94,13 +94,13 @@ class TestOutline:
         """A heading under a plain block moves up to where the plain block
         stood; a heading under a heading is indented one tab."""
         result, _ = _outline()
-        by_uuid = {l.split("\t")[0]: l for l in result.stdout.splitlines() if "\t" in l}
+        by_uuid = {ln.split("\t")[0]: ln for ln in result.stdout.splitlines() if "\t" in ln}
         assert by_uuid["h-sub"] == "h-sub\t\t\t### Sub"
         assert by_uuid["h-nested"] == "h-nested\t\t## Nested heading"
 
     def test_combines_with_heading_to_outline_one_section(self):
         result, _ = _outline(["--heading", "# Intro"])
-        uuids = [l.split("\t")[0] for l in result.stdout.splitlines() if "\t" in l]
+        uuids = [ln.split("\t")[0] for ln in result.stdout.splitlines() if "\t" in ln]
         assert uuids == ["h-intro", "h-sub"]
 
     def test_json_keeps_the_heading_blocks_and_drops_the_rest(self):
@@ -184,21 +184,21 @@ class TestMaxCharsOnGetPage:
     def test_json_counts_its_own_size_not_the_content(self):
         text, _ = _capped([], cap=1500)
         as_json, _ = _capped(["--json"], cap=1500)
-        text_blocks = sum(1 for l in text.stdout.splitlines() if "block" in l)
+        text_blocks = sum(1 for ln in text.stdout.splitlines() if "block" in ln)
         json_blocks = as_json.stdout.count('"uuid": "s')
         assert json_blocks < text_blocks
 
     def test_the_cut_falls_between_blocks(self):
         result, _ = _capped([])
-        body = [l.strip() for l in result.stdout.splitlines()
-                if l.strip().startswith("- ")]
+        body = [ln.strip() for ln in result.stdout.splitlines()
+                if ln.strip().startswith("- ")]
         whole = {"- " + b["content"] for s in _big_tree()
                  for b in [s] + s["children"]}
         assert body and all(line in whole for line in body)
 
     def test_stderr_names_what_was_withheld(self):
         result, _ = _capped([])
-        printed = sum(1 for l in result.stdout.splitlines() if l.strip().startswith("- "))
+        printed = sum(1 for ln in result.stdout.splitlines() if ln.strip().startswith("- "))
         assert 0 < printed < 33
         assert f"{33 - printed} block(s) withheld" in result.stderr
         assert "--max-chars" in result.stderr
@@ -452,7 +452,7 @@ class TestFromBlock:
     def test_ancestors_come_along_as_context(self):
         result, _ = _run(["get-page", "--name", "p", "--no-backlinks",
                           "--from-block", "s1-b5"], _big_tree())
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
         assert lines[1] == "- ## Section 1"
         assert lines[2].strip().startswith("- section 1 block 5")
         assert "section 1 block 4" not in result.stdout
@@ -461,7 +461,7 @@ class TestFromBlock:
     def test_it_works_on_the_outline_too(self):
         result, _ = _run(["get-page", "--name", "p", "--outline",
                           "--from-block", "h-nested"], _page_tree())
-        uuids = [l.split("\t")[0] for l in result.stdout.splitlines() if "\t" in l]
+        uuids = [ln.split("\t")[0] for ln in result.stdout.splitlines() if "\t" in ln]
         assert uuids == ["h-nested", "h-auto"]
 
     def test_an_unknown_block_is_refused(self):

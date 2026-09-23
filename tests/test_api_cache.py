@@ -1,6 +1,5 @@
 """Tests for in-memory TTL cache in LogseqAPI."""
 
-import os
 from unittest.mock import patch, MagicMock
 
 import pytest

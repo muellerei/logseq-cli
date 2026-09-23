@@ -726,11 +726,11 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
         if as_json:
             output(payload, True)
         else:
-            click.echo(f"[DRY RUN] Would rename page")
+            click.echo("[DRY RUN] Would rename page")
             click.echo(f"  from: {page}")
             click.echo(f"  to:   {new_name}")
             if referencing is None:
-                click.echo(f"  pages with references that would be rewritten: unknown")
+                click.echo("  pages with references that would be rewritten: unknown")
             else:
                 click.echo(f"  pages with references that would be rewritten: {len(referencing)}")
                 for name in referencing[:10]:

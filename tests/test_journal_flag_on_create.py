@@ -16,7 +16,6 @@ recognise is exactly the asymmetry that creates a duplicate journal page.
 """
 
 import datetime
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest

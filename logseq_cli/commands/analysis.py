@@ -200,7 +200,7 @@ def analyze_graph(ctx, days, as_json):
             click.echo(f"\nRecently Updated (last {days} days): {len(recently_updated)} pages")
             for r in recently_updated[:30]:
                 click.echo(f"  {r['page']} ({r['updated']})")
-        click.echo(f"\nTop Referenced Pages:")
+        click.echo("\nTop Referenced Pages:")
         for item in result["top_referenced"]:
             click.echo(f"  {item['page']}: {item['refs']} refs")
 
