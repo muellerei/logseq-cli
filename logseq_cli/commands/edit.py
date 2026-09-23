@@ -245,10 +245,12 @@ Note:
   any block is written; it may change such lines the block had, not add one.
   So is one that turns a line into an id:: line, which Logseq would make the
   block's uuid.
+  --replace is inserted as written. With --regex it is a template: \\1 or
+  \\g<name> for a group, a backslash doubled to write one.
 """)
 @click.option("--page", "--name", required=True, help="Page name to search in")
 @click.option("--find", "find_text", required=True, help="Text to find")
-@click.option("--replace", "replace_text", required=True, help="Replacement text")
+@click.option("--replace", "replace_text", required=True, help="Replacement text, literal unless --regex")
 @click.option("--regex", "use_regex", is_flag=True, help="Treat --find as regex pattern")
 @click.option("--dry-run", is_flag=True, help="Show matches without replacing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
@@ -263,9 +265,24 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
         fail(f"Page '{page}' not found or empty.", as_json=as_json, page=page)
 
     if use_regex:
-        pattern = re.compile(find_text)
+        try:
+            pattern = re.compile(find_text)
+        # A repeat count past the C limit or deep nesting fails outside re.error.
+        except (re.error, OverflowError, RecursionError) as e:
+            fail(f"--find is not a valid regex: {e}", as_json=as_json)
+        # re.sub parses the template before it searches, so an empty string
+        # checks it whether or not any block matches. A name no group has is
+        # an IndexError, not a re.error.
+        try:
+            pattern.sub(replace_text, "")
+        except (re.error, IndexError) as e:
+            fail(f"--replace is not a valid template for --find: {e}", as_json=as_json)
+        replacement = replace_text
     else:
         pattern = re.compile(re.escape(find_text))
+        # A string replacement is always a template to re.sub, so "C:\new"
+        # would write a line break (#60). A function's result is taken as is.
+        replacement = lambda m: replace_text
 
     replacements = []
 
@@ -279,7 +296,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
             # left verbatim so a --find that matches inside it cannot rewrite it.
             lines = content.split("\n")
             new_lines = [
-                ln if is_property else pattern.sub(replace_text, ln)
+                ln if is_property else pattern.sub(replacement, ln)
                 for ln, is_property in zip(lines, property_line_mask(lines))
             ]
             new_content = "\n".join(new_lines)
