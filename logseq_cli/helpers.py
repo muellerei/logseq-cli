@@ -610,6 +610,105 @@ def property_line_mask(lines: list) -> list:
             for line, code in zip(lines, inside)]
 
 
+_QUOTE_LINE_RE = re.compile(r'^[ \t]*>')
+_EMPTY_QUOTE_LINE_RE = re.compile(r'^[ \t]*>[ \t\r]*$')
+_ORG_BLOCK_RE = re.compile(r'^[ \t]*#\+(BEGIN|END)_(\S+)', re.IGNORECASE)
+
+
+def _org_block_lines(lines: list, code: list) -> list:
+    """Which of ``lines`` belong to an org ``#+BEGIN_X`` ... ``#+END_X`` block.
+
+    Like a fence (#43), an opener counts only when a closer follows: the
+    next ``#+END_`` of the same name, outside code. An opener nothing closes,
+    or a closer nothing opened, is text. A block inside another is part of it.
+    """
+    inside, i = [False] * len(lines), 0
+    while i < len(lines):
+        mark = None if code[i] or is_fence(lines[i]) else _ORG_BLOCK_RE.match(lines[i])
+        if mark and mark.group(1).upper() == "BEGIN":
+            name = mark.group(2).upper()
+            for j in range(i + 1, len(lines)):
+                end = None if code[j] or is_fence(lines[j]) else _ORG_BLOCK_RE.match(lines[j])
+                if end and end.group(1).upper() == "END" and end.group(2).upper() == name:
+                    inside[i:j + 1] = [True] * (j + 1 - i)
+                    i = j
+                    break
+        i += 1
+    return inside
+
+
+def quote_break_lines(content: str) -> list:
+    """Line numbers (1-based) where a quote in ``content`` has stopped.
+
+    mldoc takes every line after a ``>`` into the quote, until a blank line
+    (#45, from its source; measured with mldoc 1.5.7, the version Logseq
+    0.10.15 pins, in #50). The paragraph after the blank line is plain text,
+    which text written as one quote rarely means. Named is the first line of
+    that paragraph. Not named is what mldoc still reads as intended: a line
+    that opens a quote again, and a property line, which is no paragraph; the
+    paragraph after the property is named. A ``>`` with nothing after it
+    opens no quote after a blank line, so it is named too.
+
+    Blank means spaces, tabs, a form feed or a carriage return: mldoc reads a
+    no-break space as text and goes on with the quote. Inside a code block or
+    a closed org ``#+BEGIN_`` ... ``#+END_`` block nothing is a quote. List, heading and unclosed fence
+    lines after a blank line are refused by #47 before this runs.
+    """
+    lines = content.split("\n")
+    inside, _ = code_block_lines(lines)
+    org = _org_block_lines(lines, inside)
+    breaks, quoted, blank = [], False, False
+    for number, (line, code, in_org) in enumerate(zip(lines, inside, org), start=1):
+        if code or is_fence(line) or in_org:
+            quoted = blank = False
+        elif not line.strip(" \t\r\f"):
+            blank = quoted
+        elif blank and (_EMPTY_QUOTE_LINE_RE.match(line)
+                        or not (_QUOTE_LINE_RE.match(line) or PROPERTY_LINE_RE.match(line))):
+            breaks.append(number)
+            quoted = blank = False
+        elif _QUOTE_LINE_RE.match(line):
+            quoted, blank = True, False
+    return breaks
+
+
+def quote_break_note(tree: list) -> str | None:
+    """A ``Note:`` for every block in ``tree`` whose quote stops at a blank line.
+
+    A note, not a refusal: the text is written as sent and stays one block,
+    and a quote followed by a paragraph may be meant. Callers pass the nodes
+    they are about to write and print the note on stderr, like the one for
+    dropped id:: lines. Line numbers count within a block, so each is named
+    with the block's first line.
+    """
+    found = []
+
+    def walk(nodes):
+        for node in nodes:
+            content = node.get("content") or ""
+            numbers = quote_break_lines(content)
+            if numbers:
+                first = content.split("\n", 1)[0].strip()
+                first = first if len(first) <= 40 else first[:39] + "…"
+                lines = ", ".join(f"line {n}" for n in numbers)
+                found.append(f'"{first}" {lines}')
+            walk(node.get("children") or [])
+
+    walk(tree)
+    if not found:
+        return None
+    return ("Note: a quote ends at a blank line, and Logseq shows the line after "
+            f"it as plain text, not quoted: block {'; block '.join(found)}. To "
+            "keep a line in the quote, start the blank line before it with \">\".")
+
+
+def note_quote_breaks(tree: list) -> None:
+    """Print :func:`quote_break_note` for ``tree`` on stderr, if there is one."""
+    note = quote_break_note(tree)
+    if note:
+        click.echo(note, err=True)
+
+
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
 # An ``id::`` line inside a block's content names the UUID that block is meant

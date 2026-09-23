@@ -27,6 +27,7 @@ from logseq_cli.helpers import (
     insert_block_at,
     insert_tree_at_page_end,
     move_block_verified,
+    note_quote_breaks,
     outline_text,
     parse_date_keyword,
     parse_hierarchical_content,
@@ -63,6 +64,9 @@ Note:
   Scope it with --page and check with --dry-run.
   --content-file FILE is --content read from a file ('-' reads stdin), with
   the same rules; no shell quoting stands between the text and the command.
+  A quote ends at a blank line, and the paragraph after it shows as plain
+  text: written anyway, with a Note on stderr. Start the blank line with ">"
+  to keep the paragraph in the quote.
 """)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
@@ -114,6 +118,9 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     # reporting it as kept would claim a line the file will not have.
     kept_values = {k: v for k, v in values.items() if k in kept_texts}
 
+    # After every check that can refuse: a note ahead of an error would sit in
+    # front of the JSON on stderr, and speak of text that is never written.
+    note_quote_breaks([{"content": content}])
     if dry_run:
         if as_json:
             output({"id": clean_id, "old_content": old_content,
@@ -344,6 +351,9 @@ Notes:
   code block such lines are fine.
   --content-file FILE is --content read from a file ('-' reads stdin), with
   the same rules; no shell quoting stands between the text and the command.
+  A quote ends at a blank line, and the paragraph after it shows as plain
+  text: written anyway, with a Note on stderr. Start the blank line with ">"
+  to keep the paragraph in the quote.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -430,6 +440,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             )
             sys.exit(1)
 
+        note_quote_breaks(tree)
         if dry_run:
             planned = count_blocks(tree)
             if as_json:
@@ -501,6 +512,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         # What the flat writes below send, and what the preview shows.
         content = outline_text(tree) if hierarchical else tree[0]["content"]
 
+    note_quote_breaks(tree)
     if dry_run:
         planned = count_blocks(tree)
         target = page or (f"after {after[:8]}..." if after else

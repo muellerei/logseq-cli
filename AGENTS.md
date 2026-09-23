@@ -262,6 +262,20 @@ may leave as many such lines as the block had, and change their text, since
 Logseq's own editor makes such blocks; it may not add one. `update-block`
 replaces the whole text and gets no such pass.
 
+A quote ends at a blank line. `> first`, an empty line, then `second` is one
+block, but Logseq shows only the first paragraph as a quote and `second` as
+plain text. Nothing is lost, so this is not refused: the write goes through
+and says so on stderr with a `Note:`, naming the block and the line. To keep
+a paragraph in the quote, start the blank line before it with `>` (a `>` on a
+line of its own *after* the blank line does not help). The note comes after
+every check that can refuse, so a refusal under `--json` stays one JSON
+object. It is given where the caller sends a block's text: `update-block`,
+`insert-block`, `add-journal-block`, `create-page --content`. Outline text
+(`add-note-content`, `add-journal-content`) puts every line in a block of its
+own and has nothing to note; `replace-text` and `set-todo-status` change text
+already in the graph, where a note could not tell a quote the change made
+from one that was there.
+
 ### 4. Destructive Operations
 
 `--dry-run` is available on every write, not only the ones that cascade:
