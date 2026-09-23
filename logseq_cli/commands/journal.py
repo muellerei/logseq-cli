@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
 
-from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree
+from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, without_block_ids
 from logseq_cli.config import load_config, resolve_heading
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -41,7 +41,6 @@ from logseq_cli.helpers import (
     strip_title_heading,
     tree_without_block_ids,
     uuid_fields,
-    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (

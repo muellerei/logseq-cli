@@ -10,9 +10,9 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
+from logseq_cli.blocktext import block_id_property
 from logseq_cli.cli import cli
 from logseq_cli.helpers import (
-    block_id_property,
     collect_block_ids,
     invalid_block_ids,
     insert_block_tree_with_uuids,
@@ -201,7 +201,7 @@ class TestIdLinesAsLogseqReadsThem:
         assert block_id_property(f"a\nid:: {VALID}\r") == ""
 
     def test_dropping_ids_removes_one_with_a_trailing_tab(self):
-        from logseq_cli.helpers import without_block_ids
+        from logseq_cli.blocktext import without_block_ids
         assert without_block_ids(f"a\nid:: {VALID}\t") == "a"
 
     def test_keep_ids_refuses_a_taken_id_with_a_trailing_tab(self):

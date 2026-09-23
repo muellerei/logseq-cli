@@ -41,6 +41,94 @@ def code_block_lines(lines: list) -> tuple:
     return inside, opener
 
 
+# A block's content carries its property lines verbatim (id:: <uuid>, key:: val).
+# This is the one rule for what counts as one; every reader that tells
+# property lines from text goes through it or through property_line_mask,
+# which also knows code fences. (No list of readers here: it would drift.)
+#
+# It is the rule Logseq reads by, measured against 0.10.15 by writing lines
+# into a page file and reading :block/properties back. A key ends at
+# whitespace or at one of PROPERTY_KEY_STOP, may not start with '#', and '::'
+# is followed by a space or the end of the line (a tab does not count). So
+# 'logseq.order-list-type:: number', which Logseq writes for numbered lists,
+# 'k::' and an indented '  k:: v' are properties; 'std::cout', 'k::v' and
+# 'a,b:: x' are text. The stop characters are the ones #21 measured for the
+# writer, so what set-property writes and what this reads cannot disagree;
+# '/' alone differs, see helpers._PROPERTY_KEY_FORBIDDEN. What may indent the line is
+# measured too (#43): spaces, tabs, form feeds and carriage returns, not a
+# no-break space or a vertical tab. Missing one here is the unsafe direction:
+# an id:: line the CLI took for text would still be the block's id.
+PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
+_INDENT = r'[ \t\f\r]*'
+PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)[^\s{PROPERTY_KEY_STOP}]+::(?: |$)')
+
+
+def property_line_mask(lines: list) -> list:
+    """For each line of a block's content, whether Logseq reads it as a property.
+
+    PROPERTY_LINE_RE judges one line alone; inside a code block the same text
+    is code, not a property. Readers that walk a block's lines take this mask,
+    so a --find inside a fenced example is replaced and a get-todos --match
+    sees it.
+
+    The code block is Logseq's, see code_block_lines (#43).
+    """
+    inside, _ = code_block_lines(lines)
+    # A fence line itself is never a property: ` and ~ end a key.
+    return [not code and bool(PROPERTY_LINE_RE.match(line))
+            for line, code in zip(lines, inside)]
+
+
+# An ``id::`` line inside a block's content names the UUID that block is meant
+# to keep. Logseq only honours it when the write asks for it (``keepUUID`` on
+# insertBatchBlock, which every --keep-ids write goes through since #31);
+# otherwise it mints a fresh one and drops the id, which leaves every ((uuid))
+# pointing at the old one dangling. Verified against a live graph, both ways.
+#
+# Logseq reads more than one spelling as the block's id: keys are lower-cased,
+# and custom-id / custom_id are renamed to id (extract-properties, measured in
+# #21). A copied block also carries the line indented, as it sits in the file.
+# Every spelling counts, or one of them would slip past the checks in helpers
+# and still set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
+# space is text to Logseq (measured as "k::v", #39) and must not be dropped.
+# After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
+# as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
+#
+# An id:: line inside a code block is code to Logseq, not the block's id
+# (measured, #43), so only the lines property_line_mask passes count. That
+# holds only as long as the check, the removal and the write see the same
+# blocks: the commands check and clean the parsed outline they write, never
+# the raw text, where a fence opened on a bullet line reads differently.
+_ID_PROPERTY_RE = re.compile(rf'^{_INDENT}(?:id|custom[-_]id):: +(\S+)[ \t]*$',
+                             re.MULTILINE | re.IGNORECASE)
+
+
+def id_lines(content: str) -> list:
+    """``(line, id value or None)`` for each line of one block's ``content``."""
+    lines = (content or "").split("\n")
+    found = []
+    for line, is_property in zip(lines, property_line_mask(lines)):
+        match = _ID_PROPERTY_RE.fullmatch(line) if is_property else None
+        found.append((line, match.group(1) if match else None))
+    return found
+
+
+def block_id_property(content: str) -> str:
+    """The ``id::`` value in ``content``, or ``""`` if it carries none."""
+    return next((value for _, value in id_lines(content) if value), "")
+
+
+def without_block_ids(content: str) -> str:
+    """``content`` with its ``id::`` lines removed, in every spelling.
+
+    What "dropped" has to mean when an id is not kept: left in the content,
+    the line would name a uuid the block does not have, and a copy would put
+    the original's id into the file, where the next parse finds two blocks
+    claiming it. A line in a code block is code and stays.
+    """
+    return "\n".join(line for line, value in id_lines(content) if not value)
+
+
 # Text written as ONE block has to come back from the page file as that block.
 # Logseq writes it under one bullet, and its file parser reads some lines as
 # block boundaries, measured (#47) by writing a block through the API,
