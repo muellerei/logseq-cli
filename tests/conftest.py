@@ -1,5 +1,6 @@
 """Shared test helpers."""
 import os
+import re
 
 import pytest
 from click.testing import CliRunner
@@ -206,6 +207,33 @@ def answer_property_pulls(api):
     return api
 
 
+def _logseq_block_id(content):
+    """The uuid Logseq takes from ``content``'s id:: line, or ``""``.
+
+    Logseq's reading as measured (0.10.15), kept apart from the CLI's rule on
+    purpose: a stand-in that asked the code under test which line is the id
+    would agree with it whatever it got wrong. A code block runs from a line
+    starting with ``` or ~~~ (after spaces, tabs, form feeds) to the next
+    such line; an opener nothing closes hides nothing. Of two id:: lines the
+    last wins.
+    """
+    lines = content.split("\n")
+    code, opener = set(), None
+    for i, line in enumerate(lines):
+        if line.lstrip(" \t\f").startswith(("```", "~~~")):
+            if opener is None:
+                opener = i
+            else:
+                code.update(range(opener + 1, i))
+                opener = None
+    found = ""
+    for i, line in enumerate(lines):
+        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +(\S+)[ \t]*", line)
+        if m and i not in code:
+            found = m.group(1)
+    return found
+
+
 class PageGraph:
     """Pages and their block trees, answering the way Logseq 0.10.15 does.
 
@@ -220,7 +248,10 @@ class PageGraph:
       ``sibling: false`` puts it at the head of the page.
     * With ``keepUUID`` a node keeps the uuid of its ``id::`` line, a
       placeholder's included, and also one a real block already has: the
-      batch does not check (the CLI must).
+      batch does not check (the CLI must). Only a line Logseq reads as a
+      property counts: not one inside a code block, and of two the last.
+    * Without ``keepUUID`` every ``id::`` line leaves the content, one inside a
+      code block too.
     * Anchored ``before`` the page's first block, or on a page with no blocks
       at all, Logseq writes every node of the batch with ``* `` in front of its
       content. Anchored on the page uuid of a page that holds a block, it does
@@ -254,14 +285,17 @@ class PageGraph:
         self.pages.append(page)
         return page
 
-    def _node(self, spec, *, keep=False, prefix=""):
-        from logseq_cli.helpers import block_id_property
+    def _node(self, spec, *, keep=False, strip_ids=False, prefix=""):
         spec = {"content": spec} if isinstance(spec, str) else spec
-        wanted = block_id_property(spec["content"]) if keep else ""
+        wanted = _logseq_block_id(spec["content"]) if keep else ""
         uuid = spec.get("uuid") or (wanted.lower() if wanted else self._fresh())
         self.placeholders.discard(uuid)
-        return {"uuid": uuid, "content": prefix + spec["content"],
-                "children": [self._node(c, keep=keep, prefix=prefix)
+        content = spec["content"]
+        if strip_ids:
+            content = "\n".join(l for l in content.split("\n")
+                                if not re.match(r"(?i)[\s\ufeff]*id:: ", l))
+        return {"uuid": uuid, "content": prefix + content,
+                "children": [self._node(c, keep=keep, strip_ids=strip_ids, prefix=prefix)
                              for c in spec.get("children") or []]}
 
     # --- lookup ------------------------------------------------------------
@@ -356,7 +390,8 @@ class PageGraph:
             else:
                 target, at, headless = siblings, i + 1, False
         prefix = "* " if headless else ""
-        target[at:at] = [self._node(n, keep=keep, prefix=prefix) for n in batch]
+        target[at:at] = [self._node(n, keep=keep, strip_ids=not keep, prefix=prefix)
+                         for n in batch]
         return None
 
     def insert_block(self, target, content, options=None):

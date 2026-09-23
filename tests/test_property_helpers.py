@@ -1,7 +1,7 @@
 """Unit tests for the property/output helper layer.
 
 These helpers (coerce_property_value, parse_property_pairs, apply_block_properties,
-uuid_fields, insert_formatted_content_with_uuids) were previously only exercised
+uuid_fields, insert_tree_at_page_end) were previously only exercised
 indirectly through CLI end-to-end tests. These tests pin their behaviour directly.
 """
 import pytest
@@ -12,7 +12,8 @@ from logseq_cli.helpers import (
     parse_property_pairs,
     apply_block_properties,
     uuid_fields,
-    insert_formatted_content_with_uuids,
+    insert_tree_at_page_end,
+    parse_hierarchical_content,
 )
 
 
@@ -134,13 +135,13 @@ class TestUuidFields:
         assert src == ["a", "b"]  # input must not be mutated
 
 
-class TestInsertFormattedContentWithUuids:
+class TestInsertTreeAtPageEnd:
     def test_flat_top_level_blocks_appended_in_order(self):
         api = MagicMock()
         api.append_block_in_page.side_effect = [
             {"uuid": "u1"}, {"uuid": "u2"}
         ]
-        uuids = insert_formatted_content_with_uuids(api, "Page", "- A\n- B")
+        uuids = insert_tree_at_page_end(api, "Page", parse_hierarchical_content("- A\n- B"))
         assert uuids == ["u1", "u2"]
         assert api.append_block_in_page.call_count == 2
         api.insert_block.assert_not_called()
@@ -149,7 +150,7 @@ class TestInsertFormattedContentWithUuids:
         api = MagicMock()
         api.append_block_in_page.return_value = {"uuid": "parent"}
         api.insert_block.return_value = {"uuid": "child"}
-        uuids = insert_formatted_content_with_uuids(api, "Page", "- Parent\n\t- Child")
+        uuids = insert_tree_at_page_end(api, "Page", parse_hierarchical_content("- Parent\n\t- Child"))
         # DFS pre-order: parent before child.
         assert uuids == ["parent", "child"]
         # Child inserted as non-sibling under the parent uuid.
@@ -161,5 +162,5 @@ class TestInsertFormattedContentWithUuids:
         # API may return a bare uuid string instead of a dict.
         api = MagicMock()
         api.append_block_in_page.return_value = "bare-uuid"
-        uuids = insert_formatted_content_with_uuids(api, "Page", "- Solo")
+        uuids = insert_tree_at_page_end(api, "Page", parse_hierarchical_content("- Solo"))
         assert uuids == ["bare-uuid"]

@@ -23,9 +23,10 @@ from logseq_cli.helpers import (
     insert_block_tree_as_siblings,
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
-    insert_formatted_content_with_uuids,
     insert_block_at,
+    insert_tree_at_page_end,
     move_block_verified,
+    outline_text,
     parse_date_keyword,
     parse_hierarchical_content,
     parse_tree_input,
@@ -40,7 +41,6 @@ from logseq_cli.helpers import (
     subtree_uuids,
     tree_without_block_ids,
     uuid_fields,
-    without_block_ids,
 )
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -322,6 +322,10 @@ Notes:
   It restores an id that survives only as a ((ref)) target, and refuses,
   before writing anything, an id a block or page still has (the copy case:
   drop --keep-ids) and a second id:: line in one block.
+  An id:: line inside a code block (``` or ~~~) is code and is written as is
+  where the fence stays in one block: flat --content, a JSON --tree node.
+  Outline text is one block per line, so a fence there is split and its id::
+  line counts.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -458,6 +462,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     result = None
     position = ""
     new_uuid = None
+    # The outline that is written, checked and cleaned as it is: flat content
+    # is one block, whatever its lines look like.
     hierarchical = contains_hierarchical_content(content)
     tree = (parse_hierarchical_content(content) if hierarchical
             else [{"content": content, "children": []}])
@@ -467,12 +473,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
         click.echo(note, err=True)
-        content = without_block_ids(content)
-        tree = (parse_hierarchical_content(content) if hierarchical
-                else [{"content": content, "children": []}])
+        tree = tree_without_block_ids(tree)
+        # What the flat writes below send, and what the preview shows.
+        content = outline_text(tree) if hierarchical else tree[0]["content"]
 
     if dry_run:
-        planned = count_blocks(parse_hierarchical_content(content)) if hierarchical else 1
+        planned = count_blocks(tree)
         target = page or (f"after {after[:8]}..." if after else
                           f"before {before[:8]}..." if before else
                           f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
@@ -485,7 +491,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     if page:
         if hierarchical:
-            uuids = insert_formatted_content_with_uuids(api, page, content, keep_ids=keep_ids)
+            uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
             new_uuid = uuids[0] if uuids else None
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"end of '{page}' ({len(uuids)} block(s))"

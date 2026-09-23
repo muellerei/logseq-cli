@@ -23,11 +23,12 @@ from logseq_cli.helpers import (
     insert_block_tree_as_siblings,
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
-    insert_formatted_content_with_uuids,
     insert_block_at,
+    insert_tree_at_page_end,
     journal_day_to_date,
     normalize_heading,
     normalize_indentation,
+    outline_text,
     parse_date_keyword,
     parse_date_range,
     parse_hierarchical_content,
@@ -37,6 +38,7 @@ from logseq_cli.helpers import (
     require_content,
     require_insert,
     strip_title_heading,
+    tree_without_block_ids,
     uuid_fields,
     without_block_ids,
 )
@@ -423,6 +425,9 @@ Notes:
   sibling roots, tab-indented lines their children. No shell quoting, so
   apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
+  An id:: line inside a code block (``` or ~~~) is code and is written as is
+  where the fence stays in one block: flat --content. Outline text is one
+  block per line, so a fence there is split and its id:: line counts.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
@@ -504,18 +509,48 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         raise click.UsageError("--keep-ids cannot be combined with --no-preserve: "
                                "joining the lines turns id:: into plain text.")
 
+    api = ctx.obj["api"]
+    if date:
+        d = parse_date_keyword(date)
+    else:
+        d = datetime.date.today()
+    configs = api.get_user_configs()
+    date_fmt = configs.get("preferredDateFormat") if configs else None
+    page_name = format_journal_date(d, date_fmt)
+
+    # What each value is written as, decided once: a tree when it carries
+    # structure, otherwise one block (None here). The id check and the removal
+    # run on exactly that, so they cannot disagree with the write. Checking a
+    # flat value as a parsed outline, or removing lines from the text of a
+    # tree, each let a check and a write see different blocks.
+    # The text as it is written, prepared here once and not touched again: a
+    # single value without --preserve-formatting is joined into one line, and
+    # strip_title_heading also strips both ends. Checked before that, or
+    # stripped again after, "id:: <uuid>\r" was no id and became one.
+    joined = not preserve_formatting and len(contents) == 1
+    contents = tuple(strip_title_heading(" ".join(c.split()) if joined else c, page_name)
+                     for c in contents)
+    trees = [parse_hierarchical_content(c)
+             if preserve_formatting and (from_file or contains_hierarchical_content(c))
+             else None
+             for c in contents]
+
     # Before the journal page is looked up or created: a refused id must leave
     # the graph untouched, and creating the page is a write too.
     try:
         note = check_block_ids(
-            ctx.obj["api"],
-            [node for c in contents for node in parse_hierarchical_content(c)],
+            api,
+            [node for c, tree in zip(contents, trees)
+             for node in (tree if tree is not None else [{"content": c, "children": []}])],
             keep_ids)
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
         click.echo(note, err=True)
-        contents = tuple(without_block_ids(c) for c in contents)
+        trees = [tree_without_block_ids(t) if t is not None else None for t in trees]
+        # The text is what flat values send, and what the previews show.
+        contents = tuple(outline_text(t) if t is not None else without_block_ids(c)
+                         for c, t in zip(contents, trees))
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -533,14 +568,6 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
-        api = ctx.obj["api"]
-        if date:
-            d = parse_date_keyword(date)
-        else:
-            d = datetime.date.today()
-        configs = api.get_user_configs()
-        date_fmt = configs.get("preferredDateFormat") if configs else None
-        page_name = format_journal_date(d, date_fmt)
         try:
             existing = api.get_page(page_name)
         except Exception:
@@ -558,11 +585,10 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # tab sub-bullets expands to a header + children, not one flat block).
         planned = []  # list of (kind, payload) where kind in {"tree", "flat"}
         any_hierarchical = False
-        for c in contents:
-            c = strip_title_heading(c, page_name)
-            if preserve_formatting and contains_hierarchical_content(c):
+        for c, tree in zip(contents, trees):
+            if tree is not None:
                 any_hierarchical = True
-                planned.append(("tree", parse_hierarchical_content(c)))
+                planned.append(("tree", tree))
             else:
                 if has_mixed_indentation(c):
                     c = normalize_indentation(c)
@@ -616,16 +642,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 click.echo(f"  uuid: {uuids[0]}")
         return
 
-    api = ctx.obj["api"]
-
-    if date:
-        d = parse_date_keyword(date)
-    else:
-        d = datetime.date.today()
-
-    configs = api.get_user_configs()
-    date_fmt = configs.get("preferredDateFormat") if configs else None
-    page_name = format_journal_date(d, date_fmt)
+    tree = trees[0]
 
     # Ensure journal page exists with journal property. Deferred when only
     # previewing: a dry run must not bring the page into existence.
@@ -636,12 +653,6 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     would_create_page = not existing
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
-
-    if not preserve_formatting:
-        # Collapse whitespace
-        content = " ".join(content.split())
-
-    content = strip_title_heading(content, page_name)
 
     # --- upsert-heading: find-or-replace child block under a heading ---
     if upsert_heading:
@@ -671,8 +682,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         if found_uuid:
             root_uuid = found_uuid
-            if from_file or contains_hierarchical_content(content):
-                tree = parse_hierarchical_content(content)
+            if tree is not None:
                 if tree:
                     # The first root replaces the matched block; its children
                     # nest under it. Any further roots are siblings after it —
@@ -701,8 +711,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 n = 1
             status = "updated"
         elif heading_uuid:
-            if from_file or contains_hierarchical_content(content):
-                tree = parse_hierarchical_content(content)
+            if tree is not None:
                 created = insert_block_tree_with_uuids(api, tree, heading_uuid)
                 n = len(created)
                 root_uuid = created[0] if created else None
@@ -729,9 +738,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # Auto-detect hierarchical content and delegate to structured insertion.
     # --content-file always takes this path: its flush "- " lines are roots,
     # which contains_hierarchical_content (indentation-based) would not detect.
-    if preserve_formatting and (from_file or contains_hierarchical_content(content)):
+    if tree is not None:
         click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
-        tree = parse_hierarchical_content(content)
         n = count_blocks(tree)
         position = f"under '{under_heading}'" if under_heading else "top-level"
 
@@ -751,10 +759,10 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
             else:
                 click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-                uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
+                uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
                 position = "top-level (heading not found)"
         else:
-            uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
+            uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
 
         n = len(uuids)
         if as_json:
@@ -816,6 +824,8 @@ Note:
   Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
   it now auto-detects hierarchy.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
+  Each line is a block of its own, so a code block written over several lines
+  is split, and an id:: line in it counts as an id.
   --keep-ids restores an id only a ((ref)) still holds; it refuses, before
   writing anything, an id a block or page still has, one repeated in the
   content, and a second id:: line in one block.
@@ -855,16 +865,6 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
 
     api = ctx.obj["api"]
 
-    # Before the journal page is created: a refused id must leave the graph
-    # untouched.
-    try:
-        note = check_block_ids(api, parse_hierarchical_content(content), keep_ids)
-    except BlockIdError as e:
-        fail(str(e), as_json=as_json, **{e.field: e.ids})
-    if note:
-        click.echo(note, err=True)
-        content = without_block_ids(content)
-
     if date:
         d = parse_date_keyword(date)
     else:
@@ -873,6 +873,19 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
     configs = api.get_user_configs()
     date_fmt = configs.get("preferredDateFormat") if configs else None
     page_name = format_journal_date(d, date_fmt)
+    content = strip_title_heading(content, page_name)
+
+    # Before the journal page is created: a refused id must leave the graph
+    # untouched. The tree checked is the tree written.
+    tree = parse_hierarchical_content(content)
+    try:
+        note = check_block_ids(api, tree, keep_ids)
+    except BlockIdError as e:
+        fail(str(e), as_json=as_json, **{e.field: e.ids})
+    if note:
+        click.echo(note, err=True)
+        tree = tree_without_block_ids(tree)
+        content = outline_text(tree)  # what the preview shows
 
     # Ensure journal page exists with journal property
     try:
@@ -882,11 +895,9 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
 
-    content = strip_title_heading(content, page_name)
     position = f"under '{under_heading}'" if under_heading else "top-level"
 
     if dry_run:
-        tree = parse_hierarchical_content(content)
         n = count_blocks(tree)
         if as_json:
             output({"page": page_name, "date": str(d), "position": position, "blocks": n, "content": content, "dry_run": True}, True)
@@ -898,14 +909,13 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
-            tree = parse_hierarchical_content(content)
             uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         else:
             click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-            uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
+            uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
             position = "top-level (heading not found)"
     else:
-        uuids = insert_formatted_content_with_uuids(api, page_name, content, keep_ids=keep_ids)
+        uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
 
     n = len(uuids)
     if as_json:

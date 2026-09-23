@@ -585,6 +585,22 @@ def parse_hierarchical_content(content: str) -> list:
     return root
 
 
+def outline_text(tree: list) -> str:
+    """``tree`` as the text :func:`parse_hierarchical_content` reads back as it.
+
+    For showing what a command writes after it has changed the parsed tree
+    (dropped id:: lines): derived from that tree, the preview cannot disagree
+    with the write. A block's further lines sit under its bullet, indented.
+    """
+    def walk(blocks, depth):
+        for block in blocks:
+            first, *rest = (block.get("content") or "").split("\n")
+            yield "\t" * depth + "- " + first
+            yield from ("\t" * depth + "  " + line for line in rest)
+            yield from walk(block.get("children") or [], depth + 1)
+    return "\n".join(walk(tree or [], 0))
+
+
 # A block's content carries its property lines verbatim (id:: <uuid>, key:: val).
 # This is the one rule for what counts as one; every reader that tells
 # property lines from text goes through it or through property_line_mask,
@@ -598,27 +614,46 @@ def parse_hierarchical_content(content: str) -> list:
 # 'k::' and an indented '  k:: v' are properties; 'std::cout', 'k::v' and
 # 'a,b:: x' are text. The stop characters are the ones #21 measured for the
 # writer, so what set-property writes and what this reads cannot disagree;
-# '/' alone differs, see _PROPERTY_KEY_FORBIDDEN.
+# '/' alone differs, see _PROPERTY_KEY_FORBIDDEN. What may indent the line is
+# measured too (#43): spaces, tabs, form feeds and carriage returns, not a
+# no-break space or a vertical tab. Missing one here is the unsafe direction:
+# an id:: line the CLI took for text would still be the block's id.
 _PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
-PROPERTY_LINE_RE = re.compile(rf'^[ \t]*(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)')
+_INDENT = r'[ \t\f\r]*'
+PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)')
 
 
 def property_line_mask(lines: list) -> list:
     """For each line of a block's content, whether Logseq reads it as a property.
 
-    PROPERTY_LINE_RE judges one line alone; between ``` fences the same text is
-    code, not a property (measured, 0.10.15). Readers that walk a block's lines
-    take this mask, so a --find inside a fenced example is replaced and a
-    get-todos --match sees it.
+    PROPERTY_LINE_RE judges one line alone; inside a code block the same text
+    is code, not a property. Readers that walk a block's lines take this mask,
+    so a --find inside a fenced example is replaced and a get-todos --match
+    sees it.
+
+    The code block is Logseq's, measured against 0.10.15 (#43): a fence line
+    starts, after spaces, tabs or form feeds, with ``` or ~~~ (a no-break
+    space or a carriage return in front, which str.lstrip() would also take
+    away, makes it text), and the next fence line closes it, whichever of the
+    two it uses and whatever follows on the line. An opener that nothing
+    closes makes no code block; the lines after it are read as usual. So a
+    one-line ```x``` hides nothing unless a fence line follows. Erring toward
+    "code" is the unsafe direction: an id:: line the mask hid would reach
+    Logseq unchecked and still name the block's uuid.
     """
-    mask, in_fence = [], False
-    for line in lines:
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-            mask.append(False)
+    fence = [line.lstrip(" \t\f").startswith(("```", "~~~")) for line in lines]
+    inside, opener = [False] * len(lines), None
+    for i, is_fence in enumerate(fence):
+        if not is_fence:
             continue
-        mask.append(not in_fence and bool(PROPERTY_LINE_RE.match(line)))
-    return mask
+        if opener is None:
+            opener = i
+        else:
+            inside[opener + 1:i] = [True] * (i - opener - 1)
+            opener = None
+    # A fence line itself is never a property: ` and ~ end a key.
+    return [not code and bool(PROPERTY_LINE_RE.match(line))
+            for line, code in zip(lines, inside)]
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
@@ -637,13 +672,12 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
 # as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
 #
-# An id:: line between ``` fences is code to Logseq, and still counts here.
-# Telling it apart needs the check, the removal and the write to see the same
-# block boundaries, which they do not yet: the removal runs over the raw
-# content, where a fence opened on a bullet line is not seen. A first attempt
-# left an id line in place after announcing it dropped. Counting it errs
-# toward refusing and removing; see #43.
-_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+)[ \t]*$',
+# An id:: line inside a code block is code to Logseq, not the block's id
+# (measured, #43), so only the lines property_line_mask passes count. That
+# holds only as long as the check, the removal and the write see the same
+# blocks: the commands check and clean the parsed outline they write, never
+# the raw text, where a fence opened on a bullet line reads differently.
+_ID_PROPERTY_RE = re.compile(rf'^{_INDENT}(?:id|custom[-_]id):: +(\S+)[ \t]*$',
                              re.MULTILINE | re.IGNORECASE)
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot
@@ -656,10 +690,19 @@ _UUID_RE = re.compile(
 )
 
 
+def _id_lines(content: str) -> list:
+    """``(line, id value or None)`` for each line of one block's ``content``."""
+    lines = (content or "").split("\n")
+    found = []
+    for line, is_property in zip(lines, property_line_mask(lines)):
+        match = _ID_PROPERTY_RE.fullmatch(line) if is_property else None
+        found.append((line, match.group(1) if match else None))
+    return found
+
+
 def block_id_property(content: str) -> str:
     """The ``id::`` value in ``content``, or ``""`` if it carries none."""
-    match = _ID_PROPERTY_RE.search(content or "")
-    return match.group(1) if match else ""
+    return next((value for _, value in _id_lines(content) if value), "")
 
 
 def without_block_ids(content: str) -> str:
@@ -668,10 +711,9 @@ def without_block_ids(content: str) -> str:
     What "dropped" has to mean when an id is not kept: left in the content,
     the line would name a uuid the block does not have, and a copy would put
     the original's id into the file, where the next parse finds two blocks
-    claiming it.
+    claiming it. A line in a code block is code and stays.
     """
-    return "\n".join(line for line in (content or "").split("\n")
-                     if not _ID_PROPERTY_RE.fullmatch(line))
+    return "\n".join(line for line, value in _id_lines(content) if not value)
 
 
 def tree_without_block_ids(tree: list) -> list:
@@ -707,7 +749,7 @@ def blocks_with_several_ids(tree: list) -> list:
     for block in tree or []:
         if not isinstance(block, dict):
             continue
-        values = _ID_PROPERTY_RE.findall(block.get("content", "") or "")
+        values = [value for _, value in _id_lines(block.get("content", "")) if value]
         if len(values) > 1:
             found.extend(values)
         found.extend(blocks_with_several_ids(block.get("children") or []))
@@ -1087,6 +1129,30 @@ def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     return uuid
 
 
+# The lines insertBatchBlock takes out of a block's content when it is not
+# asked to keep uuids (measured, 0.10.15): "id:: " with any value or none, in
+# any case, inside a code block too, behind any whitespace JavaScript's \s
+# knows (space, tab, form feed, carriage return, no-break space and vertical
+# tab measured; \ufeff is in \s there and not in Python's). Not "id::"
+# alone, not "custom-id::". insertBlock writes the same text as given.
+_BATCH_DROPS_RE = re.compile(r'^[\s\ufeff]*id:: ', re.IGNORECASE)
+
+
+def _quotes_an_id_line(tree: list) -> bool:
+    """Whether a node of ``tree`` has a line the batch would drop that is not
+    the block's id: one inside a code block, say. Such a tree goes block by
+    block, so the text is written as given."""
+    for block in tree or []:
+        if not isinstance(block, dict):
+            continue
+        for line, value in _id_lines(block.get("content", "")):
+            if value is None and _BATCH_DROPS_RE.match(line):
+                return True
+        if _quotes_an_id_line(block.get("children") or []):
+            return True
+    return False
+
+
 def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
@@ -1112,7 +1178,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "last_child", parent_uuid,
                                        written_before=_written)
-    if strict and batch and count_blocks(tree) > 1:
+    if strict and batch and count_blocks(tree) > 1 and not _quotes_an_id_line(tree):
         # One round-trip instead of N. NOT atomic: a batch can still write only
         # part of its nodes (verified against a live graph - a malformed node is
         # skipped while its siblings land), and it answers null either way. That
@@ -1662,8 +1728,12 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: 
     return uuids
 
 
-def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True, keep_ids: bool = False) -> list:
-    """Insert hierarchical content into a page, returning the inserted block UUIDs.
+def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = True, keep_ids: bool = False) -> list:
+    """Append a parsed tree to a page, returning the inserted block UUIDs.
+
+    It takes the tree, not the text: the caller checked and cleaned that tree
+    for ``id::`` lines, and parsing the text again here would write something
+    the check never saw.
 
     Top-level nodes are appended to the page; children use insert_block.
     Returns UUIDs in DFS pre-order (parent before children).
@@ -1675,7 +1745,6 @@ def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, st
     the caller reports "Added N block(s)" with exit 0 for a journal entry that
     was never written.
     """
-    tree = parse_hierarchical_content(content)
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "page_end", page_name)
     uuids = []

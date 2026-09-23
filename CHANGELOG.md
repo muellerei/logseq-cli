@@ -114,13 +114,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An `id::` line indented by a form feed or a carriage return was not seen as
+  an id, and Logseq takes it as the block's (measured with `keepUUID`,
+  0.10.15). With `--keep-ids`, a uuid another block has could go out behind
+  one unchecked, in flat `--content` or a JSON `--tree` node; outline text
+  strips each line and was not affected. The property-line rule now takes
+  spaces, tabs, form feeds and carriage returns as indentation, and not a
+  no-break space or a vertical tab, which Logseq reads as text.
+- An `id::` line inside a code block was read as the block's id. To Logseq it
+  is code (measured, 0.10.15): `insertBlock` and `appendBlockInPage` write it
+  as given, and `insertBatchBlock` with `keepUUID` leaves it in place and gives
+  the block a fresh uuid. Without `--keep-ids` the CLI removed the line from
+  the example; with it, an example quoting an existing block's uuid was
+  refused as a copy, and one quoting a fresh uuid was sent with `keepUUID` and
+  failed the read-back after the write. The id rule now takes the code-block
+  rule of the property-line mask, as corrected in this release. That is sound
+  only because the check, the removal and the write now see the same blocks
+  (see "announced as dropped" in this section); a first attempt without that
+  was withdrawn in #31. Without `keepUUID`,
+  `insertBatchBlock` takes every `id::` line out of the content, one in a code
+  block too (measured), so a `--tree` quoting one is written block by block.
+  Outline text is one block per line, and a fence written there over several
+  lines is split: the block with the `id::` line then has an opener nothing
+  closes, and its id counts, as Logseq reads it. Flat `--content` and a JSON
+  `--tree` node keep the fence in one block. See
+  [#43](https://github.com/muellerei/logseq-cli/issues/43).
+- An `id::` line that a command announced as dropped could still be written.
+  `add-note-content`, `add-journal-block`, `add-journal-content` and
+  `insert-block --content` checked the parsed outline for `id::` lines but
+  removed them from the raw text, line by line, and the two did not always see
+  the same line. A bulleted `\t- id:: <uuid>` one level deeper is a property of
+  the block above to the parser; the raw line starts with `- `, so it stayed.
+  Logseq then minted a fresh uuid and kept the line (`insertBlock` and
+  `appendBlockInPage` write the text as given, measured, 0.10.15), and the file
+  named a uuid the block did not have. The check, the removal and the write now
+  use the one parsed outline; `add-journal-block` decides once per value
+  whether it is written as an outline or as one block. What the commands echo
+  (dry-run preview, `--json` `content`, the text preview) is derived from that
+  outline too, so the dropped line does not reappear there.
+- The code-block rule behind `replace-text` and `get-todos --match` hid too
+  much and too little. A ``` line with no closer after it made every later line
+  code, and so did a one-line ```` ```x``` ````; to Logseq neither is a code
+  block, and the `k:: v` lines after them are properties. A `~~~` fence was not
+  known at all, though Logseq hides a property between two of them. Measured
+  against Logseq 0.10.15 by writing blocks into page files: a fence line starts,
+  after spaces, tabs or form feeds (not a no-break space), with ``` or `~~~`,
+  the next fence line closes it
+  whichever of the two it uses and whatever follows on the line, and an opener
+  nothing closes is no code block. The mask now follows that.
 - An `id::` line with a tab after the value was not seen as an id, while
   Logseq keeps it as the block's (measured, 0.10.15). Flat `--content` is
   written as given, so an existing block's uuid could reach a second block
-  unchecked. A carriage return does stop Logseq, and the check agrees. An
-  `id::` line inside a code block still counts as an id; telling it apart
-  needs the check, the removal and the write to see the same block
-  boundaries, see [#43](https://github.com/muellerei/logseq-cli/issues/43).
+  unchecked. A carriage return does stop Logseq, and the check agrees.
 - `insert-block --before` with several top-level blocks (`--tree`, or
   `--content` with indented children) wrote them in reverse: `a, b, c` came
   out as `c, b, a` (measured, 0.10.15). Each root was sent "before" the one
