@@ -114,6 +114,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A code block written in outline text (`add-note-content`,
+  `add-journal-content`, indented `--content`, `--tree` as text) was cut into a
+  block per line: `` ```js ``, `a()`, `` ``` ``. None of them was a code block,
+  and the block holding only the opening fence was worse: when Logseq reads the
+  page file again, a fence nothing closes in one block runs on into the blocks
+  after it, up to the next code block on the page, and swallows them with their
+  uuids (measured, 0.10.15). The parser now reads a code block as Logseq's
+  files do: from the opening to the closing fence every line is code, `- `
+  lines included, with its indentation kept. Without a bullet the fence goes
+  on the block above, as a property line does; on a bullet line it is a block
+  of its own. See [#47](https://github.com/muellerei/logseq-cli/issues/47).
 - An `id::` line indented by a form feed or a carriage return was not seen as
   an id, and Logseq takes it as the block's (measured with `keepUUID`,
   0.10.15). With `--keep-ids`, a uuid another block has could go out behind
@@ -134,10 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was withdrawn in #31. Without `keepUUID`,
   `insertBatchBlock` takes every `id::` line out of the content, one in a code
   block too (measured), so a `--tree` quoting one is written block by block.
-  Outline text is one block per line, and a fence written there over several
-  lines is split: the block with the `id::` line then has an opener nothing
-  closes, and its id counts, as Logseq reads it. Flat `--content` and a JSON
-  `--tree` node keep the fence in one block. See
+  See
   [#43](https://github.com/muellerei/logseq-cli/issues/43).
 - An `id::` line that a command announced as dropped could still be written.
   `add-note-content`, `add-journal-block`, `add-journal-content` and

@@ -10,7 +10,8 @@ keepUUID, where the read-back then failed after the write.
 
 What made this more than a pattern change: the id check, the removal and the
 write did not see the same blocks (see test_dropped_ids_leave_no_line.py). Now
-they do, so the code-block rule can apply to all three.
+they do, so the code-block rule can apply to all three. Since #47 outline text
+keeps a code block in one block too (test_code_blocks_in_outlines.py).
 """
 import json
 from unittest.mock import patch
@@ -94,44 +95,44 @@ class TestACodeExampleInFlatContent:
         assert api.graph.locate(FRESH) is None
 
 
-SPLIT = {
-    # A code block under a bullet, as one writes it. In the raw text the id
-    # line sits between two fence lines; the parser makes it part of a block
-    # "```\nid:: X", whose opener nothing closes.
-    "indented": f"- note\n  ```\n  id:: {FRESH}\n  ```",
-    # The fence opened on a bullet line, as get-page --format markdown writes it.
-    "on a bullet": f"- note\n\t- ```js\n\t  a()\n\t  ```\n\t  id:: {FRESH}",
-}
+class TestOutlineText:
+    """Outline text keeps a code block in one block (#47). Indented under a
+    bullet, the fence goes on that block, and an id:: line inside it is code.
+    On a bullet line the code block is a block of its own, and an id:: line
+    after its closing fence is that block's id."""
 
+    INSIDE = f"- note\n  ```\n  id:: {FRESH}\n  ```"
+    AFTER = f"- note\n\t- ```js\n\t  a()\n\t  ```\n\t  id:: {FRESH}"
 
-@pytest.mark.parametrize("shape", SPLIT)
-class TestAFenceTheParserSplits:
-    """Hierarchical text is one block per line, so a fence written across lines
-    ends up split over several blocks, and the block that carries the id line
-    has an opener nothing closes. Logseq reads that as no code block: the id is
-    the block's (measured, keepUUID takes it). Read over the raw text instead,
-    the id line of the indented shape is inside a code block, and the removal
-    kept it."""
-
-    def test_without_keep_ids_the_id_is_dropped(self, shape):
+    def test_inside_the_code_block_it_is_written_as_is(self):
         api = _graph()
-        r = _run(["add-note-content", "--page", "Page A", "--content", SPLIT[shape]], api)
+        r = _run(["add-note-content", "--page", "Page A", "--keep-ids",
+                  "--content", self.INSIDE.replace(FRESH, EXISTING)], api)
+        assert r.exit_code == 0, r.stderr
+        assert "will be dropped" not in r.stderr
+        assert [b for b in _blocks(api.graph)
+                if b["content"] == f"note\n```\nid:: {EXISTING}\n```"]
+        assert api.graph.every_uuid().count(EXISTING) == 1
+
+    def test_after_the_code_block_it_is_dropped_without_keep_ids(self):
+        api = _graph()
+        r = _run(["add-note-content", "--page", "Page A", "--content", self.AFTER], api)
         assert r.exit_code == 0, r.stderr
         assert "will be dropped" in r.stderr
         assert not [b for b in _blocks(api.graph) if FRESH in b["content"]]
 
-    def test_with_keep_ids_it_is_kept(self, shape):
+    def test_after_the_code_block_it_is_kept_with_keep_ids(self):
         api = _graph()
-        r = _run(["add-note-content", "--page", "Page A", "--content", SPLIT[shape],
+        r = _run(["add-note-content", "--page", "Page A", "--content", self.AFTER,
                   "--keep-ids"], api)
         assert r.exit_code == 0, r.stderr
         page, siblings, i, _ = api.graph.locate(FRESH)
-        assert siblings[i]["content"].startswith("```\n")
+        assert siblings[i]["content"] == f"```js\na()\n```\nid:: {FRESH}"
 
-    def test_with_keep_ids_an_existing_one_is_refused(self, shape):
+    def test_after_the_code_block_an_existing_one_is_refused(self):
         api = _graph()
         r = _run(["add-note-content", "--page", "Page A", "--keep-ids",
-                  "--content", SPLIT[shape].replace(FRESH, EXISTING)], api)
+                  "--content", self.AFTER.replace(FRESH, EXISTING)], api)
         assert r.exit_code == 1
         assert "already belong" in r.stderr
 

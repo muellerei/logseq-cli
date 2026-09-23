@@ -513,22 +513,53 @@ def normalize_indentation(content: str) -> str:
     return "\n".join(out)
 
 
+def _is_fence(text: str) -> bool:
+    """A fence line by the measured rule (see property_line_mask)."""
+    return text.lstrip(" \t\f").startswith(("```", "~~~"))
+
+
+def _outline_fence_close(raw_lines: list, opener: int):
+    """Index of the line that closes the code block opened at ``opener``: the
+    next one without a bullet that starts with a fence. ``None`` if none does."""
+    for index in range(opener + 1, len(raw_lines)):
+        if _is_fence(raw_lines[index]):
+            return index
+    return None
+
+
+def _dedent_code(raw_lines: list, opener: int, close: int, bulleted: bool) -> str:
+    """The lines after ``opener`` up to ``close``, as ``"\n"``-prefixed text,
+    each moved left by the opener's indentation (plus the "- " of a bullet),
+    and by no more than the whitespace a line has."""
+    line = raw_lines[opener]
+    width = len(line) - len(line.lstrip(" \t")) + (2 if bulleted else 0)
+    out = []
+    for text in raw_lines[opener + 1:close + 1]:
+        lead = len(text) - len(text.lstrip(" \t"))
+        out.append(text[min(width, lead):])
+    return "".join("\n" + text for text in out)
+
+
 def parse_hierarchical_content(content: str) -> list:
     """Parse indented content into a block tree.
 
-    Each line becomes a block. Indentation (tab or 2 spaces) creates children.
-    Leading '- ' is stripped from each line. Mixed tab/space indentation is
+    Each line becomes a block, except a property line or a code block, which
+    go on the block they belong to (see below). Indentation (tab or 2 spaces)
+    creates children. Leading '- ' is stripped from each line. Mixed tab/space indentation is
     normalized to tab-only first, so a node's leading whitespace can never
     carry the ``\\t  \\t`` form that would break Logseq's outline.
     """
-    content = normalize_indentation(content)
-    lines = content.split("\n")
+    raw_lines = content.split("\n")
+    lines = normalize_indentation(content).split("\n")
     root = []
     stack = [(root, -1)]  # (children_list, indent_level)
     last_node = None
     last_indent = -1
+    skip_to = -1
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        if index <= skip_to:
+            continue
         if not line.strip():
             continue
         # Normalize indentation: count tabs (each tab = 1 level) or spaces (2 spaces = 1 level)
@@ -555,6 +586,24 @@ def parse_hierarchical_content(content: str) -> list:
         bulleted = stripped.startswith("- ")
         if bulleted:
             stripped = stripped[2:]
+
+        # A code block stays one block, as in Logseq's files: from the opening
+        # fence to the closing one every line is code, "- " and "# " lines
+        # included, and is taken from the text as written, so the indentation
+        # inside survives normalize_indentation. The closer is the next line
+        # without a bullet that starts with a fence. Cut into a block per
+        # line, the "```" block would run on into the blocks after it when
+        # Logseq reads the page file again, up to the next code block (#47).
+        close = _outline_fence_close(raw_lines, index) if _is_fence(stripped) else None
+        if close is not None:
+            code = _dedent_code(raw_lines, index, close, bulleted)
+            skip_to = close
+            if not bulleted and last_node is not None:
+                # Without a bullet it goes on the block above, as a property
+                # line does.
+                last_node["content"] += "\n" + stripped + code
+                continue
+            stripped += code
 
         # A property line without a bullet continues the block above it, as in
         # Logseq's files, so pasted outlines carrying collapsed:: true / id::
