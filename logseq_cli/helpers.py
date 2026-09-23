@@ -585,6 +585,22 @@ def parse_hierarchical_content(content: str) -> list:
     return root
 
 
+def outline_text(tree: list) -> str:
+    """``tree`` as the text :func:`parse_hierarchical_content` reads back as it.
+
+    For showing what a command writes after it has changed the parsed tree
+    (dropped id:: lines): derived from that tree, the preview cannot disagree
+    with the write. A block's further lines sit under its bullet, indented.
+    """
+    def walk(blocks, depth):
+        for block in blocks:
+            first, *rest = (block.get("content") or "").split("\n")
+            yield "\t" * depth + "- " + first
+            yield from ("\t" * depth + "  " + line for line in rest)
+            yield from walk(block.get("children") or [], depth + 1)
+    return "\n".join(walk(tree or [], 0))
+
+
 # A block's content carries its property lines verbatim (id:: <uuid>, key:: val).
 # This is the one rule for what counts as one; every reader that tells
 # property lines from text goes through it or through property_line_mask,
@@ -1662,8 +1678,12 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: 
     return uuids
 
 
-def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, strict: bool = True, keep_ids: bool = False) -> list:
-    """Insert hierarchical content into a page, returning the inserted block UUIDs.
+def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = True, keep_ids: bool = False) -> list:
+    """Append a parsed tree to a page, returning the inserted block UUIDs.
+
+    It takes the tree, not the text: the caller checked and cleaned that tree
+    for ``id::`` lines, and parsing the text again here would write something
+    the check never saw.
 
     Top-level nodes are appended to the page; children use insert_block.
     Returns UUIDs in DFS pre-order (parent before children).
@@ -1675,7 +1695,6 @@ def insert_formatted_content_with_uuids(api, page_name: str, content: str, *, st
     the caller reports "Added N block(s)" with exit 0 for a journal entry that
     was never written.
     """
-    tree = parse_hierarchical_content(content)
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "page_end", page_name)
     uuids = []

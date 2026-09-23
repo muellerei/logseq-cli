@@ -374,10 +374,11 @@ class TestPartialWriteIsNamed:
         assert "Nothing was written" not in result.output
 
     def test_page_top_append_failure_is_not_reported_as_success(self, api, tmp_path):
-        """insert_formatted_content_with_uuids was the last inserter without a
-        strict contract: a page Logseq has not loaded answers every append with
-        HTTP 200 + null, the None UUIDs were counted, and the command printed
-        "Added N block(s)" with exit 0 for an entry that never existed."""
+        """insert_tree_at_page_end (then insert_formatted_content_with_uuids)
+        was the last inserter without a strict contract: a page Logseq has not
+        loaded answers every append with HTTP 200 + null, the None UUIDs were
+        counted, and the command printed "Added N block(s)" with exit 0 for an
+        entry that never existed."""
         api.append_block_in_page.side_effect = None
         api.append_block_in_page.return_value = None
         f = tmp_path / "top.md"
