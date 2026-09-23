@@ -668,12 +668,11 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
 # as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
 #
-# An id:: line between ``` fences is code to Logseq, and still counts here.
-# Telling it apart needs the check, the removal and the write to see the same
-# block boundaries, which they do not yet: the removal runs over the raw
-# content, where a fence opened on a bullet line is not seen. A first attempt
-# left an id line in place after announcing it dropped. Counting it errs
-# toward refusing and removing; see #43.
+# An id:: line inside a code block is code to Logseq, not the block's id
+# (measured, #43), so only the lines property_line_mask passes count. That
+# holds only as long as the check, the removal and the write see the same
+# blocks: the commands check and clean the parsed outline they write, never
+# the raw text, where a fence opened on a bullet line reads differently.
 _ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+)[ \t]*$',
                              re.MULTILINE | re.IGNORECASE)
 
@@ -687,10 +686,19 @@ _UUID_RE = re.compile(
 )
 
 
+def _id_lines(content: str) -> list:
+    """``(line, id value or None)`` for each line of one block's ``content``."""
+    lines = (content or "").split("\n")
+    found = []
+    for line, is_property in zip(lines, property_line_mask(lines)):
+        match = _ID_PROPERTY_RE.fullmatch(line) if is_property else None
+        found.append((line, match.group(1) if match else None))
+    return found
+
+
 def block_id_property(content: str) -> str:
     """The ``id::`` value in ``content``, or ``""`` if it carries none."""
-    match = _ID_PROPERTY_RE.search(content or "")
-    return match.group(1) if match else ""
+    return next((value for _, value in _id_lines(content) if value), "")
 
 
 def without_block_ids(content: str) -> str:
@@ -699,10 +707,9 @@ def without_block_ids(content: str) -> str:
     What "dropped" has to mean when an id is not kept: left in the content,
     the line would name a uuid the block does not have, and a copy would put
     the original's id into the file, where the next parse finds two blocks
-    claiming it.
+    claiming it. A line in a code block is code and stays.
     """
-    return "\n".join(line for line in (content or "").split("\n")
-                     if not _ID_PROPERTY_RE.fullmatch(line))
+    return "\n".join(line for line, value in _id_lines(content) if not value)
 
 
 def tree_without_block_ids(tree: list) -> list:
@@ -738,7 +745,7 @@ def blocks_with_several_ids(tree: list) -> list:
     for block in tree or []:
         if not isinstance(block, dict):
             continue
-        values = _ID_PROPERTY_RE.findall(block.get("content", "") or "")
+        values = [value for _, value in _id_lines(block.get("content", "")) if value]
         if len(values) > 1:
             found.extend(values)
         found.extend(blocks_with_several_ids(block.get("children") or []))
@@ -1118,6 +1125,30 @@ def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
     return uuid
 
 
+# The lines insertBatchBlock takes out of a block's content when it is not
+# asked to keep uuids (measured, 0.10.15): "id:: " with any value or none, in
+# any case, inside a code block too, behind any whitespace JavaScript's \s
+# knows (space, tab, form feed, carriage return, no-break space and vertical
+# tab measured; \ufeff is in \s there and not in Python's). Not "id::"
+# alone, not "custom-id::". insertBlock writes the same text as given.
+_BATCH_DROPS_RE = re.compile(r'^[\s\ufeff]*id:: ', re.IGNORECASE)
+
+
+def _quotes_an_id_line(tree: list) -> bool:
+    """Whether a node of ``tree`` has a line the batch would drop that is not
+    the block's id: one inside a code block, say. Such a tree goes block by
+    block, so the text is written as given."""
+    for block in tree or []:
+        if not isinstance(block, dict):
+            continue
+        for line, value in _id_lines(block.get("content", "")):
+            if value is None and _BATCH_DROPS_RE.match(line):
+                return True
+        if _quotes_an_id_line(block.get("children") or []):
+            return True
+    return False
+
+
 def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
@@ -1143,7 +1174,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "last_child", parent_uuid,
                                        written_before=_written)
-    if strict and batch and count_blocks(tree) > 1:
+    if strict and batch and count_blocks(tree) > 1 and not _quotes_an_id_line(tree):
         # One round-trip instead of N. NOT atomic: a batch can still write only
         # part of its nodes (verified against a live graph - a malformed node is
         # skipped while its siblings land), and it answers null either way. That

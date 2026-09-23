@@ -265,7 +265,13 @@ references as plain text.
 This holds for `insert-block` (`--tree` and `--content`), `add-note-content`,
 `add-journal-block` and `add-journal-content`; not for `create-page --content`
 or the deprecated `add-journal-entry`. Each removes the `id::` lines from the
-content and says how many ids it dropped, on stderr. Pass
+content and says how many ids it dropped, on stderr. An `id::` line inside a
+code block (between two lines that start with ```` ``` ```` or `~~~`) is code, as
+it is to Logseq, and is written as is where the fence stays in one block: flat
+`--content` (`insert-block`, `add-journal-block`) and a JSON `--tree` node.
+Outline text is one block per line, so a fence written there over several lines
+is split, and the `id::` line belongs to a block whose fence nothing closes:
+that one counts. Pass
 `--keep-ids` when you are **moving or restoring** an outline:
 
 ```bash
