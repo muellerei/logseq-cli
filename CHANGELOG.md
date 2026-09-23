@@ -252,6 +252,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `remove-block`, `delete-page` and `copy-block --remove` refuse while
+  `((block-refs))` from elsewhere point into what they would delete, and list
+  where each one comes from. `--ignore-refs` deletes anyway. Before, they
+  reported a block count and left every such ref dangling, on a page other
+  than the one being changed. In real use a page was deleted with `--force`
+  during a rebuild, and the dead ref in a journal entry was only found by
+  reading the journal afterwards.
+
+  `--force` does not override the check. A caller that deletes pages
+  routinely passes `--force` every time, so a check it switched off would
+  not have stopped that case. Refs from inside the deleted set do not count,
+  because they go together with their target; for a page that means refs
+  from the same page. `:block/refs` holds `((uuid))`, `{{embed ((uuid))}}`,
+  `[label](((uuid)))` and a `key:: ((uuid))` value alike (measured, Logseq
+  0.10.15), so one query covers all four. `--dry-run` refuses the same way,
+  and under `--json` the refusal carries the refs as a list. `copy-block
+  --remove` checks before writing the copy and points to `move-block`, which
+  keeps the uuids. There, refs from within the source count too: the copy
+  carries them under new uuids, and their targets go with the original.
+  The page is looked up by the name Logseq resolves, not the one typed:
+  `getPage` also normalises the Unicode form and a slash at either end, and
+  a name that only matched after that found no refs. The `remove-block` help no longer sends block refs to
+  `get-backlinks`, which answers for page names only.
+  See [#24](https://github.com/muellerei/logseq-cli/issues/24).
+
 - `_MUTATING_METHODS` no longer lists `logseq.Editor.setBlockProperty` and
   `logseq.Editor.replaceText`. Neither has a wrapper and neither was ever sent:
   all 19 `call()` invocations pass a literal method name, so no input could

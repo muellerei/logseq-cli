@@ -19,6 +19,7 @@ from logseq_cli.helpers import (
     find_heading,
     find_or_create_heading,
     format_journal_date,
+    incoming_block_refs,
     insert_block_tree_as_first_children,
     insert_block_tree_as_siblings,
     insert_block_tree_at_page_top,
@@ -30,11 +31,13 @@ from logseq_cli.helpers import (
     parse_hierarchical_content,
     parse_tree_input,
     read_content_file,
+    refs_refusal,
     reject_unsupported_multiline,
     require_content,
     require_insert,
     resolve_single_block,
     stored_properties,
+    subtree_uuids,
     tree_without_block_ids,
     uuid_fields,
     without_block_ids,
@@ -141,14 +144,16 @@ Examples:
   logseq-cli --token TOKEN remove-block --id 12345678-...
 Note:
   Destructive. Children are removed too — --dry-run reports how many.
-  Check get-backlinks first if the block has id::.
+  Refuses while ((block-refs)) from elsewhere point into the block or its
+  children, and lists them; --ignore-refs removes anyway.
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to remove")
+@click.option("--ignore-refs", is_flag=True, help="Remove even though ((block-refs)) from elsewhere point into it")
 @click.option("--dry-run", is_flag=True, help="Show the block and its descendant count, without deleting")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def remove_block_cmd(ctx, block_id, dry_run, as_json):
+def remove_block_cmd(ctx, block_id, ignore_refs, dry_run, as_json):
     """Remove a block by UUID."""
     api = ctx.obj["api"]
     clean_id = block_id.strip().replace("((", "").replace("))", "")
@@ -163,11 +168,16 @@ def remove_block_cmd(ctx, block_id, dry_run, as_json):
     children = block.get("children", []) if isinstance(block, dict) else []
     descendants = count_blocks(children) if children else 0
 
+    refs = incoming_block_refs(api, uuids=subtree_uuids(block))
+    if refs and not ignore_refs:
+        fail(refs_refusal(refs, "this block and its children from elsewhere"),
+             as_json=as_json, id=clean_id, refs=refs)
+
     if dry_run:
         if as_json:
             output({"id": clean_id, "content": content,
                     "descendants": descendants, "blocks_removed": descendants + 1,
-                    "dry_run": True}, True)
+                    "refs_broken": len(refs), "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would remove block {clean_id}")
             preview = content[:80] + ("..." if len(content) > 80 else "")
@@ -175,18 +185,23 @@ def remove_block_cmd(ctx, block_id, dry_run, as_json):
                 click.echo(f"  content: {preview}")
             click.echo(f"  descendants that would be removed too: {descendants}")
             click.echo(f"  total blocks affected: {descendants + 1}")
+            if refs:
+                click.echo(f"  incoming block refs that would dangle: {len(refs)}")
         return
 
     api.remove_block(clean_id)
 
     if as_json:
         output({"id": clean_id, "removed": True, "content": content,
-                "descendants": descendants, "blocks_removed": descendants + 1}, True)
+                "descendants": descendants, "blocks_removed": descendants + 1,
+                "refs_broken": len(refs)}, True)
     else:
         preview = content[:80] + ("..." if len(content) > 80 else "")
         click.echo(f"Removed block {clean_id} ({descendants + 1} block(s) total)")
         if preview:
             click.echo(f"  was: {preview}")
+        if refs:
+            click.echo(f"  {len(refs)} incoming block ref(s) now point at nothing")
 
 @cli.command("replace-text", epilog="""\b
 Example:
@@ -664,21 +679,33 @@ Examples:
   logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page" --remove
 Note:
   Copies block + all children. With --remove: original is deleted (move).
+  The copy gets new UUIDs, so --remove refuses while ((block-refs)) point
+  into the original, even from within it; move-block keeps the UUIDs.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
 @click.option("--remove", is_flag=True, help="Remove source block after copying (move)")
+@click.option("--ignore-refs", is_flag=True, help="With --remove: remove even though ((block-refs)) point into the source")
 @click.option("--dry-run", is_flag=True, help="Show what would be copied/moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
+def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)
     if not source:
         fail("Block not found.", as_json=as_json, id=block_id)
+
+    # Checked before the copy is written: refusing afterwards would leave a
+    # copy behind that nobody asked to keep.
+    refs = (incoming_block_refs(api, uuids=subtree_uuids(source), count_inside=True)
+            if remove else [])
+    if refs and not ignore_refs:
+        fail(refs_refusal(refs, "the source, from elsewhere or from within it",
+                          "The copy gets new UUIDs; move-block keeps them. "),
+             as_json=as_json, id=block_id, refs=refs)
 
     if dry_run:
         planned = count_blocks([source])
@@ -687,7 +714,7 @@ def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
         if as_json:
             output({"action": action, "blocks": planned, "to_page": to_page,
                     "source_id": block_id, "removes_source": bool(remove),
-                    "dry_run": True}, True)
+                    "refs_broken": len(refs), "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would {action} {planned} block(s) to '{to_page}'")
             preview = content[:80] + ("..." if len(content) > 80 else "")
@@ -695,6 +722,8 @@ def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
                 click.echo(f"  root: {preview}")
             if remove:
                 click.echo(f"  source block {block_id} WOULD BE REMOVED after copying")
+            if refs:
+                click.echo(f"  block refs into the source that would dangle: {len(refs)}")
         return
 
     # Every insert is checked: Logseq answers a failed write with HTTP 200 +
@@ -728,11 +757,15 @@ def copy_block(ctx, block_id, to_page, remove, dry_run, as_json):
 
     action = "Moved" if remove else "Copied"
     result_data = {"action": action.lower(), "blocks": count, "to_page": to_page, "source_id": block_id}
+    if remove:
+        result_data["refs_broken"] = len(refs)
 
     if as_json:
         output(result_data, True)
     else:
         click.echo(f"{action} {count} block(s) to '{to_page}'.")
+        if refs:
+            click.echo(f"  {len(refs)} block ref(s) into the source now point at nothing")
 
 @cli.command("move-block", epilog="""\b
 Examples:
