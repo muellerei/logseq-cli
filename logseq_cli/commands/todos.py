@@ -4,6 +4,7 @@ import sys
 
 import click
 
+from logseq_cli.blocktext import refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.group import cli
 from logseq_cli.helpers import (
@@ -21,12 +22,19 @@ from logseq_cli.render import BLOCK_REF_RE
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
 
 def _swap_todo_marker(content: str, new_status: str) -> str:
-    """Replace the leading TODO-marker in content with new_status."""
-    parts = content.split(None, 1)
+    """Replace the leading TODO-marker in content with new_status.
+
+    On the first line only: split over the whole content, a line break counts
+    as the whitespace after the marker, and "TODO\nnotes" came out joined as
+    "DONE notes".
+    """
+    first, newline, rest = content.partition("\n")
+    parts = first.split(None, 1)
     if parts and parts[0].upper() in _TODO_MARKERS:
-        rest = parts[1] if len(parts) > 1 else ""
-        return f"{new_status} {rest}".strip()
-    return f"{new_status} {content}"
+        first = f"{new_status} {parts[1]}".strip() if len(parts) > 1 else new_status
+    else:
+        first = f"{new_status} {first}"
+    return first + newline + rest
 
 def _fetch_todo_references(api, markers_str: str) -> dict:
     """Map each referenced todo's uuid to the pages its references sit on.
@@ -533,6 +541,12 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     if old_marker.upper() not in _TODO_MARKERS:
         old_marker = ""
 
+    # Checked before the preview, which would otherwise show what the write
+    # refuses: a marker put in front of an opening fence leaves the code block
+    # open (#47). Lines the block already had may stay.
+    refuse_split_block(new_content, command="set-todo-status", where="The block",
+                       replacing=old_content)
+
     if dry_run:
         if as_json:
             output({"uuid": block_id, "old_marker": old_marker, "new_marker": status,
@@ -547,7 +561,8 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
             click.echo(f"  now: {preview}")
         return
 
-    api.update_block(block_id, new_content)
+    # Only the marker changes; lines the block already had are not ours to refuse.
+    api.update_block(block_id, new_content, replacing=old_content)
 
     if as_json:
         output({"uuid": block_id, "old": old_content, "new": new_content, "status": status}, True)

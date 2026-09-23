@@ -217,6 +217,39 @@ logseq-cli add-journal-content \
   --content "- ## Section\n\t- Child item\n\t\t- Grandchild"
 ```
 
+Each line is a block, with two exceptions that stay with the block they belong
+to, as in Logseq's own files. A `key:: value` line without a bullet goes on the
+block above. So does a code block: from a line starting with ```` ``` ```` or
+`~~~` to the next such line without a bullet, every line is code, `- ` lines
+included, and keeps its indentation. Put the fence on a bullet line to make the
+code block a block of its own:
+
+```bash
+logseq-cli add-note-content --page "Notes" \
+  --content $'- Example\n  ```js\n  run()\n  ```\n- ```sh\n  make\n  ```'
+# -> "Example" with the code on it, then a block holding only the sh code
+```
+
+Text the CLI writes as ONE block must come back from the page file as that
+block. Logseq's file parser takes a `- ` or `#` line after the first (indented
+too) and a code fence nothing closes as block boundaries, and rebuilds the page
+the next time it reads the file: the lines become blocks of their own, and an
+unclosed fence swallows the blocks after it. So every such write is refused
+before anything is written, with the line and the way to write it: flat
+`--content`, a JSON `--tree` node, `update-block`, `create-page --content`,
+also `copy-block`, `replace-text` and the heading of `--under-heading`. Inside
+a closed code block these lines are fine. Indent sub-bullets to write children,
+or pass `--content` several times (`add-journal-block`) for blocks side by
+side. `--json` gives `{"reason": "splits_into_blocks", "line": N, "kind": ...}`
+with exit code 2.
+
+A property value (`set-property`, `set-block-property`, `--property`) is one
+line: Logseq writes it into the block as `key:: value`, so a line break in it
+is refused. A change to part of a block (`replace-text`, `set-todo-status`)
+may leave as many such lines as the block had, and change their text, since
+Logseq's own editor makes such blocks; it may not add one. `update-block`
+replaces the whole text and gets no such pass.
+
 ### 4. Destructive Operations
 
 `--dry-run` is available on every write, not only the ones that cascade:
@@ -267,11 +300,7 @@ This holds for `insert-block` (`--tree` and `--content`), `add-note-content`,
 or the deprecated `add-journal-entry`. Each removes the `id::` lines from the
 content and says how many ids it dropped, on stderr. An `id::` line inside a
 code block (between two lines that start with ```` ``` ```` or `~~~`) is code, as
-it is to Logseq, and is written as is where the fence stays in one block: flat
-`--content` (`insert-block`, `add-journal-block`) and a JSON `--tree` node.
-Outline text is one block per line, so a fence written there over several lines
-is split, and the `id::` line belongs to a block whose fence nothing closes:
-that one counts. Pass
+it is to Logseq, and is written as is. Pass
 `--keep-ids` when you are **moving or restoring** an outline:
 
 ```bash

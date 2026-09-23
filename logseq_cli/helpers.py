@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 
+from logseq_cli.blocktext import code_block_lines, is_fence, refuse_split_property
 from logseq_cli.datalog import edn_string, page_name_literal
 
 # Locale-independent English day/month names (Logseq always uses English)
@@ -396,80 +397,6 @@ def contains_hierarchical_content(content: str) -> bool:
     return bool(re.search(r'\n[\t ]+- ', content))
 
 
-def has_flush_newline_bullets(content: str) -> bool:
-    """True if content has a bullet line (``- ``) after a newline with NO indentation.
-
-    This is the silent-failure case for ``add-journal-block``: a single
-    ``--content`` string like ``"**09:16** Header\\n- point a\\n- point b"``
-    is neither detected as hierarchy (``contains_hierarchical_content`` requires
-    indentation) nor written as separate blocks. It ends up as ONE block whose
-    body carries raw ``\\n- `` lines — a broken outline. Callers should reject
-    such content and tell the user to indent (children), split into multiple
-    ``--content`` (siblings), or use ``insert-block --tree``.
-
-    Only flush (column-0) bullets on line 2+ count. A leading bullet on line 1
-    and any indented sub-bullet are fine.
-    """
-    lines = content.split("\n")
-    for line in lines[1:]:
-        if line.startswith("- "):
-            return True
-    return False
-
-
-class MultilineContentError(ValueError):
-    """Raised when a ``--content`` value carries bullets the command cannot write.
-
-    Carries a ready-to-print message; CLI callers re-raise it as a
-    ``click.UsageError`` so the user sees the fix instructions directly.
-    """
-
-
-def reject_unsupported_multiline(content: str, *, command: str, accepts_tree: bool) -> None:
-    """Reject newline bullets that ``command`` cannot turn into real blocks.
-
-    Two different failure modes, one rule per command:
-
-    ``accepts_tree=True`` (``insert-block``, ``add-journal-block``,
-    ``add-note-content``): indented sub-bullets are parsed into children, so only
-    a flush (column-0) ``- `` on line 2+ is broken — it is neither hierarchy nor
-    a sibling split and would land as raw text inside one block.
-
-    ``accepts_tree=False`` (``update-block``): the command replaces the content of
-    ONE existing block and has no tree path at all. *Any* newline bullet, indented
-    or not, ends up as raw text inside that block.
-
-    Raises:
-        MultilineContentError: with a message naming the fix for this command.
-    """
-    flush = has_flush_newline_bullets(content)
-    indented = contains_hierarchical_content(content)
-
-    if accepts_tree:
-        if not flush:
-            return
-        raise MultilineContentError(
-            "--content has multiline '- ' bullets with no indentation "
-            "(line 2+). That is NOT recognised as a hierarchy and lands as "
-            "ONE block with raw newline bullets.\n"
-            "  - want children?  -> indent sub-bullets with a tab\n"
-            "  - want siblings?  -> pass --content several times\n"
-            "  - want a tree?    -> insert-block --tree\n"
-            "  - from a file?    -> --content-file FILE"
-        )
-
-    if not (flush or indented):
-        return
-    raise MultilineContentError(
-        f"--content has multiline '- ' bullets. {command} replaces the content "
-        "of ONE block and creates no child blocks: the lines land as raw text "
-        "inside the block.\n"
-        "  - only change the line? -> shorten --content to a single line\n"
-        "  - want children?        -> insert-block --child-of UUID\n"
-        "  - want a tree?          -> insert-block --tree"
-    )
-
-
 def has_mixed_indentation(content: str) -> bool:
     """True if any indented line mixes tabs and spaces in its leading whitespace.
 
@@ -513,22 +440,48 @@ def normalize_indentation(content: str) -> str:
     return "\n".join(out)
 
 
+def _outline_fence_close(raw_lines: list, opener: int):
+    """Index of the line that closes the code block opened at ``opener``: the
+    next one without a bullet that starts with a fence. ``None`` if none does."""
+    for index in range(opener + 1, len(raw_lines)):
+        if is_fence(raw_lines[index]):
+            return index
+    return None
+
+
+def _dedent_code(raw_lines: list, opener: int, close: int, bulleted: bool) -> str:
+    """The lines after ``opener`` up to ``close``, as ``"\n"``-prefixed text,
+    each moved left by the opener's indentation (plus the "- " of a bullet),
+    and by no more than the whitespace a line has."""
+    line = raw_lines[opener]
+    width = len(line) - len(line.lstrip(" \t")) + (2 if bulleted else 0)
+    out = []
+    for text in raw_lines[opener + 1:close + 1]:
+        lead = len(text) - len(text.lstrip(" \t"))
+        out.append(text[min(width, lead):])
+    return "".join("\n" + text for text in out)
+
+
 def parse_hierarchical_content(content: str) -> list:
     """Parse indented content into a block tree.
 
-    Each line becomes a block. Indentation (tab or 2 spaces) creates children.
-    Leading '- ' is stripped from each line. Mixed tab/space indentation is
+    Each line becomes a block, except a property line or a code block, which
+    go on the block they belong to (see below). Indentation (tab or 2 spaces)
+    creates children. Leading '- ' is stripped from each line. Mixed tab/space indentation is
     normalized to tab-only first, so a node's leading whitespace can never
     carry the ``\\t  \\t`` form that would break Logseq's outline.
     """
-    content = normalize_indentation(content)
-    lines = content.split("\n")
+    raw_lines = content.split("\n")
+    lines = normalize_indentation(content).split("\n")
     root = []
     stack = [(root, -1)]  # (children_list, indent_level)
     last_node = None
     last_indent = -1
+    skip_to = -1
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        if index <= skip_to:
+            continue
         if not line.strip():
             continue
         # Normalize indentation: count tabs (each tab = 1 level) or spaces (2 spaces = 1 level)
@@ -555,6 +508,24 @@ def parse_hierarchical_content(content: str) -> list:
         bulleted = stripped.startswith("- ")
         if bulleted:
             stripped = stripped[2:]
+
+        # A code block stays one block, as in Logseq's files: from the opening
+        # fence to the closing one every line is code, "- " and "# " lines
+        # included, and is taken from the text as written, so the indentation
+        # inside survives normalize_indentation. The closer is the next line
+        # without a bullet that starts with a fence. Cut into a block per
+        # line, the "```" block would run on into the blocks after it when
+        # Logseq reads the page file again, up to the next code block (#47).
+        close = _outline_fence_close(raw_lines, index) if is_fence(stripped) else None
+        if close is not None:
+            code = _dedent_code(raw_lines, index, close, bulleted)
+            skip_to = close
+            if not bulleted and last_node is not None:
+                # Without a bullet it goes on the block above, as a property
+                # line does.
+                last_node["content"] += "\n" + stripped + code
+                continue
+            stripped += code
 
         # A property line without a bullet continues the block above it, as in
         # Logseq's files, so pasted outlines carrying collapsed:: true / id::
@@ -631,29 +602,13 @@ def property_line_mask(lines: list) -> list:
     so a --find inside a fenced example is replaced and a get-todos --match
     sees it.
 
-    The code block is Logseq's, measured against 0.10.15 (#43): a fence line
-    starts, after spaces, tabs or form feeds, with ``` or ~~~ (a no-break
-    space or a carriage return in front, which str.lstrip() would also take
-    away, makes it text), and the next fence line closes it, whichever of the
-    two it uses and whatever follows on the line. An opener that nothing
-    closes makes no code block; the lines after it are read as usual. So a
-    one-line ```x``` hides nothing unless a fence line follows. Erring toward
-    "code" is the unsafe direction: an id:: line the mask hid would reach
-    Logseq unchecked and still name the block's uuid.
+    The code block is Logseq's, see blocktext.code_block_lines (#43).
     """
-    fence = [line.lstrip(" \t\f").startswith(("```", "~~~")) for line in lines]
-    inside, opener = [False] * len(lines), None
-    for i, is_fence in enumerate(fence):
-        if not is_fence:
-            continue
-        if opener is None:
-            opener = i
-        else:
-            inside[opener + 1:i] = [True] * (i - opener - 1)
-            opener = None
+    inside, _ = code_block_lines(lines)
     # A fence line itself is never a property: ` and ~ end a key.
     return [not code and bool(PROPERTY_LINE_RE.match(line))
             for line, code in zip(lines, inside)]
+
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 
@@ -1899,13 +1854,15 @@ def parse_property_pairs(pairs) -> list:
 def check_property_pairs(pairs) -> list:
     """:func:`parse_property_pairs` for a command's up-front validation.
 
-    Same result, and additionally names every renamed key on stderr. Called
-    once per command, before anything is read or written, so each note appears
-    once however often the pairs are parsed later.
+    Same result, and additionally names every renamed key on stderr and refuses
+    a value Logseq would split into blocks (#47). Called once per command,
+    before anything is read or written, so each note appears once however often
+    the pairs are parsed later.
     """
     parsed = parse_property_pairs(pairs)
-    for raw, (stored, _value) in zip(pairs, parsed):
+    for raw, (stored, value) in zip(pairs, parsed):
         note_renamed_property_key(_split_property_pair(raw)[0], stored)
+        refuse_split_property(stored, value)
     return parsed
 
 
