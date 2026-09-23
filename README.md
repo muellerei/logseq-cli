@@ -439,7 +439,12 @@ declines to move a block into its own subtree and says so only by doing
 nothing. So the move is proven by re-reading, and the obvious check is not
 enough: for `--before`, "same parent" would also hold for a move that did
 nothing at all, since source and target usually share one already, so the
-sibling order is what gets compared. The option names mislead as well, which
+sibling order is what gets compared. That order has to come from the page tree
+when the target sits at the top level, because its parent is then the page and
+`getBlock` does not answer for a page; up to 0.13.0 every top-level `--before`
+was reported as failed, moved or not. The subtree case is checked before the
+call instead, so it is refused with its reason rather than guessed at
+afterwards. The option names mislead as well, which
 only a live graph will tell you: `before: true` inserts a sibling in front, and
 everything else — including the `sibling: true` the API's own option list
 suggests — nests the block as the target's first child. This matters beyond
