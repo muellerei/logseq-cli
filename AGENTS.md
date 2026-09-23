@@ -97,6 +97,18 @@ logseq-cli add-journal-block --date 2026-04-03 --content "**14:30** Late note"
 logseq-cli add-journal-block --top-level --content "Top-level block"
 ```
 
+Text with apostrophes, quotes or umlauts is safer from a file than through
+shell quoting: on `update-block`, `insert-block`, `add-note-content` and
+`add-journal-content`, `--content-file FILE` (`-` reads stdin) is `--content`
+read from the file, with the same rules. `create-page` and the deprecated
+`add-journal-entry` do not have it. On `add-journal-block` the file is read as one
+tree instead, so flush `- ` lines become sibling blocks.
+
+```bash
+logseq-cli update-block --id "$U" --content-file note.md
+printf 'Alice'"'"'s note\n' | logseq-cli insert-block --child-of "$U" --content-file -
+```
+
 `add-journal-block`, `add-journal-content`, `add-note-content` and
 `add-block-ref` print the uuid of the block they wrote (the root, for a tree)
 on one `  uuid: ...` line, so a follow-up `find-block` to recover it is not
