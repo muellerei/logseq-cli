@@ -11,7 +11,7 @@ from logseq_cli.helpers import (
     note_renamed_property_key,
     stored_properties,
 )
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
 def _property_key_spellings(key: str):
@@ -78,6 +78,8 @@ Examples:
 def get_properties(ctx, page, prop_name, as_json):
     """Get properties of a page."""
     api = ctx.obj["api"]
+    ref = follow_page(api, page, as_json)
+    page = ref.page
     page_data = api.get_page(page)
 
     if not page_data:
@@ -88,6 +90,9 @@ def get_properties(ctx, page, prop_name, as_json):
     properties, text_values = (stored_properties(api, page_data["uuid"])
                                if page_data.get("uuid") else ({}, {}))
     page_name = page_data.get("originalName") or page_data.get("name", page)
+    # This command has always named the page as stored; an alias keeps the
+    # rule of the others, the name asked for and alias_of (#63).
+    names = ref.fields() if ref.redirected else {"page": page_name}
 
     # Logseq does not always expose page properties on the page object itself:
     # for pages written via set-property they live on the first block instead
@@ -113,12 +118,12 @@ def get_properties(ctx, page, prop_name, as_json):
         text_value = text_values.get(text_key) if text_key else None
 
         if as_json:
-            output({"page": page_name, "property": stored_key, "value": value, "text": text_value}, True)
+            output({**names, "property": stored_key, "value": value, "text": text_value}, True)
         else:
             click.echo(text_value or value)
     else:
         if as_json:
-            output({"page": page_name, "properties": properties, "text_values": text_values}, True)
+            output({**names, "properties": properties, "text_values": text_values}, True)
         else:
             if not properties:
                 click.echo(f"No properties on '{page_name}'.")
@@ -165,6 +170,9 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     key = stored
     refuse_split_property(key, value)
 
+    ref = follow_page(api, page, as_json)
+    page = ref.page
+
     # Get page blocks to find the first block (properties block)
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
@@ -187,7 +195,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
         had = key in existing
         old_value = existing.get(key)
         if as_json:
-            output({"page": page, "property": key, "old_value": old_value,
+            output({**ref.fields(), "property": key, "old_value": old_value,
                     "value": value, "existed": had, "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would set '{key}::' on page '{page}'")
@@ -200,7 +208,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
 
     api.upsert_block_property(str(block_uuid), key, value)
 
-    result = {"page": page, "property": key, "value": value, "status": "updated"}
+    result = {**ref.fields(), "property": key, "value": value, "status": "updated"}
     if as_json:
         output(result, True)
     else:
@@ -251,6 +259,8 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         target = f"block '{block_uuid}'"
         result = {"id": block_uuid, "property": key, "status": "removed"}
     else:
+        ref = follow_page(api, page, as_json)
+        page = ref.page
         blocks = api.get_page_blocks_tree(page)
         if not blocks:
             fail(f"Page '{page}' not found or has no blocks", as_json=as_json, page=page)
@@ -258,7 +268,7 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         if not block_uuid:
             fail("Could not find block UUID", as_json=as_json, page=page)
         target = f"page '{page}'"
-        result = {"page": page, "property": key, "status": "removed"}
+        result = {**ref.fields(), "property": key, "status": "removed"}
 
     if dry_run:
         existing, _texts = stored_properties(api, block_uuid)

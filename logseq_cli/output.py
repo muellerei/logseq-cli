@@ -14,6 +14,7 @@ from logseq_cli.api import DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.blocktext import IdLineError, SplitBlockError
+from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
 
 
 def handle_connection_error(func):
@@ -99,6 +100,24 @@ def handle_connection_error(func):
                 reason="id_line",
                 line=e.line,
             )
+        except AmbiguousAliasError as e:
+            # Logseq would take the first of the pages; the CLI names them all
+            # and lets the caller choose, so no read or write guesses.
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="ambiguous_alias",
+                page=e.name,
+                ambiguous=e.candidates,
+            )
+        except AliasError as e:
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="alias",
+                page=e.ref.requested,
+                alias_of=e.ref.page,
+            )
         except InvalidKeywordError as e:
             # The connection is healthy and no query was sent; the input was
             # rejected before building. A distinct reason keeps this out of the
@@ -109,6 +128,48 @@ def handle_connection_error(func):
                 reason="invalid_property_key",
             )
     return wrapper
+
+
+def note_alias(ref, as_json: bool) -> None:
+    """Say on stderr that a name was an alias, in text mode only.
+
+    Under --json a result that names the page carries ``alias_of`` instead: a
+    note there could stand in front of a later error object and break its JSON.
+    """
+    if ref.redirected and not as_json:
+        click.echo(f"Note: '{ref.requested}' is an alias of '{ref.page}'.", err=True)
+
+
+def follow_page(api, name: str, as_json: bool):
+    """The page ``name`` means (see pagenames), said on stderr if an alias.
+
+    One call for both, so no command follows an alias without saying so.
+    """
+    ref = resolve_page(api, name)
+    note_alias(ref, as_json)
+    return ref
+
+
+def follow_pages(api, names, as_json: bool):
+    """:func:`follow_page` for each of a batch, an ambiguous alias per name.
+
+    Returns ``(refs, ambiguous)``: ``None`` in ``refs`` where ``ambiguous``
+    holds the candidates, so the other names are still read, as a missing
+    page does not cost the batch either.
+    """
+    refs, ambiguous = [], {}
+    for name in names:
+        try:
+            refs.append(follow_page(api, name, as_json))
+        except AmbiguousAliasError as e:
+            ambiguous[name] = e.candidates
+            refs.append(None)
+    return refs, ambiguous
+
+
+def ambiguous_message(ambiguous: dict) -> str:
+    """One sentence per alias two pages claim, for a batch's final error."""
+    return " ".join(str(AmbiguousAliasError(n, c)) for n, c in ambiguous.items())
 
 
 def json_text(data) -> str:

@@ -51,7 +51,7 @@ from logseq_cli.helpers import (
     uuid_fields,
     without_foreign_block_ids,
 )
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
 @cli.command("update-block", epilog="""\b
@@ -104,6 +104,9 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     if bool(block_id) == bool(where_content):
         fail("Specify exactly one of: --id, --where-content.", as_json=as_json)
     if where_content:
+        if page:
+            ref = follow_page(api, page, as_json)
+            page = ref.page
         clean_id = resolve_single_block(api, where_content, page=page, use_regex=use_regex)
     else:
         clean_id = block_id.strip().replace("((", "").replace("))", "")
@@ -260,6 +263,8 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     """Find and replace text in all blocks of a page."""
     api = ctx.obj["api"]
 
+    ref = follow_page(api, page, as_json)
+    page = ref.page
     blocks = api.get_page_blocks_tree(page)
     if not blocks:
         fail(f"Page '{page}' not found or empty.", as_json=as_json, page=page)
@@ -338,7 +343,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
                 failed.append(r["id"])
 
     if as_json:
-        payload = {"page": page, "replacements": len(replacements) - len(failed),
+        payload = {**ref.fields(), "replacements": len(replacements) - len(failed),
                    "dry_run": dry_run, "matches": replacements}
         if failed:
             payload["failed"] = failed
@@ -416,6 +421,14 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
     content = content_or_file(content, content_file, required=False)
+    # --page is the target only without an anchor: with --after, --before or
+    # --child-of it is refused or, in tree mode, not used, and must not be
+    # resolved into an alias_of for a page nothing is written to.
+    alias = {}
+    if page and not (after or before or child_of):
+        ref = follow_page(api, page, as_json)
+        page = ref.page
+        alias = {"alias_of": page} if ref.redirected else {}
 
     # --tree-file is --tree from a file; resolve it before any other validation
     # so the rest of the command sees a single tree_input.
@@ -484,7 +497,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         if dry_run:
             planned = count_blocks(tree)
             if as_json:
-                output({"position": position, "blocks": planned, "dry_run": True}, True)
+                output({"position": position, "blocks": planned, "dry_run": True, **alias}, True)
             else:
                 click.echo(f"[DRY RUN] Would insert {planned} block(s) {position}")
             return
@@ -504,6 +517,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 **uuid_fields(uuids),
                 "blocks_added": len(uuids),
                 "properties": applied,
+                **alias,
             }, True)
         else:
             click.echo(f"Inserted {len(uuids)} block(s) {position}")
@@ -560,7 +574,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                           f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
         target_desc = f"end of '{page}'" if page else target
         if as_json:
-            output({"position": target_desc, "blocks": planned, "dry_run": True}, True)
+            output({"position": target_desc, "blocks": planned, "dry_run": True, **alias}, True)
         else:
             click.echo(f"[DRY RUN] Would insert {planned} block(s) {target_desc}")
         return
@@ -625,7 +639,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             click.echo("Warning: no block uuid returned, --property ignored", err=True)
 
     if as_json:
-        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u])}, True)
+        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u]), **alias}, True)
     else:
         click.echo(f"Inserted block {position}")
         # Before the preview: the content may itself contain "uuid: ...".
@@ -677,6 +691,14 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         import datetime as _dt
         journal_date = _dt.date.today().strftime("%Y-%m-%d")
 
+    # A page named by the caller means what it means in Logseq (#63); a
+    # journal named by its date has no alias to follow.
+    names = {}
+    if page:
+        ref = follow_page(api, page, as_json)
+        page = ref.page
+        names = ref.fields()
+
     would_create_page = False
     if journal_date and not page:
         d = parse_date_keyword(journal_date)
@@ -713,7 +735,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
             position = f"top-level on '{page}'"
 
         if as_json:
-            output({"source_id": source_id, "ref": ref_content, "page": page,
+            output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}),
                     "position": position, "under_heading": under_heading,
                     "source_exists": bool(source_block),
                     "source_content": source_content,
@@ -754,7 +776,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     new_uuid = require_insert(result, f"the block-ref {position}")
 
     if as_json:
-        output({"source_id": source_id, "ref": ref_content, "page": page, "position": position, "uuid": new_uuid}, True)
+        output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}), "position": position, "uuid": new_uuid}, True)
     else:
         click.echo(f"Added block-ref {position}")
         click.echo(f"  {ref_content}")
@@ -784,6 +806,9 @@ Note:
 def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
+    ref = follow_page(api, to_page, as_json)
+    to_page = ref.page
+    names = ref.fields("to_page")
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)
     if not source:
@@ -808,7 +833,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         action = "move" if remove else "copy"
         content = without_block_ids(source.get("content", "")) if isinstance(source, dict) else ""
         if as_json:
-            output({"action": action, "blocks": planned, "to_page": to_page,
+            output({"action": action, "blocks": planned, **names,
                     "source_id": block_id, "removes_source": bool(remove),
                     "refs_broken": len(refs), "dry_run": True}, True)
         else:
@@ -855,7 +880,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         api.remove_block(block_id)
 
     action = "Moved" if remove else "Copied"
-    result_data = {"action": action.lower(), "blocks": count, "to_page": to_page, "source_id": block_id}
+    result_data = {"action": action.lower(), "blocks": count, **names, "source_id": block_id}
     if remove:
         result_data["refs_broken"] = len(refs)
 
