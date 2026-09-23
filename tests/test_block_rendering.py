@@ -18,7 +18,6 @@ item produces a page that no longer round-trips into the graph.
 through both, rather than by writing the expected tab runs out twice.
 """
 
-import pytest
 
 from logseq_cli.render import blocks_to_markdown, blocks_with_ids
 

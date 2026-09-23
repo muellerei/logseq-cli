@@ -280,7 +280,8 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
         pattern = re.compile(re.escape(find_text))
         # A string replacement is always a template to re.sub, so "C:\new"
         # would write a line break (#60). A function's result is taken as is.
-        replacement = lambda m: replace_text
+        def replacement(_match):
+            return replace_text
 
     replacements = []
 
@@ -466,20 +467,25 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             clean_id = child_of.strip().replace("((", "").replace("))", "")
             position = f"{'first child' if as_first else 'child'} of {clean_id[:8]}..."
             if as_first:
-                do_insert = lambda: insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
+                def do_insert():
+                    return insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
-                do_insert = lambda: insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
+                def do_insert():
+                    return insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
         elif after:
             clean_id = after.strip().replace("((", "").replace("))", "")
             position = f"after {clean_id[:8]}..."
-            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
+            def do_insert():
+                return insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
         elif before:
             clean_id = before.strip().replace("((", "").replace("))", "")
             position = f"before {clean_id[:8]}..."
-            do_insert = lambda: insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
+            def do_insert():
+                return insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
         elif page and top_level:
             position = f"top-level of '{page}'"
-            do_insert = lambda: insert_block_tree_at_page_top(api, tree, page, keep_ids=keep_ids)
+            def do_insert():
+                return insert_block_tree_at_page_top(api, tree, page, keep_ids=keep_ids)
         else:
             click.echo(
                 "Tree insert requires --child-of, --after, --before, or --page NAME --top-level",

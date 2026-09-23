@@ -1,7 +1,6 @@
 """Tests for hierarchical content detection and block tree insertion."""
 
-import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from logseq_cli.helpers import (
     contains_hierarchical_content,

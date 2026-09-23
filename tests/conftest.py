@@ -1,5 +1,4 @@
 """Shared test helpers."""
-import os
 import re
 
 import pytest
@@ -309,8 +308,8 @@ class PageGraph:
         self.placeholders.discard(uuid)
         content = spec["content"]
         if strip_ids:
-            content = "\n".join(l for l in content.split("\n")
-                                if not re.match(r"(?i)[\s\ufeff]*id:: ", l))
+            content = "\n".join(ln for ln in content.split("\n")
+                                if not re.match(r"(?i)[\s\ufeff]*id:: ", ln))
         return {"uuid": uuid, "content": prefix + content,
                 "children": [self._node(c, keep=keep, strip_ids=strip_ids, prefix=prefix)
                              for c in spec.get("children") or []]}
@@ -421,7 +420,7 @@ class PageGraph:
         _, siblings, i, _ = found
         lines = content.split("\n")
         for key, value in (properties or {}).items():
-            lines = [l for l in lines if not re.match(rf"[ \t]*{re.escape(key)}:: ", l)]
+            lines = [ln for ln in lines if not re.match(rf"[ \t]*{re.escape(key)}:: ", ln)]
             lines.append(f"{key}:: {value}")
         siblings[i]["content"] = "\n".join(lines)
         wanted = _logseq_block_id(siblings[i]["content"])

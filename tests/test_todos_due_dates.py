@@ -18,8 +18,6 @@ derived date: it is reported and left out rather than guessed at.
 import datetime
 import json
 
-import pytest
-from click.testing import CliRunner
 from unittest.mock import MagicMock, patch
 
 from logseq_cli.cli import cli

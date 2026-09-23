@@ -44,7 +44,7 @@ class TestJournalWritersPrintTheRootUuid:
     def test_plain_text_names_the_root_uuid(self, args, root):
         r = _run(_japi(), args + ["--date", "2026-06-04"])
         assert r.exit_code == 0, r.output
-        lines = [l for l in r.output.splitlines() if l.startswith("  uuid: ")]
+        lines = [ln for ln in r.output.splitlines() if ln.startswith("  uuid: ")]
         assert lines == [f"  uuid: {root}"]
 
 
@@ -56,7 +56,7 @@ class TestUuidLineComesBeforeThePreview:
         r = _run(_japi(), ["add-journal-block", "--content", "uuid: see ticket 42",
                            "--top-level", "--date", "2026-06-04"])
         assert r.exit_code == 0, r.output
-        first = next(l for l in r.output.splitlines() if l.startswith("  uuid: "))
+        first = next(ln for ln in r.output.splitlines() if ln.startswith("  uuid: "))
         assert first == "  uuid: j-append"
 
     def test_insert_block(self):
@@ -64,7 +64,7 @@ class TestUuidLineComesBeforeThePreview:
         api.append_block_in_page.return_value = {"uuid": "ib-1"}
         r = _run(api, ["insert-block", "--page", "P", "--content", "uuid: see ticket 42"])
         assert r.exit_code == 0, r.output
-        first = next(l for l in r.output.splitlines() if l.startswith("  uuid: "))
+        first = next(ln for ln in r.output.splitlines() if ln.startswith("  uuid: "))
         assert first == "  uuid: ib-1"
 
 

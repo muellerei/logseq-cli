@@ -13,7 +13,6 @@ grow the default output by the length of every linking block.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli

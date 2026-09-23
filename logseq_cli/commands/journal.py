@@ -370,7 +370,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     content = strip_title_heading(content, page_name)
     # The blocks as they are written: checked to come back as one each (#47),
     # counted for the preview and written, from this one list.
-    blocks = [content] if as_block else [l.strip() for l in content.split("\n") if l.strip()]
+    blocks = [content] if as_block else [ln.strip() for ln in content.split("\n") if ln.strip()]
     refuse_split_tree([{"content": block} for block in blocks], command="add-journal-entry")
     # An id:: line would become a block's uuid (#56); dropped, as every writer
     # drops it without --keep-ids, which this deprecated command does not get.
@@ -648,7 +648,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                     click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
                 click.echo(f"[DRY RUN] Would add {planned_total} block(s) to journal: {page_name}")
             if would_create_page:
-                click.echo(f"  the journal page does not exist yet and would be created")
+                click.echo("  the journal page does not exist yet and would be created")
                 for c in contents:
                     click.echo(f"  {c[:80]}")
             return
@@ -784,7 +784,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             else:
                 click.echo(f"[DRY RUN] Would add {n} block(s) to journal: {page_name} ({position})")
             if would_create_page:
-                click.echo(f"  the journal page does not exist yet and would be created")
+                click.echo("  the journal page does not exist yet and would be created")
                 click.echo(f"  {content[:120]}{'...' if len(content) > 120 else ''}")
             return
 

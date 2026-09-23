@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ruff check` runs in CI, with the rule set named in `pyproject.toml`
+  (`E4`, `E7`, `E9`, `F`) rather than taken from ruff's default, which later
+  versions widened. ruff is pinned in the `dev` extra, so a local run checks
+  what CI checks. The 57 findings were fixed, not ignored: unused imports,
+  a variable and f-strings without placeholders, `l` as a name, and lambdas
+  assigned to a name.
 - `--content-file FILE` on `update-block`, `insert-block`, `add-note-content`
   and `add-journal-content`, where only `add-journal-block` had it. A call
   reaching for it on `update-block` failed with "No such option", and the way

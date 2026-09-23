@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "ruff==0.16.8"]
 
 [project.urls]
 Homepage = "https://github.com/muellerei/logseq-cli"
@@ -30,3 +30,9 @@ logseq-cli = "logseq_cli.cli:cli"
 
 [tool.setuptools]
 packages = ["logseq_cli", "logseq_cli.commands"]
+
+[tool.ruff.lint]
+# Named rather than left to ruff's default, which later versions widened:
+# ruff 0.16.8 finds 57 here with these four, 218 with its own default. The
+# pin in the dev extra keeps CI and a local run on the same rules.
+select = ["E4", "E7", "E9", "F"]
