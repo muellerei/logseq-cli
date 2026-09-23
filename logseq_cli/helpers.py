@@ -622,19 +622,34 @@ PROPERTY_LINE_RE = re.compile(rf'^[ \t]*(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)
 def property_line_mask(lines: list) -> list:
     """For each line of a block's content, whether Logseq reads it as a property.
 
-    PROPERTY_LINE_RE judges one line alone; between ``` fences the same text is
-    code, not a property (measured, 0.10.15). Readers that walk a block's lines
-    take this mask, so a --find inside a fenced example is replaced and a
-    get-todos --match sees it.
+    PROPERTY_LINE_RE judges one line alone; inside a code block the same text
+    is code, not a property. Readers that walk a block's lines take this mask,
+    so a --find inside a fenced example is replaced and a get-todos --match
+    sees it.
+
+    The code block is Logseq's, measured against 0.10.15 (#43): a fence line
+    starts, after spaces, tabs or form feeds, with ``` or ~~~ (a no-break
+    space or a carriage return in front, which str.lstrip() would also take
+    away, makes it text), and the next fence line closes it, whichever of the
+    two it uses and whatever follows on the line. An opener that nothing
+    closes makes no code block; the lines after it are read as usual. So a
+    one-line ```x``` hides nothing unless a fence line follows. Erring toward
+    "code" is the unsafe direction: an id:: line the mask hid would reach
+    Logseq unchecked and still name the block's uuid.
     """
-    mask, in_fence = [], False
-    for line in lines:
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-            mask.append(False)
+    fence = [line.lstrip(" \t\f").startswith(("```", "~~~")) for line in lines]
+    inside, opener = [False] * len(lines), None
+    for i, is_fence in enumerate(fence):
+        if not is_fence:
             continue
-        mask.append(not in_fence and bool(PROPERTY_LINE_RE.match(line)))
-    return mask
+        if opener is None:
+            opener = i
+        else:
+            inside[opener + 1:i] = [True] * (i - opener - 1)
+            opener = None
+    # A fence line itself is never a property: ` and ~ end a key.
+    return [not code and bool(PROPERTY_LINE_RE.match(line))
+            for line, code in zip(lines, inside)]
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 

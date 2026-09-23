@@ -160,6 +160,68 @@ class TestInsideACodeFenceItIsText:
             "Template doc\n```\ntemplate:: call\n```\nkind:: meeting"
 
 
+# Which lines a code block hides, measured against Logseq 0.10.15 like the
+# table above: each block written into a page file, ``k:: v`` read back from
+# :block/properties (the whitespace cases through keepUUID). A fence line is
+# one that starts, after spaces, tabs or form feeds, with ``` or ~~~. Two such
+# lines make a code block, whichever of the two they use and whatever follows
+# them on the line; an opener with no closer after it is no code block at all,
+# and the lines after it are read as usual.
+FENCED = [
+    ("closed", ["x", "```", "k:: v", "```"]),
+    ("with a language", ["x", "```js", "k:: v", "```"]),
+    ("tilde", ["x", "~~~", "k:: v", "~~~"]),
+    ("tilde closes backticks", ["x", "```", "k:: v", "~~~"]),
+    ("backticks close tilde", ["x", "~~~", "k:: v", "```"]),
+    ("four closed by three", ["x", "````", "k:: v", "```"]),
+    ("closer with text after it", ["x", "```", "k:: v", "``` y"]),
+    ("closer indented further", ["x", "```", "k:: v", "    ```"]),
+    ("indented by a tab", ["x", "\t```", "k:: v", "\t```"]),
+    ("indented by a form feed", ["x", "\f```", "k:: v", "\f```"]),
+    ("one-line opener, closed later", ["x", "```y```", "k:: v", "```"]),
+    ("first line", ["```", "k:: v", "```"]),
+]
+NOT_FENCED = [
+    ("never closed", ["```", "k:: v"]),
+    ("tilde never closed", ["x", "~~~", "k:: v"]),
+    ("one line", ["```x```", "k:: v"]),
+    ("one line with text after it", ["x", "```y``` z", "k:: v"]),
+    ("tilde on one line", ["x", "~~~y~~~", "k:: v"]),
+    ("a pair, then an opener", ["x", "```", "```", "k:: v", "```"]),
+    ("between two pairs", ["x", "```", "a", "```", "k:: v", "```", "b", "```"]),
+    ("not at the line start", ["x", "a ```", "k:: v", "```"]),
+    ("two backticks", ["x", "``", "k:: v", "``"]),
+    # str.lstrip() takes these away too, Logseq does not.
+    ("after a no-break space", ["x", "\u00a0```", "k:: v", "\u00a0```"]),
+    ("after a carriage return", ["x", "\r```", "k:: v", "\r```"]),
+]
+
+
+class TestTheCodeBlockRule:
+    """Fixed after #43 measured it: an opener without a closer hid every line
+    after it, a one-line ```x``` opened a block, and ~~~ did not."""
+
+    @pytest.mark.parametrize("name,lines", FENCED, ids=[n for n, _ in FENCED])
+    def test_a_code_block_hides_the_line(self, name, lines):
+        from logseq_cli.helpers import property_line_mask
+        assert not property_line_mask(lines)[lines.index("k:: v")]
+
+    @pytest.mark.parametrize("name,lines", NOT_FENCED, ids=[n for n, _ in NOT_FENCED])
+    def test_without_a_code_block_the_line_is_a_property(self, name, lines):
+        from logseq_cli.helpers import property_line_mask
+        assert property_line_mask(lines)[lines.index("k:: v")]
+
+    def test_a_property_after_a_code_block_is_one(self):
+        from logseq_cli.helpers import property_line_mask
+        lines = ["x", "```", "k:: v", "```", "k2:: w", "```"]
+        assert property_line_mask(lines) == [False, False, False, False, True, False]
+
+    def test_replace_text_leaves_a_property_after_an_unclosed_fence(self):
+        content = "A meeting doc\n```\nkind:: meeting"
+        assert _replace_text(content, "meeting", "call") == \
+            "A call doc\n```\nkind:: meeting"
+
+
 class TestOnlyThePageOwnPropertiesLoseTheirBullet:
     """Logseq writes the page's properties, its first block, without a bullet;
     every other block keeps one, properties-only or not (an empty
