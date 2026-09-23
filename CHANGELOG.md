@@ -114,6 +114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An `id::` line indented by a form feed or a carriage return was not seen as
+  an id, and Logseq takes it as the block's (measured with `keepUUID`,
+  0.10.15). With `--keep-ids`, a uuid another block has could go out behind
+  one unchecked, in flat `--content` or a JSON `--tree` node; outline text
+  strips each line and was not affected. The property-line rule now takes
+  spaces, tabs, form feeds and carriage returns as indentation, and not a
+  no-break space or a vertical tab, which Logseq reads as text.
 - An `id::` line inside a code block was read as the block's id. To Logseq it
   is code (measured, 0.10.15): `insertBlock` and `appendBlockInPage` write it
   as given, and `insertBatchBlock` with `keepUUID` leaves it in place and gives

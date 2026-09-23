@@ -182,3 +182,23 @@ class TestTheRule:
 
     def test_a_quoted_id_does_not_make_two(self):
         assert blocks_with_several_ids([{"content": f"a\nid:: {FRESH}\n{EXAMPLE}"}]) == []
+
+
+class TestWhatIndentsAnIdLine:
+    """Measured with keepUUID (0.10.15): Logseq takes the id of a line indented
+    by a form feed or a carriage return as it does one indented by spaces, and
+    not one behind a no-break space or a vertical tab. The CLI saw only spaces
+    and tabs, so an existing uuid behind a form feed went out unchecked. Before
+    #43 already; a fence is indented by a different set (no carriage return)."""
+
+    @pytest.mark.parametrize("indent", ["\f", "\r", "\t\f"], ids=["ff", "cr", "tab-ff"])
+    def test_an_existing_uuid_is_refused(self, indent):
+        api = _graph()
+        r = _run(["insert-block", "--page", "Page A", "--keep-ids",
+                  "--content", f"Restored\n{indent}id:: {EXISTING}"], api)
+        assert r.exit_code == 1
+        assert "already belong" in r.stderr
+
+    @pytest.mark.parametrize("indent", ["\u00a0", "\v"], ids=["nbsp", "vt"])
+    def test_behind_other_whitespace_it_is_text(self, indent):
+        assert block_id_property(f"Restored\n{indent}id:: {EXISTING}") == ""

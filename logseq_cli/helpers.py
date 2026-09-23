@@ -614,9 +614,13 @@ def outline_text(tree: list) -> str:
 # 'k::' and an indented '  k:: v' are properties; 'std::cout', 'k::v' and
 # 'a,b:: x' are text. The stop characters are the ones #21 measured for the
 # writer, so what set-property writes and what this reads cannot disagree;
-# '/' alone differs, see _PROPERTY_KEY_FORBIDDEN.
+# '/' alone differs, see _PROPERTY_KEY_FORBIDDEN. What may indent the line is
+# measured too (#43): spaces, tabs, form feeds and carriage returns, not a
+# no-break space or a vertical tab. Missing one here is the unsafe direction:
+# an id:: line the CLI took for text would still be the block's id.
 _PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
-PROPERTY_LINE_RE = re.compile(rf'^[ \t]*(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)')
+_INDENT = r'[ \t\f\r]*'
+PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)[^\s{_PROPERTY_KEY_STOP}]+::(?: |$)')
 
 
 def property_line_mask(lines: list) -> list:
@@ -673,7 +677,7 @@ _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
 # holds only as long as the check, the removal and the write see the same
 # blocks: the commands check and clean the parsed outline they write, never
 # the raw text, where a fence opened on a bullet line reads differently.
-_ID_PROPERTY_RE = re.compile(r'^[ \t]*(?:id|custom[-_]id):: +(\S+)[ \t]*$',
+_ID_PROPERTY_RE = re.compile(rf'^{_INDENT}(?:id|custom[-_]id):: +(\S+)[ \t]*$',
                              re.MULTILINE | re.IGNORECASE)
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot

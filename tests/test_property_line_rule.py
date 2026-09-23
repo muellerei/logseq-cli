@@ -34,6 +34,8 @@ READ_AS_PROPERTY = [
     "  deep:: z",       # indented, as in a file
     "prio:: A",
     "id:: 00000000-0000-4000-8000-000000000001",
+    "\fdeep:: z",       # a form feed indents too
+    "\f\tdeep:: z",
 ]
 
 READ_AS_TEXT = [
@@ -46,6 +48,7 @@ READ_AS_TEXT = [
     "a@b:: x", "a^b:: x", "a{b}:: x", "a|b:: x", "a~b:: x", "a`b:: x",
     "a\\b:: x",
     "plain text",
+    "\u00a0k:: v",       # a no-break space does not indent
 ]
 
 
