@@ -61,6 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-page` and `get-journal-range` printed the second and later lines of a
+  block at column 0, in both text formats, and so did `get-block` and
+  `find-block --with-children` for the children they list. A reader could not
+  tell which block a line belonged to, and a property line of a nested block
+  read like one of the page's. They now sit under the bullet, two spaces in,
+  blank lines too: the layout Logseq writes to the page file (measured against
+  0.10.15), and the one write previews already used. Logseq itself was not
+  misled: fed back as a page file, the old output parsed into the same tree.
+  `get-journal-summary`'s `content` and the page lengths `find-knowledge-gaps`
+  measures follow, since they are the same text, so a page near its 100- or
+  200-character mark can change sides; on a real graph the same pages were
+  listed. The task counts of `analyze-graph` and `analyze-journal-patterns`
+  did not change there. A task marker opening a further line, which Logseq
+  does not read as a task, no longer counts as one, unless the line above is
+  only dashes: the pattern still reaches across that line break, as it did
+  before.
+  See [#75](https://github.com/muellerei/logseq-cli/issues/75).
 - README and AGENTS.md promised every error as a JSON object on stderr under
   `--json`. Most are, but a refused option (exit 2) and a write Logseq
   dropped still come as a plain `Error:` line; both now say so, and name the

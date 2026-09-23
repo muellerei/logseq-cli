@@ -194,6 +194,14 @@ class TestAnalyzeGraphCountsOpenTasks:
         d = run_json(self._api(text), tmp_path, "analyze-graph")
         assert d["total_todos"] == 0
 
+    def test_a_marker_on_a_further_line_does_not_count(self, tmp_path):
+        """Logseq reads a marker only where a block starts. The page text
+        used to put a block's further lines at column 0, where the pattern
+        took one for a block start (#75)."""
+        d = run_json(self._api("a note\nTODO is only a word here"),
+                     tmp_path, "analyze-graph")
+        assert d["total_todos"] == 0
+
 
 class TestFindKnowledgeGapsIgnoresArtefacts:
     """596 "orphans" in a real graph were almost all side effects.
