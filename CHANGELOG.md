@@ -21,6 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps its own check, since its `--content` is repeatable, and answers with
   the same words.
   See [#49](https://github.com/muellerei/logseq-cli/issues/49).
+- A write of one block's text says so when a quote in it stops at a blank
+  line: `> first`, an empty line, `second` shows `second` as plain text,
+  since Logseq's parser ends a quote there. It happened in real use, and the
+  write had reported nothing. The text is written as sent and stays one
+  block, so this is a `Note:` on stderr, naming the block and the line and
+  the fix (start the blank line with `>`), not a refusal. It comes after
+  every check that can refuse, so a refused write under `--json` still
+  leaves one JSON object on stderr. The rule is narrow and measured with
+  mldoc 1.5.7, the parser version Logseq 0.10.15 pins: no note for a quote
+  kept by a `>` line, a lazy continuation, a second quote, a property line,
+  code or a closed org `#+BEGIN_` block, or a line holding only a no-break
+  space, which mldoc reads as text. A `>` alone after the blank line opens no
+  quote and is noted. A fuller model of mldoc's quote grammar was built and dropped
+  in #45; this needs none of it. Outline text puts every line in a block of
+  its own, so `add-note-content` and `add-journal-content` have nothing to
+  note, and `replace-text` changes text already in the graph, where a note
+  could not tell a quote it made from one that was there.
+  See [#50](https://github.com/muellerei/logseq-cli/issues/50).
 
 ### Fixed
 
@@ -42,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first `- ` was no bullet and a first `# title` was not recognised as the
   page title. Affects `add-journal-block --content-file`, `insert-block
   --tree-file` and, since #49, every `--content-file`.
+- `add-journal-block --upsert-heading` without a heading (with `--top-level`,
+  or with none configured) created the journal page when it was missing and
+  only then refused. The check now comes first, so a refused run writes
+  nothing; with several `--content` values, where `--upsert-heading` is not
+  used, it is refused the same way instead of being passed over.
 
 ## [0.14.0] - 2026-09-23
 
