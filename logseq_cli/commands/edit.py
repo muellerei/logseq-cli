@@ -33,6 +33,7 @@ from logseq_cli.helpers import (
     insert_block_tree_with_uuids,
     insert_block_at,
     insert_tree_at_page_end,
+    kept_properties,
     move_block_verified,
     note_quote_breaks,
     outline_text,
@@ -45,7 +46,6 @@ from logseq_cli.helpers import (
     require_insert,
     require_text_besides_ids,
     resolve_single_block,
-    stored_properties,
     subtree_uuids,
     tree_without_block_ids,
     uuid_fields,
@@ -61,7 +61,8 @@ Example:
 Note:
   Use set-property/remove-property for properties, never edit them via update-block.
   Existing block properties survive the update: they are read first and written
-  back, so changing the text no longer drops them.
+  back, so changing the text no longer drops them. A property line in
+  --content is the new value of its key.
   Use set-todo-status to change TODO/DOING/DONE markers.
   --content is ONE block, so a line Logseq would read as a block of its own is
   refused: a "- " or "# " line after the first (indented too), or a code fence
@@ -126,16 +127,8 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     # would drop them. This command changes text; properties belong to
     # set-block-property / remove-property, and losing them here was a silent
     # side effect nobody asked for. Carrying them through keeps that split
-    # honest. They go back as their original text under the keys the database
-    # stores (see stored_properties): the block's own map from getBlock has
-    # camel-cased keys, and writing those back turned due-date:: into
-    # duedate:: and 01234 into 1234. ``id::`` is among them and is written
-    # back unchanged, so block references survive.
-    values, kept_texts = stored_properties(api, block.get("uuid") or clean_id)
-    # Only what has a text goes back. A markdown heading ("## Title") shows up
-    # as heading 2 among the values but comes from the "##", not from a line;
-    # reporting it as kept would claim a line the file will not have.
-    kept_values = {k: v for k, v in values.items() if k in kept_texts}
+    # honest; kept_properties says which go back, and as what (#30, #66).
+    kept_values, kept_texts = kept_properties(api, block.get("uuid") or clean_id, content)
 
     # After every check that can refuse: a note ahead of an error would sit in
     # front of the JSON on stderr, and speak of text that is never written.

@@ -60,7 +60,7 @@ def code_block_lines(lines: list) -> tuple:
 # an id:: line the CLI took for text would still be the block's id.
 PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
 _INDENT = r'[ \t\f\r]*'
-PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)[^\s{PROPERTY_KEY_STOP}]+::(?: |$)')
+PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)([^\s{PROPERTY_KEY_STOP}]+)::(?: |$)')  # group 1: the key
 
 
 def property_line_mask(lines: list) -> list:

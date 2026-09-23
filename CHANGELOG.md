@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `update-block` kept a property's old value over the one `--content` sets.
+  It passes the block's properties back so the update does not drop them
+  (#30), and measured against 0.10.15, Logseq lets a passed value win over a
+  line of the new text with the same key and drops that line:
+  `--content $'x\nprio:: 2'` on a block with `prio:: 1` left `prio:: 1`, exit
+  0. A key the new text sets as a property line is now left out of what goes
+  back, compared as Logseq stores keys (`due_date` is `due-date`), a line in
+  a code block included, since `updateBlock` takes it out of the code block
+  (#68). `id` and `custom-id` always go back: the block's uuid is not the
+  text's to set. The test stand-in modelled the opposite and follows the measurement now.
+  See [#66](https://github.com/muellerei/logseq-cli/issues/66).
 - A page alias was read and written as a page of its own. Logseq's HTTP API
   does not resolve an alias, so `get-page --name <alias>` answered an empty
   page with exit 0, `get-properties` `{}`, `get-page-stats` 0 blocks, and

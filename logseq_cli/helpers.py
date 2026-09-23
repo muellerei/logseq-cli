@@ -1914,11 +1914,16 @@ def normalize_property_key(key: str) -> str:
     # surrogates (PEP 383). They cannot be written to the file as given.
     if any("\ud800" <= c <= "\udfff" for c in key):
         raise refuse("contains bytes that are not valid UTF-8")
-    canonical = key.lower().replace("_", "-")
+    canonical = stored_property_key(key)
     if canonical in _PROPERTY_KEYS_READ_AS_ID:
         raise refuse("Logseq reads it as the block's id",
                      "Writing it would replace the uuid that ((refs)) to the block point at")
     return canonical
+
+
+def stored_property_key(key: str) -> str:
+    """``key`` as Logseq stores it: lower-cased, ``_`` read as ``-`` (#21)."""
+    return key.lower().replace("_", "-")
 
 
 def note_renamed_property_key(key: str, stored: str) -> None:
@@ -1997,6 +2002,35 @@ def stored_properties(api, uuid: str) -> tuple:
     if not isinstance(entity, dict):
         return {}, {}
     return entity.get("properties") or {}, entity.get("properties-text-values") or {}
+
+
+def kept_properties(api, uuid: str, content: str) -> tuple:
+    """The properties a replacement of block ``uuid``'s text with ``content``
+    passes back, as ``(values, texts)`` like :func:`stored_properties`.
+
+    Properties are lines of the text, so replacing it drops them unless their
+    text goes back through ``updateBlock``'s ``opts.properties`` (#30). Only
+    what has a text goes back: a markdown heading ("## Title") shows up as
+    heading 2 among the values but comes from the "##", not from a line.
+
+    A key ``content`` sets itself is left out: Logseq lets the passed value
+    win and drops the caller's line (measured, 0.10.15, #66); with ``_`` for
+    ``-`` both lines stay and the passed one, written last, wins. Keys compare
+    as Logseq stores them. Every line counts, one in a code block too:
+    ``updateBlock`` takes such a line out of the code block as a property
+    (measured, #68), unlike a file read, so property_line_mask is not the rule.
+
+    ``id`` and ``custom-id`` always go back. The block's uuid is not the
+    text's to set (#56), and a foreign ``id::`` line in a code block, which
+    the id rules read as code, would otherwise leave the block and become its
+    uuid (#68).
+    """
+    values, texts = stored_properties(api, uuid)
+    own = {stored_property_key(m.group(1))
+           for m in map(PROPERTY_LINE_RE.match, content.split("\n")) if m}
+    own -= _PROPERTY_KEYS_READ_AS_ID
+    texts = {k: v for k, v in texts.items() if k not in own}
+    return {k: v for k, v in values.items() if k in texts}, texts
 
 
 def apply_block_properties(api, block_uuid: str, pairs) -> dict:
