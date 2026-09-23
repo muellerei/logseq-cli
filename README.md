@@ -251,7 +251,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 
 | Command | Description |
 |---------|-------------|
-| `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so is `custom-id`, which Logseq reads as the block's uuid |
+| `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so are `id` and `custom-id`, which Logseq reads as the block's uuid |
 | `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it |
 | `set-block-property --id UUID --key KEY --value VAL [--dry-run]` | Set/update a block property. `--dry-run` shows the old value and fails on an unknown UUID, which the write path cannot detect. Keys follow the `set-property` rule |
 

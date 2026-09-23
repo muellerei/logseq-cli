@@ -33,8 +33,12 @@ DROPPED = [
 
 # Keys the parser turns into the block's id. Measured: "custom-id:: plain-text"
 # on re-read made "plain-text" the block's uuid, so a write under this key
-# replaces the identity every ((ref)) to the block points at.
-BECOMES_ID = ["custom-id", "custom_id", "Custom_ID"]
+# replaces the identity every ((ref)) to the block points at. "id" itself does
+# the same (measured in #51: set-block-property --key id wrote "id:: plain-text",
+# and on re-read "plain-text" was the block's uuid; the command's --help example
+# wrote that key); it was left out here because only the rename had been
+# measured.
+BECOMES_ID = ["custom-id", "custom_id", "Custom_ID", "id", "ID", "Id"]
 
 # Undecodable argv bytes arrive as lone surrogates (PEP 383). Measured on the
 # Python side: the upsert went out, then printing the confirmation raised.
