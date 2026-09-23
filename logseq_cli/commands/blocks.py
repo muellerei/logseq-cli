@@ -72,6 +72,10 @@ Examples:
 Note:
   Output gives uuid + page + content preview. Use --first to disambiguate; pipe to
   insert-block --child-of, update-block, remove-block downstream.
+  --uuid-only prints bare uuids, one per line, and fails when nothing matches.
+  For a block to write to, add --exactly-one: it fails unless exactly one block
+  matches, where --first would pick one of several without a word on stdout.
+    U=$(logseq-cli find-block --content "..." --page "..." --exactly-one --uuid-only)
   --with-children prints each match with its sub-blocks indented, instead of
   guessing a line count with `get-page | grep -A<n>`.
   A common word matches thousands of blocks: --limit N caps the output, and
@@ -82,12 +86,14 @@ Note:
 @click.option("--page", "--name", default=None, help="Restrict search to this page name")
 @click.option("--regex", "use_regex", is_flag=True, help="Interpret --content as regex pattern")
 @click.option("--first", "first_only", is_flag=True, help="Output only the first match")
+@click.option("--exactly-one", "exactly_one", is_flag=True, help="Fail unless exactly one block matches, listing the matches otherwise")
 @click.option("--limit", "limit", type=int, default=None, help="Print at most N matches (1 or greater); the number withheld is reported on stderr")
 @click.option("--with-children", "with_children", is_flag=True, help="Print each match with its sub-blocks (one extra API read per match)")
+@click.option("--uuid-only", "uuid_only", is_flag=True, help="Print only the uuids, one per line; exit 1 when nothing matches")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def find_block(ctx, content, page, use_regex, first_only, limit, with_children, as_json):
+def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, with_children, uuid_only, as_json):
     """Find blocks by content substring or regex."""
     api = ctx.obj["api"]
 
@@ -98,8 +104,27 @@ def find_block(ctx, content, page, use_regex, first_only, limit, with_children, 
         fail("Specify either --first or --limit, not both.", as_json)
     if limit is not None and limit < 1:
         fail("--limit must be 1 or greater.", as_json)
+    if exactly_one and (first_only or limit is not None):
+        fail("--exactly-one refuses to pick among matches; drop --first and --limit.", as_json)
+    if uuid_only and (as_json or with_children):
+        fail("--uuid-only is an output form of its own; drop --json and "
+             "--with-children.", as_json)
 
     matches = find_blocks_by_content(api, content, page=page, use_regex=use_regex)
+
+    # For a write target, picking one of several matches is a guess, and the
+    # caller cannot tell afterwards; resolve_single_block refuses it for the
+    # same reason. The matches are listed so the search can be narrowed.
+    if exactly_one and len(matches) != 1:
+        where = f" on page '{page}'" if page else ""
+        if not matches:
+            fail(f"No block matches {content!r}{where}.", as_json)
+        listing = "\n".join(
+            f"  {m.get('uuid')}  {(m.get('content') or '')[:70]}" for m in matches[:10])
+        more = f"\n  ... and {len(matches) - 10} more" if len(matches) > 10 else ""
+        fail(f"{len(matches)} blocks match {content!r}{where}; --exactly-one refuses "
+             f"to pick one. Narrow --content or --page:\n{listing}{more}",
+             as_json, matches=[m.get("uuid") for m in matches])
 
     # A common word matches thousands of blocks, and printing all of them is
     # the unbounded-output failure the journal paths fixed in 0.6.0: the caller
@@ -139,6 +164,16 @@ def find_block(ctx, content, page, use_regex, first_only, limit, with_children, 
         click.echo(
             f"showing {shown} of {shown + withheld} match(es) ... {withheld} omitted "
             "(raise --limit, or narrow --content/--page)", err=True)
+
+    if uuid_only:
+        # Bare values for $(...). No match is a failure here, unlike the plain
+        # form: an empty $U would otherwise flow into the next write unnoticed.
+        if not matches:
+            fail("No blocks found.")
+        for block in matches:
+            if block.get("uuid"):
+                click.echo(block["uuid"])
+        return
 
     if as_json:
         output(matches, True)

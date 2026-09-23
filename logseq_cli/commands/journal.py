@@ -580,6 +580,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)
         else:
             click.echo(f"Added {total} block(s) to journal: {page_name} ({position})")
+            if uuids:
+                click.echo(f"  uuid: {uuids[0]}")
         return
 
     api = ctx.obj["api"]
@@ -688,6 +690,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             output({"page": page_name, "date": str(d), "position": position, "blocks": n, **uuid_fields([u for u in [root_uuid] if u])}, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
+            if root_uuid:
+                click.echo(f"  uuid: {root_uuid}")
         return
 
     # Auto-detect hierarchical content and delegate to structured insertion.
@@ -725,6 +729,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, **uuid_fields(uuids)}, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
+            if uuids:
+                click.echo(f"  uuid: {uuids[0]}")
         return
 
     if dry_run:
@@ -765,6 +771,9 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([u for u in [_u] if u])}, True)
     else:
         click.echo(f"Added block to journal: {page_name} ({position})")
+        # Before the preview: the content may itself contain "uuid: ...".
+        if _u:
+            click.echo(f"  uuid: {_u}")
         click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
 
 @cli.command("add-journal-content", epilog="""\b
@@ -870,3 +879,5 @@ def add_journal_content(ctx, content, date, under_heading, top_level, dry_run, k
         output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, "content_added": True, **uuid_fields(uuids)}, True)
     else:
         click.echo(f"Added {n} block(s) to journal: {page_name} ({position})")
+        if uuids:
+            click.echo(f"  uuid: {uuids[0]}")
