@@ -273,10 +273,11 @@ logseq-cli insert-block --child-of UUID --tree-file outline.md --keep-ids
 ```
 
 Before anything is written, `--keep-ids` refuses four kinds of id: one that is
-repeated in the content; one that is not a valid UUID; one a block still has (the copy case, where two blocks would
-share one uuid; drop the flag to copy with new ids, or use `move-block`); and
-one that survives only as the target of a `((ref))` elsewhere, since Logseq
-keeps a placeholder under that uuid and will not give it to a new block.
+repeated in the content; a second `id::` line in the same block; one that is
+not a valid UUID; and one a block or page still has (the copy case, where two blocks would share one uuid; drop the flag to copy
+with new ids, or use `move-block`). An id that survives only as the target of a
+`((ref))` elsewhere is restored: that is the restore case, a deleted block
+written back from a copy, and the refs resolve again.
 `add-journal-block` rejects the flag with `--upsert-heading`, which rewrites a
 block that already exists (that block keeps its uuid), and with
 `--no-preserve`, which joins the lines and turns `id::` into plain text.

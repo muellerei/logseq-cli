@@ -212,7 +212,9 @@ class LogseqAPI:
 
     def append_block_in_page(self, page_name: str, content: str, options: dict = None):
         # Options reach insertBlock unchanged (append_block_in_page in api.cljs),
-        # so customUUID works here as it does there.
+        # so customUUID works here as it does there, and is refused the same way
+        # for a placeholder's uuid. --keep-ids writes go through insertBatchBlock
+        # instead (#31).
         args = [page_name, content]
         if options:
             args.append(options)
