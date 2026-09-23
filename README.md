@@ -223,7 +223,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `update-block (--id UUID \| --where-content TEXT [--page NAME] [--regex]) --content TEXT [--dry-run]` | Update block content. `--content` is ONE block and has no tree path: newline bullets are rejected, indented ones too: use `insert-block --child-of` for children. `--where-content` selects by text instead of UUID and aborts unless exactly one block matches. The block's properties are kept as written, values as their original text; the one change is Logseq's own spelling of a key (`created_at` is stored and written back as `created-at`) |
-| `remove-block --id UUID [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count |
+| `remove-block --id UUID [--ignore-refs] [--dry-run]` | Delete a block and its children (alias: `delete-block`). `--dry-run` reports the descendant count. Refuses while `((block-refs))` from elsewhere point into the block or its children, and lists them; `--ignore-refs` removes anyway |
 | `add-block-ref --source-id UUID (--journal-date DATE \| --page NAME) [--under-heading "## X"] [--dry-run]` | Write a `((block-ref))` pointing at an existing block. Journal defaults to today, heading to `LOGSEQ_JOURNAL_HEADING`. `--dry-run` also verifies the source block exists — a ref to a missing UUID renders as nothing |
 | `set-todo-status (--id UUID \| --content TEXT --page NAME) --status DONE [--follow-refs] [--dry-run]` | Swap a TODO/DOING/DONE marker without retyping the line. `--follow-refs` updates the original when the block is just a `((ref))`. Ambiguous `--content` aborts and lists candidates. `--dry-run` shows the old and new marker |
 | `replace-text --page NAME --find TEXT --replace TEXT` | Search & replace with regex and dry-run support |
@@ -232,7 +232,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | `insert-block --child-of UUID --first` | Insert as FIRST child instead of appending last (works with `--content` and `--tree`; order preserved). Only valid with `--child-of` |
 | `insert-block --tree "<tab-or-json>" [--child-of UUID \| --page NAME --top-level]` | Batch-insert a hierarchy in one call (DFS pre-order UUIDs returned). `--tree-file FILE` reads the same tab-indented text or JSON from a file |
 | `insert-block --tree ... --keep-ids` | Keep the `id::` values in the content instead of letting Logseq mint new ones, for moving or restoring an outline — top-level blocks included. Without it they are dropped and the count is reported on stderr. With it, an id a block still has is refused before anything is written (a copy would put one uuid on two blocks), and so is one that survives only as a `((ref))` target, which Logseq will not give to a new block. The same flag and rule apply to `--content` and to `add-note-content`, `add-journal-block` and `add-journal-content` |
-| `copy-block --id UUID --to-page NAME [--remove] [--dry-run]` | Copy/move block with children to another page |
+| `copy-block --id UUID --to-page NAME [--remove] [--ignore-refs] [--dry-run]` | Copy/move block with children to another page. The copy gets new UUIDs, so `--remove` refuses while `((block-refs))` point into the source (`--ignore-refs` overrides); `move-block` keeps them |
 | `move-block --id UUID (--under UUID \| --before UUID) [--dry-run]` | Structural move: the block keeps its UUID, so `((block-refs))` to it survive. Prefer over `copy-block --remove`, which writes a new block and deletes the original. `--under` nests as first child, `--before` places it in front as a sibling |
 
 ### Meta (4)
@@ -257,7 +257,7 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `rename-page --page NAME --new-name NAME [--dry-run]` | Rename page (updates all references). `--dry-run` lists the pages whose `[[links]]` would be rewritten — the blast radius reaches the whole graph |
-| `delete-page --page NAME [--force] [--dry-run]` | Delete page. Prompts on a TTY; `--force` required non-interactively |
+| `delete-page --page NAME [--force] [--ignore-refs] [--dry-run]` | Delete page. Prompts on a TTY; `--force` required non-interactively. Refuses while `((block-refs))` from other pages point into it; `--force` does not override that, `--ignore-refs` does |
 
 ### Query (1)
 

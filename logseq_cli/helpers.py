@@ -1639,3 +1639,75 @@ def extract_topics(text: str) -> list:
     links = extract_page_links(text)
     tags = re.findall(r"#(\w+)", text)
     return list(set(links + tags))
+
+
+def subtree_uuids(block: dict) -> list:
+    """The block's own UUID and those of all its descendants."""
+    return [block["uuid"], *_collect_child_uuids(block)] if block.get("uuid") else []
+
+
+def incoming_block_refs(api, *, uuids=None, page=None, count_inside=False) -> list:
+    """``((block-refs))`` from outside a deleted set into it.
+
+    The set is either ``uuids`` (a block and its descendants) or every block
+    of ``page``. A ref from inside the set does not count: it goes together
+    with its target. ``count_inside`` counts it anyway, for a move by copy,
+    where the source lives on in the copy under new uuids and its internal
+    refs dangle there. Returns ``{"target", "block", "page"}`` per ref, sorted.
+
+    ``page`` must be the ``name`` Logseq itself reports for the page, not the
+    caller's spelling: ``getPage`` normalises a name (Unicode form, a slash at
+    either end) further than lower-casing, so a name typed differently finds
+    the page there and nothing here, which would read as "no refs".
+
+    ``:block/refs`` holds ``((uuid))``, ``{{embed ((uuid))}}``,
+    ``[label](((uuid)))`` and ``key:: ((uuid))`` alike (measured, 0.10.15), so
+    one relation answers for all of them. The source is pulled rather than
+    matched, because a clause on its page name would silently drop a ref whose
+    source lacks the attribute, and an undercount here reads as "safe".
+    """
+    if page is not None:
+        target_clause = (f"[?p :block/name {page_name_literal(page)}]"
+                         " [?t :block/page ?p] [?t :block/uuid ?tu]")
+        inside = lambda src, owner: owner.get("name") == page.lower()
+    else:
+        wanted = {u.lower() for u in uuids or []}
+        if not wanted:
+            return []
+        literal = " ".join(f'#uuid "{u}"' for u in sorted(wanted))
+        target_clause = f"[?t :block/uuid ?tu] [(contains? #{{{literal}}} ?tu)]"
+        inside = lambda src, owner: src.lower() in wanted
+    query = (
+        "[:find ?tu (pull ?b [:block/uuid :block/original-name :block/name"
+        " {:block/page [:block/original-name :block/name]}])"
+        f" :where {target_clause} [?b :block/refs ?t]]"
+    )
+    refs = []
+    for row in api.datascript_query(query) or []:
+        if not row or len(row) < 2 or not isinstance(row[1], dict):
+            continue
+        target, src = str(row[0]), row[1]
+        # A page entity can carry refs itself; it is then its own page.
+        owner = src.get("page") or src
+        src_page = owner.get("original-name") or owner.get("name")
+        src_uuid = str(src.get("uuid") or "")
+        if not count_inside and inside(src_uuid, owner):
+            continue
+        refs.append({"target": target, "block": src_uuid, "page": src_page})
+    return sorted(refs, key=lambda r: (r["page"] or "", r["block"], r["target"]))
+
+
+def refs_refusal(refs: list, what: str, instead: str = "", limit: int = 10) -> str:
+    """The refusal for a delete that would leave ``refs`` dangling.
+
+    Lists where each ref comes from, bounded like other listings, and names
+    the override. ``--force`` is not it: a caller that deletes routinely passes
+    ``--force`` every time, so a check it overrides would never stop anything.
+    """
+    lines = [f"  {r['page']}  {r['block']}  -> (({r['target']}))" for r in refs[:limit]]
+    if len(refs) > limit:
+        lines.append(f"  ... and {len(refs) - limit} more")
+    listing = "\n".join(lines)
+    return (f"{len(refs)} block ref(s) point into {what}, and would "
+            f"dangle:\n{listing}\n{instead}Re-run with --ignore-refs to delete "
+            "anyway. Nothing was changed.")
