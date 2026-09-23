@@ -16,7 +16,8 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import PROPERTY_LINE_RE, parse_hierarchical_content
+from logseq_cli.blocktext import PROPERTY_LINE_RE
+from logseq_cli.helpers import parse_hierarchical_content
 from logseq_cli.render import is_properties_block
 
 
@@ -137,13 +138,13 @@ class TestTheIdLineFollowsTheSameSeparator:
     measured). Such a line was dropped from content as if it were the id."""
 
     def test_no_space_is_text(self):
-        from logseq_cli.helpers import block_id_property, without_block_ids
+        from logseq_cli.blocktext import block_id_property, without_block_ids
         line = "id::00000000-0000-4000-8000-000000000001"
         assert block_id_property("A\n" + line) == ""
         assert without_block_ids("A\n" + line) == "A\n" + line
 
     def test_with_the_space_it_is_the_id(self):
-        from logseq_cli.helpers import block_id_property
+        from logseq_cli.blocktext import block_id_property
         assert block_id_property("A\nid:: 00000000-0000-4000-8000-000000000001") == \
             "00000000-0000-4000-8000-000000000001"
 
@@ -153,7 +154,7 @@ class TestInsideACodeFenceItIsText:
     replace-text skipped it (reporting "No matches") and get-todos hid it."""
 
     def test_the_mask_follows_the_fences(self):
-        from logseq_cli.helpers import property_line_mask
+        from logseq_cli.blocktext import property_line_mask
         lines = ["Template", "```", "  template:: meeting", "```", "real:: yes"]
         assert property_line_mask(lines) == [False, False, False, False, True]
 
@@ -206,16 +207,16 @@ class TestTheCodeBlockRule:
 
     @pytest.mark.parametrize("name,lines", FENCED, ids=[n for n, _ in FENCED])
     def test_a_code_block_hides_the_line(self, name, lines):
-        from logseq_cli.helpers import property_line_mask
+        from logseq_cli.blocktext import property_line_mask
         assert not property_line_mask(lines)[lines.index("k:: v")]
 
     @pytest.mark.parametrize("name,lines", NOT_FENCED, ids=[n for n, _ in NOT_FENCED])
     def test_without_a_code_block_the_line_is_a_property(self, name, lines):
-        from logseq_cli.helpers import property_line_mask
+        from logseq_cli.blocktext import property_line_mask
         assert property_line_mask(lines)[lines.index("k:: v")]
 
     def test_a_property_after_a_code_block_is_one(self):
-        from logseq_cli.helpers import property_line_mask
+        from logseq_cli.blocktext import property_line_mask
         lines = ["x", "```", "k:: v", "```", "k2:: w", "```"]
         assert property_line_mask(lines) == [False, False, False, False, True, False]
 

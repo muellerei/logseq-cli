@@ -215,7 +215,8 @@ def _logseq_block_id(content):
     would agree with it whatever it got wrong. A code block runs from a line
     starting with ``` or ~~~ (after spaces, tabs, form feeds) to the next
     such line; an opener nothing closes hides nothing. Of two id:: lines the
-    last wins.
+    last wins. The value is trimmed of whitespace but a trailing ``\r``, and
+    a value with spaces in it is taken whole (``id:: a b c``, #56).
     """
     lines = content.split("\n")
     code, opener = set(), None
@@ -228,7 +229,7 @@ def _logseq_block_id(content):
                 opener = None
     found = ""
     for i, line in enumerate(lines):
-        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +(\S+)[ \t]*", line)
+        m = re.fullmatch(r"(?i)[ \t\f\r]*(?:id|custom[-_]id):: +[^\S\r\n]*(\S(?:[^\r\n]*\S)?)[^\S\r\n]*", line)
         if m and i not in code:
             found = m.group(1)
     return found
@@ -258,6 +259,11 @@ class PageGraph:
       not.
     * ``insertBlock`` and ``appendBlockInPage`` refuse a ``customUUID`` that a
       block or a placeholder holds.
+    * ``updateBlock`` writes the content as given, then each of ``properties``
+      as a ``key:: value`` line the text does not already carry. Once the
+      file is read again, an ``id::`` line in the text is the block's uuid,
+      a foreign one too (#56); modelled at once, so a write that lets one
+      through shows as the block losing its uuid.
     * ``createPage`` makes a page with one empty block. A page known only from
       a ``[[link]]`` has none.
     * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
@@ -394,6 +400,21 @@ class PageGraph:
                          for n in batch]
         return None
 
+    def update_block(self, uuid, content, properties=None, *, replacing=None):
+        found = self.locate(uuid)
+        if not found:
+            return None
+        _, siblings, i, _ = found
+        lines = content.split("\n")
+        for key, value in (properties or {}).items():
+            if not any(re.match(rf"(?i)[ \t]*{re.escape(key)}:: ", l) for l in lines):
+                lines.append(f"{key}:: {value}")
+        siblings[i]["content"] = "\n".join(lines)
+        wanted = _logseq_block_id(siblings[i]["content"])
+        if wanted:
+            siblings[i]["uuid"] = wanted.lower()
+        return None
+
     def insert_block(self, target, content, options=None):
         opts = options or {}
         wanted = opts.get("customUUID")
@@ -469,7 +490,7 @@ def page_graph_api(graph):
     api = MagicMock()
     for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
-                 "remove_block", "move_block", "datascript_query"):
+                 "remove_block", "move_block", "datascript_query", "update_block"):
         getattr(api, name).side_effect = getattr(graph, name)
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []

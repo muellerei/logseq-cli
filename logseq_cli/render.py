@@ -13,7 +13,8 @@ them, and a helper three modules import is not private to any of them.
 """
 import re
 
-from logseq_cli.helpers import PROPERTY_LINE_RE, normalize_heading
+from logseq_cli.blocktext import PROPERTY_LINE_RE
+from logseq_cli.helpers import normalize_heading
 
 
 BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')

@@ -76,6 +76,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parser and every key an example writes through the rule its command
   applies.
   See [#51](https://github.com/muellerei/logseq-cli/issues/51).
+- Every write of a block's text applies the `id::` contract now. Logseq reads
+  an `id::` line as the block's uuid. `insert-block`, `add-note-content`,
+  `add-journal-block` and `add-journal-content` have handled one since #22 and
+  #31, and the other writers passed it on. Measured on Logseq 0.10.15, with
+  the page file read again after each write:
+  - `update-block --content` with a line naming another uuid gave the block
+    that uuid. The old one answered `null`, every `((ref))` to the block
+    dangled, and the exit code was 0.
+  - `create-page --content` made the value the new block's uuid, without a
+    word.
+  - `replace-text` could turn `ID: <uuid>` into `ID:: <uuid>`, with the same
+    effect.
+  - `copy-block` wrote the source's line into the copy, so the file named one
+    uuid for two blocks until Logseq read it again.
+
+  Now `update-block` keeps the block's own line, the one `get-block` returns,
+  so a block read and written back keeps working. A line naming another uuid
+  is dropped with a note. `create-page --content` and `add-journal-entry` drop
+  the line with a note. `copy-block` drops it without one, since the copy gets
+  new uuids anyway and refs stay with the original. `replace-text` refuses a
+  replacement that makes such a line, before any block is written
+  (`reason: "id_line"`, exit 2, like a line that splits a block). The rule
+  sits where #47 put the one-block rule: `LogseqAPI` refuses any `id::` line
+  in a write unless the write keeps ids or the block already had that line.
+  A writer added later therefore fails loudly instead of replacing a uuid.
+  The heading of `--under-heading` is block text as well and is checked
+  before the page it goes on is created. Text that was nothing but `id::`
+  lines is refused on `update-block`, `create-page` and `add-journal-entry`,
+  before anything is written, rather than written as an empty block.
+  See [#56](https://github.com/muellerei/logseq-cli/issues/56).
+- An `id::` value with a space in it (`id:: a b c`) got past every id check.
+  So did one with whitespace around it that Logseq trims off: a tab after
+  the space, or a no-break space, form feed, vertical tab or ideographic
+  space after the value. The CLI neither dropped nor refused such a line, and
+  Logseq takes it as the block's uuid all the same (each case measured on
+  0.10.15; with spaces inside, the block afterwards stood twice in the page
+  file, one of the two entities without a page). The value is now read the
+  way Logseq reads it, trimmed except for a trailing `\r`, which Logseq does
+  not take. So the line is dropped like any other, and `--keep-ids` refuses
+  a value that is not a valid uuid.
+  See [#56](https://github.com/muellerei/logseq-cli/issues/56).
 
 ## [0.14.0] - 2026-09-23
 
