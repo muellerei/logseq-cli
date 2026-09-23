@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An Agent Skill, `skills/logseq-cli/SKILL.md`, for an agent that has not met
+  the tool yet: why the database and not the Markdown files, `doctor` first,
+  and four habits (a journal by its date, `--dry-run` before destructive
+  writes, bounded reads, the exit status); AGENTS.md stays the reference. It
+  lives in the repository only, under `skills/<name>/`, where the Agent
+  Skills specification wants the folder to match the name and
+  `npx skills add` looks; a `skill install` command would cover two agents
+  where that installer covers most. The frontmatter holds only fields of the
+  specification, since claude.ai refuses one agent's own.
+  `tests/test_skill.py` checks every command and option the skill names
+  against the CLI. Measured while writing it, and so left out: a page file
+  Logseq reads again keeps its blocks' uuids, so "the uuids break" is no
+  reason against editing the files.
 - `ruff check` runs in CI, with the rule set named in `pyproject.toml`
   (`E4`, `E7`, `E9`, `F`) rather than taken from ruff's default, which later
   versions widened. ruff is pinned in the `dev` extra, so a local run checks
@@ -48,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- README and AGENTS.md promised every error as a JSON object on stderr under
+  `--json`. Most are, but a refused option (exit 2) and a write Logseq
+  dropped still come as a plain `Error:` line; both now say so, and name the
+  exit status as the signal to rely on.
 - `add-block-ref` wrote a ref to a block that does not exist. Only
   `--dry-run` looked the source up, and it warned and exited 0; the real call
   wrote `((uuid))` for a mistyped uuid, exit 0, and the ref rendered as
@@ -61,10 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as well. Input that was no uuid at all could create the heading before a
   later check refused it with "Nothing was written"; it is refused first now,
   exit 1 as a missing block rather than exit 2.
-- README and AGENTS.md promised every error as a JSON object on stderr under
-  `--json`. Most are, but a refused option (exit 2) and a write Logseq
-  dropped still come as a plain `Error:` line; both now say so, and name the
-  exit status as the signal to rely on.
   See [#70](https://github.com/muellerei/logseq-cli/issues/70).
 - `add-journal-block --upsert-heading` dropped the properties of the block it
   replaced: it called `updateBlock` with the new text alone, and measured

@@ -14,6 +14,12 @@ No vendor coupling — a plain Python package with `click` and `requests`.
 See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
 [design notes](#design-notes) for the decisions behind the above.
 
+An agent that has not met the tool yet finds it through the skill in
+[`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md): when to reach for
+it rather than the Markdown files, and the three habits that prevent damage.
+It follows the [Agent Skills](https://agentskills.io) format, so
+`npx skills add muellerei/logseq-cli` installs it for most coding agents.
+
 > **Which Logseq.** This is a tool for **file-based (Markdown) graphs**, driven
 > over Logseq's local HTTP API — the 0.10.x line, tested against 0.10.15, and
 > Logseq OG, which continues it. The DB version (2.x) keeps graphs in SQLite
@@ -693,6 +699,7 @@ logseq-cli/
 │   │   └── meta.py         # init and doctor
 │   └── cli.py        # Entry point: imports every command module
 ├── examples/         # Shell scripts for scripting/cronjobs
+├── skills/logseq-cli/SKILL.md  # The skill agents find the tool by
 └── pyproject.toml
 ```
 

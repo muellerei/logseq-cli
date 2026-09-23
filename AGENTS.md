@@ -14,6 +14,10 @@ What makes it scriptable:
   input the tool refused. The exit status is the signal to rely on
 - `--dry-run` on every command that writes, showing the state it would replace
 
+This file is the reference for an agent that has chosen the tool. The one
+that decides whether to use it at all is the skill,
+[`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md), which points here.
+
 ## Setup Check
 
 ```bash
