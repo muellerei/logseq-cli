@@ -28,14 +28,17 @@ from logseq_cli.helpers import (
     uuid_fields,
     without_block_ids,
 )
-from logseq_cli.output import fail, handle_connection_error, output
+from logseq_cli.output import fail, handle_connection_error, json_text, output
 from logseq_cli.render import (
     blocks_to_markdown,
     blocks_with_ids,
+    bound,
     count_unresolved_refs,
     extract_backlink_names,
     extract_section,
+    first_uuids,
     is_properties_block,
+    outline_blocks,
     resolve_refs_in_blocks,
 )
 
@@ -108,26 +111,60 @@ Examples:
   logseq-cli --token TOKEN get-page --name "Project Alpha"
   logseq-cli --token TOKEN get-page --name "2026-05-08, friday" --resolve-refs --with-ids
   logseq-cli --token TOKEN get-page --name "Project Alpha" --heading "## Open Points"
+  logseq-cli --token TOKEN get-page --name "Project Alpha" --outline
+  logseq-cli --token TOKEN get-page --name "Project Alpha" --max-chars 20000
   logseq-cli --token TOKEN get-page --name A --name B    # batch read
 Notes:
   --resolve-refs inlines ((uuid)) block-refs (saves N×get-block).
   --with-ids prefixes each line with the block UUID (replaces --json | jq).
   --heading returns only the matching heading-block + its children.
+  --outline lists the headings with their UUIDs, the page's table of contents;
+  with --heading, the outline of that section.
+  --max-chars cuts the blocks so the output fits, in the format printed. The
+  cut falls between blocks; pages past it are not printed. stderr names what
+  was withheld and where; --json carries the same as "withheld" and "cut".
+  --from-block continues a cut read: same command, plus the uuid the note
+  names. The block's ancestors come along as context. A block that does not
+  fit is named with the --max-chars it needs instead. Both flags refuse a
+  page named twice.
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name (repeatable for batch: --name A --name B)")
 @click.option("--no-backlinks", is_flag=True, help="Skip backlink computation")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
 @click.option("--with-ids", "with_ids", is_flag=True, help="Prefix each block line with its UUID (format: <uuid>\\t<indent>\\t<content>)")
 @click.option("--heading", default=None, help="Return only the section under this heading (e.g. '## Focus Topics W17'). Searches recursively.")
+@click.option("--outline", is_flag=True, help="Only the headings, one line each with its UUID, indented by how they nest: a heading inside another's section one tab deeper. A heading is what Logseq reads as one. No backlinks; not with --format markdown")
+@click.option("--max-chars", "max_chars", type=int, default=None, help="Cut the blocks so the output fits in N characters, 1 or greater. The cut falls between blocks; what is withheld is reported on stderr and, with --json, as 'withheld'/'cut' fields. Page headers and backlinks are not cut")
+@click.option("--from-block", "from_block", default=None, help="Start at this block, as named by a --max-chars note: pages and blocks before it are skipped, its ancestors kept as context")
 @click.option("--format", "output_format", type=click.Choice(["text", "markdown"]), default="text", help="Output format: text (default) or markdown (Logseq-compatible)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_format, as_json):
+def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, max_chars, from_block, output_format, as_json):
     """Get page content with backlinks. Pass --name multiple times for batch reads."""
     api = ctx.obj["api"]
     missing = []
     dead_refs = []
+
+    # Before any read: a refused call should cost nothing and say why.
+    if max_chars is not None and max_chars < 1:
+        fail("--max-chars must be 1 or greater.", as_json)
+    if outline and output_format == "markdown" and not as_json:
+        # Markdown has nowhere to put the uuid, and the uuid is what an
+        # outline is read for.
+        fail("--outline prints UUIDs; it cannot be combined with --format markdown.", as_json)
+    if max_chars is not None or from_block:
+        # A cut read continues by block uuid, and a page read twice holds each
+        # uuid twice: the continuation would jump back into the first copy.
+        # Logseq finds a page by its lower-cased name (JavaScript
+        # toLowerCase, measured on 0.10.15: 'ß' stays apart from 'ss', so
+        # casefold() would merge two pages).
+        seen = {}
+        for name in page:
+            if name.lower() in seen:
+                fail(f"page '{name}' is named twice ('{seen[name.lower()]}'); "
+                     f"--max-chars and --from-block need each page once.", as_json)
+            seen[name.lower()] = name
 
     def _fetch_one(page_name):
         # A page that does not exist is an error, not an empty result: Logseq's
@@ -137,7 +174,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
         if api.get_page(page_name) is None:
             missing.append(page_name)
         blocks = api.get_page_blocks_tree(page_name)
-        if no_backlinks or heading:
+        if no_backlinks or heading or outline:
             backlinks = []
         else:
             try:
@@ -149,22 +186,73 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
             blocks = extract_section(blocks, heading)
             if not blocks:
                 click.echo(f"Warning: heading '{heading}' not found in '{page_name}'", err=True)
+        if outline and blocks:
+            # Before resolving: refs in the blocks the outline drops would
+            # cost a lookup each and never be printed.
+            blocks = outline_blocks(blocks)
         if resolve_refs and blocks:
             resolve_refs_in_blocks(api, blocks, dead_refs)
         return {"page": page_name, "blocks": blocks, "backlinks": backlinks}
 
     results = [_fetch_one(p) for p in page]
+    first_uuid = first_uuids(results)
 
     for result in results:
         if result["page"] in missing:
             result["exists"] = False
-    if dead_refs:
-        for result in results:
-            in_this = [u for u in dead_refs
-                       if f"(({u}))" in json.dumps(result.get("blocks") or [])]
-            if in_this:
-                result["dead_refs"] = in_this
 
+    def _dead_in(result):
+        return [u for u in dead_refs
+                if f"(({u}))" in json.dumps(result.get("blocks") or [])]
+
+    def _render(results):
+        if as_json:
+            annotated = []
+            for result in results:
+                in_this = _dead_in(result)
+                annotated.append({**result, "dead_refs": in_this} if in_this else result)
+            # The shape follows what was asked for, not what survived a cut
+            # or --from-block: several names answer with a list, always.
+            payload = annotated if len(page) > 1 else annotated[0]
+            return json_text(payload) + "\n"
+        out = []
+        for result in results:
+            p, blocks, backlinks = result["page"], result["blocks"], result["backlinks"]
+            if p in missing:
+                placeholder = "(page does not exist)"
+            elif result.get("withheld"):
+                placeholder = f"({result['withheld']} block(s) withheld by --max-chars)"
+            elif outline:
+                placeholder = "(no headings)"
+            else:
+                placeholder = "(empty page)"
+            if outline or with_ids:
+                out.append(f"=== {p} ===\n\n")
+                body = blocks_with_ids(blocks, first_line=outline) if blocks else placeholder
+                out.append(body + "\n")
+            elif output_format == "markdown":
+                starts = bool(blocks) and blocks[0].get("uuid") == first_uuid.get(p)
+                out.append((blocks_to_markdown(blocks, page_start=starts)
+                            if blocks else placeholder) + "\n")
+            else:
+                out.append(f"=== {p} ===\n\n")
+                out.append((process_blocks(blocks) if blocks else placeholder) + "\n")
+                if backlinks:
+                    out.append(f"\nBacklinks ({len(backlinks)}):\n")
+                    for bl in backlinks:
+                        out.append(f"  <- {bl}\n")
+            if len(page) > 1:
+                out.append("\n")
+        return "".join(out)
+
+    try:
+        results, note = bound(results, _render, max_chars, from_block, "page")
+    except LookupError as exc:
+        fail(str(exc), as_json)
+    if note:
+        click.echo(note, err=True)
+
+    # The notices below speak about what is printed, so they come after the cap.
     if not resolve_refs:
         total_refs = sum(count_unresolved_refs(r.get("blocks") or []) for r in results)
         if total_refs > 0:
@@ -180,33 +268,13 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, output_fo
         # A notice rather than an error: the page is still readable, and one
         # stale ref must not cost the whole read.
         for uuid in dead_refs:
-            results_with = [r["page"] for r in results
-                            if f"(({uuid}))" in json.dumps(r.get("blocks") or [])]
-            where = f" (on {', '.join(results_with)})" if results_with else ""
+            results_with = [r["page"] for r in results if uuid in _dead_in(r)]
+            if not results_with:
+                continue
             click.echo(f"⚠️  block-ref (({uuid})) points at a block that no "
-                       f"longer exists{where}", err=True)
+                       f"longer exists (on {', '.join(results_with)})", err=True)
 
-    if as_json:
-        output(results if len(results) > 1 else results[0], True)
-    else:
-        for result in results:
-            p, blocks, backlinks = result["page"], result["blocks"], result["backlinks"]
-            absent = p in missing
-            placeholder = "(page does not exist)" if absent else "(empty page)"
-            if with_ids:
-                click.echo(f"=== {p} ===\n")
-                click.echo(blocks_with_ids(blocks) if blocks else placeholder)
-            elif output_format == "markdown":
-                click.echo(blocks_to_markdown(blocks) if blocks else placeholder)
-            else:
-                click.echo(f"=== {p} ===\n")
-                click.echo(process_blocks(blocks) if blocks else placeholder)
-                if backlinks:
-                    click.echo(f"\nBacklinks ({len(backlinks)}):")
-                    for bl in backlinks:
-                        click.echo(f"  <- {bl}")
-            if len(results) > 1:
-                click.echo()
+    click.echo(_render(results), nl=False)
 
     # Exit non-zero if any requested page is absent. Batch reads still print every
     # page that does exist first, so one typo does not cost the whole result.

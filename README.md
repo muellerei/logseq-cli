@@ -194,10 +194,10 @@ logseq-cli get-page --name "My Page"   # equivalent
 | Command | Description |
 |---------|-------------|
 | `get-all-pages` | List all pages |
-| `get-page --page NAME [--no-backlinks] [--resolve-refs] [--with-ids] [--heading "## X"] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. `--no-backlinks` skips the backlink lookup, `--heading` returns only that section (searched recursively). With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
+| `get-page --page NAME [--no-backlinks] [--resolve-refs] [--with-ids] [--heading "## X"] [--outline] [--max-chars N] [--from-block UUID] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. `--no-backlinks` skips the backlink lookup, `--heading` returns only that section (searched recursively). `--outline` lists the headings with their uuids; `--max-chars` cuts the output to size and `--from-block` continues it — see [Bounded output](#bounded-output). With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
 | `get-block --id UUID [--no-children]` | Block by UUID; `--no-children` returns the block alone |
 | `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N \| --exactly-one] [--with-children \| --uuid-only]` | Find blocks by content. `--uuid-only` prints bare uuids, one per line, and exits 1 on no match. `--exactly-one` fails unless exactly one block matches and lists the matches otherwise; use it for a block to write to, `U=$(... --exactly-one --uuid-only)`, where `--first` would pick one of several. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
-| `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading` bound the output — see [Bounded output](#bounded-output) |
+| `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"] [--max-chars N] [--from-block UUID]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading/--max-chars` bound the output, `--from-block` continues a cut one — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder; `0` keeps all |
 | `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
@@ -398,14 +398,35 @@ For scale: Claude Code caps tool responses at 25,000 tokens by default.
 - `--heading "## Log"` returns only that section per day.
 - `--no-content` (summary only) drops the bodies but keeps date, character
   count, topics and top concepts — enough for an overview, without the text.
+- `--max-chars N` (`get-page`, `get-journal-range`) cuts the blocks so the
+  output fits in N characters, measured in the format printed: a block in
+  `--json` is several times its text. The cut falls between blocks in reading
+  order, oldest day first; pages and days past it are not printed. `--json`
+  puts `withheld` and `cut` (`before`, `section`, `section_uuid`, `later`,
+  and `needs` when nothing fit) on
+  the page or day the cut fell in. Only blocks are cut: page headers and
+  backlinks always print, and when they alone exceed N the note says so.
+- `--from-block UUID` continues a cut read: the same command plus the uuid
+  the note names. Pages, days and blocks before it are skipped; its ancestors
+  come along as context. Following the notes reads every block once: a
+  repeated heading name, a heading rewritten by `--resolve-refs` or a section
+  larger than N cannot send it back. A block that does not fit in N, alone or
+  with its ancestors, ends the chain: the note names the `--max-chars` it
+  needs, and `--json` puts it in `cut.needs`. A page named twice is refused,
+  since its block uuids would be too.
+- `get-page --outline` prints only the headings, each with its uuid,
+  indented by how they nest (one tab per heading whose section holds it, not
+  per `#`), and reads no backlinks. Read the outline of a large page first,
+  then the section you need with `--heading`.
 
 Search has the same shape: a word that recurs across months of notes matches
 thousands of blocks, so `find-block --limit N` caps the output.
 
 Truncation is never silent: whenever anything is omitted, a note goes to
 **stderr** (`showing 3 of 20 journal day(s) ... 17 omitted`,
-`showing 10 of 1382 match(es) ... 1372 omitted`) while stdout stays pure
-payload. Without truncation there is no note.
+`showing 10 of 1382 match(es) ... 1372 omitted`, `12 block(s) withheld on
+'...', cut in section '## Log' ... plus --from-block <uuid>`) while
+stdout stays pure payload. Without truncation there is no note.
 
 ## Design notes
 
