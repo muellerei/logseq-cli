@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import answer_property_pulls
+from tests.conftest import PageGraph, answer_property_pulls, page_graph_api, split_runner
 
 
 def _build_api(existing_blocks=None, page_exists=True):
@@ -110,16 +110,17 @@ class TestAddNoteContentProperties:
         json.dumps(api.upsert_block_property.call_args.args[2], allow_nan=False)
 
     @pytest.mark.parametrize("typed, sent", [("5", 5), ("01234", "01234")])
-    def test_set_property_sends_the_same_value(self, typed, sent):
-        """set-property calls the helper on its own; this pins that call."""
-        block = "00000000-0000-4000-8000-0000000000b1"
-        api = _build_api(existing_blocks=[{"uuid": block, "content": ""}])
+    def test_set_property_writes_the_value_as_typed(self, typed, sent):
+        """set-property writes the property block's text (#80), so the value
+        lands as typed; the reply types it the way the other writers do."""
+        graph = PageGraph({"Foo": ["", "text"]})
+        api = page_graph_api(graph)
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            result = CliRunner().invoke(cli, [
-                "set-property", "--name", "Foo", "--key", "zip", "--value", typed])
+            result = split_runner().invoke(cli, [
+                "set-property", "--name", "Foo", "--key", "zip", "--value", typed, "--json"])
         assert result.exit_code == 0, result.output
-        api.upsert_block_property.assert_called_once_with(block, "zip", sent)
-        assert type(api.upsert_block_property.call_args.args[2]) is type(sent)
+        assert graph.tree("Foo")[0] == (f"zip:: {typed}", [])
+        assert json.loads(result.stdout)["value"] == sent
 
 
 class TestInsertBlockProperties:
@@ -224,13 +225,14 @@ class TestRemovePropertyById:
         api.get_page_blocks_tree.assert_not_called()
 
     def test_page_path_still_uses_the_first_block(self):
-        api = MagicMock()
-        api.get_page_blocks_tree.return_value = [{"uuid": "first"}]
+        graph = PageGraph({"P": ["text\ntype:: x", "other\ntype:: y"]})
+        api = page_graph_api(graph)
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "remove-property", "--name", "P", "--key", "type"])
         assert r.exit_code == 0, r.output
-        api.remove_block_property.assert_called_once_with("first", "type")
+        assert [b["content"] for b in graph.page_named("P")["blocks"]] == \
+            ["text", "other\ntype:: y"]
 
     def test_exactly_one_selector(self):
         api = MagicMock()

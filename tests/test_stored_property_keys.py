@@ -100,10 +100,20 @@ class TestUpdateBlockKeepsStoredProperties:
         assert "due-date::" in r.stdout and "dueDate" not in r.stdout
 
 
+def _page_api():
+    """The page's first block as its property block: set-property and
+    remove-property --name read and write there (#80)."""
+    api = _api()
+    api.get_page_blocks_tree.return_value = [{
+        **api.get_block.return_value, "preBlock?": True,
+        "content": "due-date:: 2026-10-01\ncreated-at:: x\nzip:: 01234\ntags:: [[Alpha]], beta"}]
+    return api
+
+
 class TestDryRunSeesAKeyThatIsSet:
     def test_set_property(self):
         r = _run(["set-property", "--name", "Page A", "--key", "due-date",
-                  "--value", "2026-12-01", "--dry-run", "--json"], _api())
+                  "--value", "2026-12-01", "--dry-run", "--json"], _page_api())
         payload = json.loads(r.stdout)
         assert payload["existed"] is True
         assert payload["old_value"] == "2026-10-01"
@@ -117,7 +127,7 @@ class TestDryRunSeesAKeyThatIsSet:
     @pytest.mark.parametrize("target", [["--name", "Page A"], ["--id", BLOCK]])
     def test_remove_property(self, target):
         r = _run(["remove-property", *target, "--key", "created-at",
-                  "--dry-run", "--json"], _api())
+                  "--dry-run", "--json"], _page_api())
         payload = json.loads(r.stdout)
         assert payload["present"] is True
         assert payload["value"] == "x"

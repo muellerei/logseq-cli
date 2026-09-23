@@ -16,6 +16,7 @@ from logseq_cli.blocktext import (
     id_lines,
     is_fence,
     refuse_split_property,
+    stored_property_key,
     without_block_ids,
 )
 from logseq_cli.datalog import edn_string, page_name_literal
@@ -1950,10 +1951,6 @@ def normalize_property_key(key: str) -> str:
                      "Writing it would replace the uuid that ((refs)) to the block point at")
     return canonical
 
-
-def stored_property_key(key: str) -> str:
-    """``key`` as Logseq stores it: lower-cased, ``_`` read as ``-`` (#21)."""
-    return key.lower().replace("_", "-")
 
 
 def note_renamed_property_key(key: str, stored: str) -> None:
