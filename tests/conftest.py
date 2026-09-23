@@ -260,10 +260,11 @@ class PageGraph:
     * ``insertBlock`` and ``appendBlockInPage`` refuse a ``customUUID`` that a
       block or a placeholder holds.
     * ``updateBlock`` writes the content as given, then each of ``properties``
-      as a ``key:: value`` line the text does not already carry. Once the
-      file is read again, an ``id::`` line in the text is the block's uuid,
-      a foreign one too (#56); modelled at once, so a write that lets one
-      through shows as the block losing its uuid.
+      as a ``key:: value`` line. A line of the text with the same key goes:
+      the passed value wins (#66). Once the file is read again, an ``id::``
+      line in the text is the block's uuid, a foreign one too (#56); modelled
+      at once, so a write that lets one through shows as the block losing its
+      uuid.
     * ``createPage`` makes a page with one empty block. A page known only from
       a ``[[link]]`` has none.
     * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
@@ -420,8 +421,8 @@ class PageGraph:
         _, siblings, i, _ = found
         lines = content.split("\n")
         for key, value in (properties or {}).items():
-            if not any(re.match(rf"(?i)[ \t]*{re.escape(key)}:: ", l) for l in lines):
-                lines.append(f"{key}:: {value}")
+            lines = [l for l in lines if not re.match(rf"[ \t]*{re.escape(key)}:: ", l)]
+            lines.append(f"{key}:: {value}")
         siblings[i]["content"] = "\n".join(lines)
         wanted = _logseq_block_id(siblings[i]["content"])
         if wanted:
@@ -490,6 +491,20 @@ class PageGraph:
             # alias:: names the alias, with that property value as a list.
             alias = re.search(r'\[\?a :block/name "([^"]*)"\]', query).group(1)
             return [[source, [alias]] for source in self.alias_sources.get(alias, [])]
+        if ":block/properties-text-values" in query:
+            # stored_properties' pull: each property line's text, under its
+            # key as stored (lower-cased, "_" read as "-", #21), of two the
+            # last. Enough for the writers here.
+            found = self.locate(re.search(r'#uuid "([^"]+)"', query).group(1))
+            if not found:
+                return []
+            _, siblings, i, _ = found
+            texts = {}
+            for line in siblings[i]["content"].split("\n"):
+                m = re.fullmatch(r"[ \t]*([^\s:]+):: (.*)", line)
+                if m:
+                    texts[m.group(1).lower().replace("_", "-")] = m.group(2)
+            return [[{"properties": dict(texts), "properties-text-values": texts}]]
         if "contains?" not in query:
             return []
         asked = re.findall(r'#uuid "([^"]+)"', query)
