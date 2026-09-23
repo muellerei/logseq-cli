@@ -24,7 +24,7 @@ from logseq_cli.helpers import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_formatted_content_with_uuids,
-    insert_options,
+    insert_block_at,
     journal_day_to_date,
     normalize_heading,
     normalize_indentation,
@@ -423,8 +423,9 @@ Notes:
   sibling roots, tab-indented lines their children. No shell quoting, so
   apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
-  --keep-ids refuses, before writing anything, an id a block still has, one
-  only a ((ref)) still holds, and one repeated in the content.
+  --keep-ids restores an id only a ((ref)) still holds; it refuses, before
+  writing anything, an id a block or page still has, one repeated in the
+  content, and a second id:: line in one block.
   --keep-ids cannot be combined with --upsert-heading or --no-preserve.
 """)
 @click.option("--content", "contents", multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
@@ -435,7 +436,7 @@ Notes:
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
-@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline; an id only a ((ref)) still holds is restored, so the ref resolves again. Refused before any write: an id a block or page still has, a repeated or malformed one, two in one block")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
@@ -596,10 +597,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                         api, payload, page_name, keep_ids=keep_ids, _written=len(uuids)))
             else:
                 if heading_uuid:
-                    r = api.insert_block(heading_uuid, payload,
-                                         insert_options(payload, keep_ids, sibling=False))
+                    r = insert_block_at(api, heading_uuid, payload, sibling=False,
+                                        keep_ids=keep_ids, written_before=len(uuids))
                 else:
-                    r = append_in_page(api, page_name, payload, keep_ids)
+                    r = append_in_page(api, page_name, payload, keep_ids,
+                                       written_before=len(uuids))
                 uuids.append(require_insert(r, "a journal block", written_so_far=len(uuids)))
         total = len(uuids)
         if any_hierarchical:
@@ -783,8 +785,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         if heading_uuid:
-            result = api.insert_block(heading_uuid, content,
-                                      insert_options(content, keep_ids, sibling=False))
+            result = insert_block_at(api, heading_uuid, content, sibling=False,
+                                     keep_ids=keep_ids)
             position = f"under '{under_heading}'"
             _u = require_insert(result, f"a block under '{under_heading}'")
         else:
@@ -814,15 +816,16 @@ Note:
   Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
   it now auto-detects hierarchy.
   id:: lines are dropped unless --keep-ids is given, and the command says so.
-  --keep-ids refuses, before writing anything, an id a block still has, one
-  only a ((ref)) still holds, and one repeated in the content.
+  --keep-ids restores an id only a ((ref)) still holds; it refuses, before
+  writing anything, an id a block or page still has, one repeated in the
+  content, and a second id:: line in one block.
 """)
 @click.option("--content", required=True, help="Hierarchical content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert under this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--top-level", is_flag=True, help="Add as top-level content (ignore --under-heading and env var)")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
-@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline. Refused before any write: an id a block still has, one only a ((ref)) still holds, a repeated or malformed one")
+@click.option("--keep-ids", "keep_ids", is_flag=True, help="Keep the id:: values in the content instead of letting Logseq mint new ones, for moving or restoring an outline; an id only a ((ref)) still holds is restored, so the ref resolves again. Refused before any write: an id a block or page still has, a repeated or malformed one, two in one block")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error

@@ -24,8 +24,12 @@ Logseq 0.10.15:
 A third case turned up while measuring the rebuild: a ``((ref))`` to an id with
 no block makes Logseq keep a placeholder entity under that uuid, without a page.
 It is not a block, so refusing it as "already exists" would be wrong; but
-insertBlock refuses to give a new block its uuid all the same. Until the CLI
-can restore such an id, it is refused up front with that reason.
+insertBlock refuses to give a new block its uuid all the same. It was refused
+up front until #31, which sends every --keep-ids write through the one call
+that takes a placeholder over; tests/test_keep_ids_placeholders.py has that.
+Since then the writes here go out as insertBatchBlock with keepUUID, proven by
+reading the page back, so they run against ``PageGraph`` rather than a mock
+that answers every read.
 """
 import json
 from unittest.mock import MagicMock, patch
@@ -42,7 +46,7 @@ TOP = f"root with id\nid:: {ID}"          # one top-level block carrying the id
 NESTED = f"- parent\n\t- child\n\t  id:: {ID}"
 
 
-def _api(*, existing_ids=(), placeholder_ids=()):
+def _api(*, existing_ids=()):
     api = MagicMock()
     api.get_page.return_value = {"name": "page a", "originalName": "Page A"}
     api.get_page_blocks_tree.return_value = [{"uuid": ANCHOR, "content": "## Log", "children": []}]
@@ -55,9 +59,7 @@ def _api(*, existing_ids=(), placeholder_ids=()):
 
     def query(q):
         if "contains?" in q:  # the existence check for ids about to be kept
-            on_a_page = ":block/page" in q
-            ids = list(existing_ids) + ([] if on_a_page else list(placeholder_ids))
-            return [[i] for i in ids if i in q]
+            return [[i] for i in existing_ids if i in q]
         return []
     api.datascript_query.side_effect = query
     return api
@@ -86,15 +88,16 @@ def _ids_asked_for(api):
 
 
 def _fake():
-    """_api() backed by FakeGraph, for trees that go out as one insertBatchBlock:
-    that call answers null, and the write is proven by reading back."""
-    from tests.conftest import fake_api
-    api = fake_api([f"00000000-0000-4000-8000-0000000001{i:02d}" for i in range(40)])
-    plain = _api()
-    for name in ("get_page", "get_page_blocks_tree", "get_user_configs",
-                 "append_block_in_page", "datascript_query"):
-        setattr(api, name, getattr(plain, name))
-    return api
+    """A graph that answers as Logseq does, for writes proven by reading back:
+    Page A holds the anchor (a ``## Log`` heading with one entry)."""
+    from tests.conftest import PageGraph, page_graph_api
+    return page_graph_api(PageGraph({"Page A": [
+        {"uuid": ANCHOR, "content": "## Log", "children": [{"content": "entry"}]}]}))
+
+
+def _kept(api):
+    """Whether a block on a page now carries ID."""
+    return api.graph.locate(ID) is not None
 
 
 # One top-level block with an id, through every command that writes content.
@@ -131,10 +134,12 @@ class TestEveryWriter:
         assert _ids_asked_for(api) == []
 
     def test_with_keep_ids_the_id_is_kept_even_at_top_level(self, name):
-        api = _api()
+        api = _fake()
         r = _invoke(name, ["--keep-ids"], api)
         assert r.exit_code == 0, r.stderr
         assert _ids_asked_for(api) == [ID]
+        page, _, _, parent = api.graph.locate(ID)
+        assert parent is None
         assert "cannot preserve" not in r.stderr
 
     def test_an_id_that_already_exists_is_refused_before_any_write(self, name):
@@ -143,18 +148,6 @@ class TestEveryWriter:
         r = _invoke(name, ["--keep-ids"], api)
         assert r.exit_code == 1
         assert ID in r.stderr and "already" in r.stderr
-        api.create_page.assert_not_called()
-        api.append_block_in_page.assert_not_called()
-        api.insert_block.assert_not_called()
-        api.insert_batch_block.assert_not_called()
-
-    def test_an_id_that_only_a_reference_holds_is_refused_as_such(self, name):
-        api = _api(placeholder_ids=[ID])
-        api.get_page.return_value = None
-        r = _invoke(name, ["--keep-ids"], api)
-        assert r.exit_code == 1
-        assert ID in r.stderr and "reference" in r.stderr
-        assert "already belong to a block" not in r.stderr
         api.create_page.assert_not_called()
         api.append_block_in_page.assert_not_called()
         api.insert_block.assert_not_called()
@@ -176,16 +169,12 @@ class TestNestedBlocks:
     """A nested block goes through insertBlock (one block) or insertBatchBlock."""
 
     def test_add_note_content_under_heading_keeps_a_nested_id(self):
-        from tests.conftest import fake_api
-        api = fake_api([f"00000000-0000-4000-8000-00000000000{i}" for i in range(1, 6)])
-        api.get_page.return_value = {"name": "page a"}
-        api.get_page_blocks_tree.return_value = [{"uuid": ANCHOR, "content": "## Log"}]
-        api.datascript_query.return_value = []
+        api = _fake()
         r = _run(["add-note-content", "--page", "Page A", "--under-heading", "## Log",
                   "--content", NESTED, "--keep-ids"], api)
         assert r.exit_code == 0, r.stderr
-        (_anchor, _tree, options), = api.graph.batch_calls
-        assert options.get("keepUUID") is True
+        _, _, _, parent = api.graph.locate(ID)
+        assert parent["content"] == "parent"
 
     def test_upsert_heading_refuses_keep_ids(self):
         # --upsert-heading rewrites an existing block, whose uuid cannot change;
@@ -258,15 +247,17 @@ def test_every_path_passes_the_id_on(args):
     r = _run(args + ["--keep-ids"], api)
     assert r.exit_code == 0, r.stderr
     assert _ids_asked_for(api) == [ID]
+    assert _kept(api)
 
 
 @pytest.mark.parametrize("args", HEADING_MISSING_CASES.values(), ids=HEADING_MISSING_CASES.keys())
 def test_the_heading_fallback_passes_the_id_on(args):
-    api = _api()
+    api = _fake()
     with patch("logseq_cli.commands.journal.find_or_create_heading", return_value=None):
         r = _run(args + ["--keep-ids"], api)
     assert r.exit_code == 0, r.stderr
     assert _ids_asked_for(api) == [ID]
+    assert _kept(api)
 
 
 class TestRefusedCombinations:
@@ -298,6 +289,7 @@ class TestFoundInReview:
                   "--content", f"- Meeting\n  id:: {ID}"], api)
         assert r.exit_code == 0, r.stderr
         assert _ids_asked_for(api) == [ID]
+        assert _kept(api)
 
     @pytest.mark.parametrize("args", [
         ["insert-block", "--after", ANCHOR, "--content", TOP],
