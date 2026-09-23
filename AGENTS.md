@@ -183,7 +183,8 @@ logseq-cli get-properties --name "Page"
 logseq-cli get-properties --name "Page" --property status
 
 # Set property. Keys are stored as Logseq reads them back: "Status" becomes
-# "status" (noted on stderr); a key Logseq would drop is refused, exit 1.
+# "status" (noted on stderr); a key Logseq would drop is refused, exit 1, and
+# so are "id" and "custom-id", which Logseq reads as the block's uuid.
 logseq-cli set-property --name "Page" --key status --value Active
 
 # Find pages by property
