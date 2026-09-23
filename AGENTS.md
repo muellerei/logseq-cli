@@ -190,7 +190,9 @@ logseq-cli get-properties --name "Page" --property status
 
 # Set property. Keys are stored as Logseq reads them back: "Status" becomes
 # "status" (noted on stderr); a key Logseq would drop is refused, exit 1, and
-# so are "id" and "custom-id", which Logseq reads as the block's uuid.
+# so are "id" and "custom-id", which Logseq reads as the block's uuid, and
+# "title", which would rename the page (use rename-page), and "collapsed",
+# which Logseq reads as the block's folded state.
 logseq-cli set-property --name "Page" --key status --value Active
 
 # Find pages by property
@@ -388,9 +390,6 @@ text as given.
   reported per name, like a missing page.
 - `delete-page` and `rename-page` refuse an alias (`reason: "alias"`, exit 1)
   and name the page: use its own name.
-- An alias just set with `set-property --key alias` is not an alias until
-  Logseq has read the file again; a write to it before then makes a page of
-  its own.
 
 ## Environment Variables
 

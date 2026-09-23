@@ -61,6 +61,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `set-property` did not make a page property Logseq could find. It wrote with
+  `upsertBlockProperty` into the page's first block, and Logseq takes a page's
+  properties from its property block only when that block is saved, which that
+  call skips (measured against 0.10.15, and in `save-block-inner!`). On a page
+  with a property block, a new key or value reached the file but not the page
+  until Logseq read the file again: `query-pages-by-property` missed the page,
+  `get-properties --property` exited 1, and an alias just set was no alias
+  yet. On a page whose first block held text, the property went into that
+  block, where it never counted as the page's. Both commands now rewrite the
+  property block's lines and save it with `updateBlock`; a page without one
+  gets one before its first block, inserted empty and then filled, since a
+  block inserted with the text is not taken for one. A first block of property
+  lines only, which the old way left on a page created empty, becomes the
+  property block, and it goes with its last property, unless it is the page's
+  only block. The page is read back after the write, and one it does not show
+  exits 1. `title` is refused: saved there, it renames the page, past every
+  check `rename-page` makes (measured). So is `collapsed`, which Logseq reads
+  as the block's folded state and never shows as the page's. The block's text
+  is read again just before it is written back whole, so a key a parallel call
+  set in between is kept. Setting a value the page already shows writes
+  nothing and says `unchanged`; one whose line is there but which the page
+  does not show, as the old way left it, is saved again, first empty and then
+  with its text, since Logseq saves only a change. Removing a key that is not
+  set says so instead of "Removed". `--dry-run --json` names the `target`: the
+  property block, or a new one. A key older versions stored verbatim, which no
+  file line can hold, is still removed by name.
+  See [#80](https://github.com/muellerei/logseq-cli/issues/80).
 - `get-page` and `get-journal-range` printed the second and later lines of a
   block at column 0, in both text formats, and so did `get-block` and
   `find-block --with-children` for the children they list. A reader could not
