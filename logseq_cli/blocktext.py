@@ -88,8 +88,8 @@ def property_line_mask(lines: list) -> list:
 # Logseq reads more than one spelling as the block's id: keys are lower-cased,
 # and custom-id / custom_id are renamed to id (extract-properties, measured in
 # #21). A copied block also carries the line indented, as it sits in the file.
-# Every spelling counts, or one of them would slip past the checks in helpers
-# and still set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
+# Every spelling counts, or one of them would slip past the checks and still
+# set the uuid. The separator is PROPERTY_LINE_RE's: "id::x" without the
 # space is text to Logseq (measured as "k::v", #39) and must not be dropped.
 # After the value, spaces and tabs may follow: Logseq keeps "id:: <uuid>\t"
 # as the block's id, and drops one ending in "\r" (both measured, 0.10.15).
@@ -127,6 +127,54 @@ def without_block_ids(content: str) -> str:
     claiming it. A line in a code block is code and stays.
     """
     return "\n".join(line for line, value in id_lines(content) if not value)
+
+
+def refuse_id_lines(content: str, *, own: str = None, replacing: str = None,
+                    where: str = "The text") -> None:
+    """Refuse ``content`` if it carries an ``id::`` line, other than one naming
+    ``own``, the uuid of the block an update writes, or one ``replacing`` (the
+    text the update replaces) already had.
+
+    Every write in LogseqAPI goes through this, as through refuse_split_block:
+    the commands decide first what their contract with such a line is (drop it
+    and say so, keep it with --keep-ids, refuse), and this is where a line no
+    command decided on stops. Written, Logseq takes the line as the block's
+    uuid once it reads the page file again (measured, #56), and every ((ref))
+    to the block points at nothing. The block's own line is what getBlock
+    hands out, and writing it back keeps the uuid (measured). A line the block
+    had passes as well, as in refuse_split_block: a copy carries its source's
+    line until the file is read again (measured), and changing another line
+    of it changes nothing about that.
+
+    Raises:
+        IdLineError: naming the line.
+    """
+    allowed = {(own or "").lower()} | {value.lower() for _, value in id_lines(replacing or "")
+                                        if value}
+    for number, (line, value) in enumerate(id_lines(content), 1):
+        if value and value.lower() not in allowed:
+            raise IdLineError(
+                f"{where}, line {number} ({line!r}): Logseq reads this line as "
+                "the block's id, and would give the block this uuid when it "
+                "reads the page file again; every ((ref)) to the block would "
+                "then point at nothing. Nothing was written.", line=number)
+
+
+def refuse_id_lines_tree(tree: list) -> None:
+    """:func:`refuse_id_lines` for every block of ``tree``, before any of it is
+    written."""
+    for content, where in _labelled_blocks(tree, "The block"):
+        refuse_id_lines(content, where=where)
+
+
+class IdLineError(Exception):
+    """An ``id::`` line that would reach Logseq without a command having decided
+    on it. Carries ``line`` for a JSON error, like :class:`SplitBlockError`,
+    and is answered like it: refused before the write."""
+
+    def __init__(self, message: str, line: int = None):
+        super().__init__(message)
+        self.line = line
 
 
 # Text written as ONE block has to come back from the page file as that block.
@@ -269,17 +317,20 @@ def refuse_split_tree(tree: list, *, command: str, label: str = "The block",
     block is named ``single_label`` (the text as given); in a larger one each
     block by ``label`` and its first line."""
     alone = len(tree or []) == 1 and not tree[0].get("children")
+    for content, where in _labelled_blocks(tree, label):
+        refuse_split_block(content, command=command,
+                           where=single_label if alone else where)
 
-    def walk(blocks):
-        for node in blocks or []:
-            if not isinstance(node, dict):
-                continue
+
+def _labelled_blocks(tree: list, label: str):
+    """``(content, name)`` for every block of ``tree``, DFS pre-order, the
+    name being ``label`` and the block's first line: how a refusal of a tree
+    names the block it stopped at."""
+    for node in tree or []:
+        if isinstance(node, dict):
             content = node.get("content", "") or ""
-            first = content.split("\n")[0]
-            refuse_split_block(content, command=command,
-                               where=single_label if alone else f"{label} {first[:40]!r}")
-            walk(node.get("children"))
-    walk(tree)
+            yield content, f"{label} {content.split(chr(10))[0][:40]!r}"
+            yield from _labelled_blocks(node.get("children"), label)
 
 
 def refuse_split_heading(heading: str, *, command: str) -> None:
@@ -291,6 +342,9 @@ def refuse_split_heading(heading: str, *, command: str) -> None:
         refuse_split_block(heading, command=command, where="The heading",
                            ways="  - name one heading          -> a single line, "
                                 "such as \"## Log\"")
+        # Checked here too, not only in LogseqAPI: by the time the heading is
+        # written, the page it goes on may have been created (#56).
+        refuse_id_lines(heading, where="The heading")
 
 
 def refuse_split_property(key: str, value) -> None:
