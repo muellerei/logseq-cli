@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An Agent Skill, `skills/logseq-cli/SKILL.md`, for an agent that has not met
   the tool yet: why the database and not the Markdown files, `doctor` first,
   and four habits (a journal by its date, `--dry-run` before destructive
-  writes, bounded reads, the exit status); AGENTS.md stays the reference. It
+  writes, bounded reads, the exit status). For the commands and their
+  options it points to `--help`, which describes the version installed;
+  AGENTS.md on `main` stays the reference for the workflows (#88). It
   lives in the repository only, under `skills/<name>/`, where the Agent
   Skills specification wants the folder to match the name and
   `npx skills add` looks; a `skill install` command would cover two agents

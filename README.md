@@ -16,7 +16,7 @@ See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
 
 An agent that has not met the tool yet finds it through the skill in
 [`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md): when to reach for
-it rather than the Markdown files, and the three habits that prevent damage.
+it rather than the Markdown files, and the habits that prevent damage.
 It follows the [Agent Skills](https://agentskills.io) format, so
 `npx skills add muellerei/logseq-cli` installs it for most coding agents.
 

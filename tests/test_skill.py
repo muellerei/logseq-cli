@@ -14,6 +14,8 @@ refuses a skill that carries Claude Code's own fields.
 import pathlib
 import re
 
+import click
+
 from logseq_cli.cli import cli
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -29,9 +31,10 @@ def _parts():
 
 
 TEXT, FIELDS, BODY = _parts()
+# click keeps --help out of ``params``; it is an option all the same.
 OPTIONS = {name: {opt for param in command.params
                   for opt in [*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ())]
-                  if opt.startswith("--")}
+                  if opt.startswith("--")} | set(click.Context(command).help_option_names)
            for name, command in cli.commands.items()}
 
 

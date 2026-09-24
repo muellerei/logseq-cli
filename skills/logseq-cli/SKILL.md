@@ -56,6 +56,7 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
 
 ## Everything else
 
-The command reference, the JSON shapes and the rules for block text, ids and
-properties are in
+`logseq-cli --help` lists the commands and `logseq-cli <command> --help` a
+command's options, both for the version installed. The workflows, the JSON
+shapes and the rules for block text, ids and properties are in
 [AGENTS.md](https://github.com/muellerei/logseq-cli/blob/main/AGENTS.md).
