@@ -44,6 +44,7 @@ from logseq_cli.render import (
     extract_backlink_names,
     extract_section,
     first_uuids,
+    hanging,
     is_properties_block,
     outline_blocks,
     resolve_refs_in_blocks,
@@ -425,7 +426,7 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
                     if isinstance(bl, dict):
                         click.echo(f"  <- {bl['page']}")
                         for block in bl["blocks"]:
-                            click.echo(f"       {block['content']}")
+                            click.echo(hanging(block["content"], "       ", deeper=2))
                         if bl.get("withheld"):
                             click.echo(f"       ... {bl['withheld']} more not shown")
                     else:
