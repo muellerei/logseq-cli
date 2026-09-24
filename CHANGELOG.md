@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `find-block --with-children` and `get-backlinks --with-context` printed a
+  block's second and later lines at column 0, the gap #75 closed for
+  `get-page`: a property line of the block read like part of the listing. They
+  now sit under the block's first line, and under `--with-context`, where the
+  linking blocks follow one another, two spaces deeper, so where one block
+  ends stays visible.
+  See [#77](https://github.com/muellerei/logseq-cli/issues/77).
 - `get-properties` reported a first block's own `id`, `heading` or `collapsed`
   as the page's properties on a page without any: its fallback to the first
   block, kept for pages the old `set-property` wrote there, took every key the

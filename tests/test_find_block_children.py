@@ -57,6 +57,15 @@ class TestWithChildren:
             return len(line) - len(line.lstrip())
         assert indent_of("=> state matches") > indent_of("**Implementation:**")
 
+    def test_further_lines_of_the_match_sit_under_its_content(self):
+        """At column 0 they read as lines of the listing, not of the block
+        (#77); the children below are indented already."""
+        api = _api([dict(HIT, content="**14:22** Ticket\nprio:: 1")], {"u-1": []})
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = CliRunner().invoke(cli, [
+                "find-block", "--content", "14:22", "--with-children"])
+        assert "  content: **14:22** Ticket\n           prio:: 1\n" in r.output
+
     def test_without_flag_no_extra_read_and_no_children(self):
         api = _api([HIT], {"u-1": KIDS})
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
