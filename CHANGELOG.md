@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-todos --help` said `--due-from/--due-to` exclude repeating tasks
+  because Logseq stores only their first occurrence, and the comment above
+  the due filter said the same. Both described an earlier design: a
+  repeating task is placed by its next occurrence, derived from the date in
+  its text, and only one whose interval cannot be read is left out. That date
+  is also not always the first one — Logseq moves it on when the task is
+  ticked off by its checkbox.
+  See [#90](https://github.com/muellerei/logseq-cli/issues/90).
 - `find-block --with-children` and `get-backlinks --with-context` printed a
   block's second and later lines at column 0, the gap #75 closed for
   `get-page`: a property line of the block read like part of the listing. They
