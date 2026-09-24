@@ -1,12 +1,13 @@
-"""Turning blocks into text, and resolving the references inside them.
+"""Turning blocks into text, and finding and resolving the references inside them.
 
 Most of these render blocks to text or Markdown, or cut the tree down to what a
 read asked for (a section, the outline, a size); resolve_refs_in_blocks and
 count_unresolved_refs do not — they resolve block references against the graph
-and count the dead ones. BLOCK_REF_RE is here although todos.py uses it to
-recognise a reference rather than to display one. The name is approximate and
-kept: the reference half is about sixty lines, and moving it out buys a file
-plus an edge between the two, which is movement without the gain.
+and count the dead ones. Finding references in block text is the third job:
+BLOCK_REF_RE for block refs, extract_page_links and extract_topics for [[links]]
+and #tags, which todos, pages, journal and analysis use to find references, not
+to render a block. The name is approximate and kept: moving this out buys a
+file plus an edge between the two, which is movement without the gain.
 
 They live apart from the commands because pages, journal and todos all read
 them, and a helper three modules import is not private to any of them.
@@ -14,7 +15,8 @@ them, and a helper three modules import is not private to any of them.
 import re
 
 from logseq_cli.blocktext import PROPERTY_LINE_RE
-from logseq_cli.helpers import bullet_lines, normalize_heading
+from logseq_cli.headings import normalize_heading
+from logseq_cli.outlinetext import bullet_lines
 
 
 BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
@@ -77,10 +79,33 @@ def extract_backlink_names(refs) -> list:
                     names.append(name)
     return sorted(names)
 
+def extract_page_links(text: str) -> list:
+    """Extract all [[page link]] references from text."""
+    return re.findall(r"\[\[(.*?)\]\]", text)
+
+def extract_topics(text: str) -> list:
+    """Extract topics from hashtags and page links."""
+    links = extract_page_links(text)
+    tags = re.findall(r"#(\w+)", text)
+    return list(set(links + tags))
+
 def is_properties_block(content: str) -> bool:
     """Check if block content is a Logseq properties block (key:: value lines)."""
     lines = content.strip().split("\n")
     return all(PROPERTY_LINE_RE.match(line) for line in lines if line.strip())
+
+def process_blocks(blocks, indent: int = 0) -> str:
+    """Recursively format blocks as indented text."""
+    lines = []
+    prefix = "  " * indent
+    for block in blocks:
+        content = block.get("content", "")
+        if content:
+            lines.extend(bullet_lines(content, prefix))
+        children = block.get("children", [])
+        if children:
+            lines.append(process_blocks(children, indent + 1))
+    return "\n".join(lines)
 
 def blocks_to_markdown(blocks, indent=0, page_start=True):
     """Convert block tree to Logseq-compatible markdown.

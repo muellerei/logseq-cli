@@ -3,8 +3,8 @@ import datetime
 import click
 
 from logseq_cli.group import cli
-from logseq_cli.helpers import find_blocks_by_content, process_blocks
-from logseq_cli.render import hanging
+from logseq_cli.lookup import find_blocks_by_content
+from logseq_cli.render import hanging, process_blocks
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 

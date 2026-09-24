@@ -20,7 +20,7 @@ import pytest
 
 from logseq_cli.cli import cli
 from logseq_cli.blocktext import block_id_property, without_block_ids
-from logseq_cli.helpers import blocks_with_several_ids
+from logseq_cli.ids import blocks_with_several_ids
 from tests.conftest import PageGraph, page_graph_api, split_runner
 
 EXISTING = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"   # a block in the graph has it

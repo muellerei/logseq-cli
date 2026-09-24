@@ -7,14 +7,14 @@ indirectly through CLI end-to-end tests. These tests pin their behaviour directl
 import pytest
 from unittest.mock import MagicMock
 
-from logseq_cli.helpers import (
+from logseq_cli.blockprops import (
+    apply_block_properties,
     coerce_property_value,
     parse_property_pairs,
-    apply_block_properties,
-    uuid_fields,
-    insert_tree_at_page_end,
-    parse_hierarchical_content,
 )
+from logseq_cli.outlinetext import parse_hierarchical_content
+from logseq_cli.output import uuid_fields
+from logseq_cli.strictinsert import insert_tree_at_page_end
 
 
 class TestCoercePropertyValue:

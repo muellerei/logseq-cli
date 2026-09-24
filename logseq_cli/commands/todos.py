@@ -6,14 +6,14 @@ import click
 
 from logseq_cli.blocktext import property_line_mask, refuse_split_block
 from logseq_cli.datalog import edn_string
-from logseq_cli.group import cli
-from logseq_cli.helpers import (
-    find_blocks_by_content,
+from logseq_cli.dates import (
     journal_day_to_date,
     next_occurrence,
     parse_date_keyword,
     parse_repeater,
 )
+from logseq_cli.group import cli
+from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import BLOCK_REF_RE
 

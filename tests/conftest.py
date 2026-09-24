@@ -35,7 +35,7 @@ class FakeGraph:
     """Minimal in-memory stand-in for the block graph.
 
     ``insertBatchBlock`` answers ``null`` whether it wrote or not, so
-    :func:`helpers.insert_block_tree_batched` proves the write by reading the
+    :func:`strictinsert.insert_block_tree_batched` proves the write by reading the
     parent's children back. A MagicMock returns a MagicMock for that read, which
     reads as "nothing arrived" and would make every success test fail for the
     wrong reason. This models just enough of the real API to tell a genuine
@@ -170,7 +170,7 @@ def fake_api(uuids, *, fail_after=None):
 def answer_property_pulls(api):
     """Answer ``stored_properties``' datascript pull from the mocked blocks.
 
-    Commands read property keys through a pull (see helpers.stored_properties),
+    Commands read property keys through a pull (see blockprops.stored_properties),
     while most tests describe a block the way the API returns it, with a
     ``properties`` map. This lets such a test keep describing the block once:
     the pull for a uuid answers with the properties of whichever mocked page or

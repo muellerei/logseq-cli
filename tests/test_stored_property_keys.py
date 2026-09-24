@@ -23,8 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from logseq_cli.blockprops import stored_properties
 from logseq_cli.cli import cli
-from logseq_cli.helpers import stored_properties
 from tests.conftest import split_runner
 
 BLOCK = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
