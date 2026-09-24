@@ -15,8 +15,13 @@ import list into decoration and hides a missing entry.
 Both were checked by `local/specs/audit-001-map.py` while the split was being
 made. That script parses the module map out of a specification which is now
 archived, and it runs nowhere on its own. These assertions do not depend on it.
+
+`docs/adr/0003-shared-code-is-split-by-what-it-decides.md` adds two more: the
+import graph of the whole package has no cycle, and the modules named in PURE
+take no ``api`` and import no module that does.
 """
 import ast
+import importlib.util
 import pathlib
 
 import logseq_cli.cli
@@ -93,3 +98,102 @@ def test_only_the_entry_point_imports_from_commands():
         f"{offenders} — only cli.py imports from commands/; a module below the "
         f"command layer that reaches up inverts the dependency"
     )
+
+
+def _module_name(path):
+    """``logseq_cli/render.py`` -> ``logseq_cli.render``; a package's __init__ is the package."""
+    parts = path.relative_to(PACKAGE.parent).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def _package_imports(path):
+    """:func:`_imports`, plus relative imports resolved to their dotted name.
+
+    ``from .api import LogseqAPI`` names no ``logseq_cli`` and would pass both
+    tests below unseen; ruff's rule set here does not forbid the form."""
+    here = _module_name(path)
+    package = here if path.name == "__init__.py" else here.rpartition(".")[0]
+    out = _imports(path)
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            module = importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+            out.add(module)
+            out.update(f"{module}.{alias.name}" for alias in node.names)
+    return out
+
+
+def test_the_package_import_graph_has_no_cycle():
+    """No module reaches back to one that imports it.
+
+    Some cycles fail on import and need no test. Others Python accepts in
+    silence: an import moved into a function, the usual repair for the first
+    kind, or a plain ``import`` placed after the names the other side needs.
+    Those pass the whole suite (ADR 0003)."""
+    paths = {_module_name(p): p for p in PACKAGE.rglob("*.py")}
+    graph = {name: sorted(_package_imports(path) & set(paths) - {name})
+             for name, path in paths.items()}
+    done, trail = set(), []
+
+    def visit(name):
+        if name in trail:
+            return trail[trail.index(name):] + [name]
+        if name in done:
+            return None
+        trail.append(name)
+        for dep in graph[name]:
+            cycle = visit(dep)
+            if cycle:
+                return cycle
+        trail.pop()
+        done.add(name)
+        return None
+
+    for name in sorted(graph):
+        cycle = visit(name)
+        assert not cycle, (
+            f"import cycle: {' -> '.join(cycle)}. One side has to stop importing "
+            f"the other; moving the import into a function only hides it")
+
+
+# Written out, not derived: the list is a decision, and adding or removing a
+# module here should be a visible change.
+PURE = ("dates", "outlinetext", "cliinput")
+
+
+def _takes_api(path):
+    """True for a module that handles a LogseqAPI or imports its module.
+
+    Handling it covers a parameter named ``api`` and the way every command
+    gets one, ``api = ctx.obj["api"]``: a name ``api`` or a lookup of the key."""
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+            if any(a.arg == "api" for a in args):
+                return True
+        if isinstance(node, ast.Name) and node.id == "api":
+            return True
+        if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant)
+                and node.slice.value == "api"):
+            return True
+    return "logseq_cli.api" in _package_imports(path)
+
+
+def test_the_pure_modules_need_no_logseq_api():
+    """These three need no LogseqAPI, and their docstrings and ADR 0003 say
+    so. That was not why they were cut out, but it keeps them testable without
+    a mock. Code that needs the API belongs elsewhere."""
+    api_side = {_module_name(p) for p in PACKAGE.glob("*.py") if _takes_api(p)}
+    offenders = {}
+    for name in PURE:
+        path = PACKAGE / f"{name}.py"
+        reached = sorted(_package_imports(path) & api_side)
+        if _takes_api(path):
+            reached.append("handles an api or imports logseq_cli.api itself")
+        if reached:
+            offenders[name] = reached
+    assert not offenders, (
+        f"{offenders} — a module in PURE reaches LogseqAPI. Move what needs "
+        f"the API into a module that already takes it, or take the module out "
+        f"of PURE and say why in ADR 0003")
