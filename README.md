@@ -273,7 +273,7 @@ graph.
 | Command | Description |
 |---------|-------------|
 | `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property, in the page's property block (made before the first block when there is none), so Logseq and `query-pages-by-property` see it at once. `title` is refused: it would rename the page; use `rename-page`. So is `collapsed`, which Logseq reads as the block's folded state. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so are `id` and `custom-id`, which Logseq reads as the block's uuid |
-| `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property; the property block goes with its last one. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it |
+| `remove-property (--page NAME \| --id UUID) --key KEY [--dry-run]` | Remove a page property; the property block goes with its last one, unless it is the page's only block. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it |
 | `set-block-property --id UUID --key KEY --value VAL [--dry-run]` | Set/update a block property. `--dry-run` shows the old value and fails on an unknown UUID, which the write path cannot detect. Keys follow the `set-property` rule |
 
 ### Page Management (2)
