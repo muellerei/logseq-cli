@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
+from logseq_cli.blockprops import normalize_property_key, parse_property_pairs
 from logseq_cli.blocktext import PROPERTY_LINE_RE
 from logseq_cli.cli import cli
-from logseq_cli.helpers import normalize_property_key, parse_property_pairs
 from tests.conftest import PageGraph, page_graph_api, split_runner
 
 # Keys the parser drops entirely: the line is no property at all on re-read.

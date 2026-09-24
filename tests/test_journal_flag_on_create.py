@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import format_journal_date, is_journal_date
+from logseq_cli.dates import format_journal_date, is_journal_date
 from tests.conftest import split_runner
 
 

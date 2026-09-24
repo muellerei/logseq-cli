@@ -51,6 +51,21 @@ _Avoid_: daily note, diary entry
 One bullet in a page, with an identity of its own and possibly children.
 _Avoid_: node, item, entry
 
+**Id Line**:
+A line `id:: <uuid>` in a Block's text. Logseq reads it as the Block's uuid,
+not as content, so whoever writes one decides which Block the uuid names.
+_Avoid_: id property, uuid line
+
+**Reference**:
+A mention of another page or Block inside a Block's text: a Block Ref, a page
+link `[[name]]` or a tag `#name`. Logseq records all three as the Block's refs.
+_Avoid_: link (for the whole family)
+
+**Block Ref**:
+`((uuid))` in a Block's text, standing for the Block with that uuid. The one
+kind of Reference that points at a Block rather than a page.
+_Avoid_: block reference link, embed
+
 ### Guarantees the tool makes
 
 **Refusal**:

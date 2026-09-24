@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import escape_regex, find_backlinks
+from logseq_cli.lookup import escape_regex, find_backlinks
 from tests.conftest import split_runner
 
 

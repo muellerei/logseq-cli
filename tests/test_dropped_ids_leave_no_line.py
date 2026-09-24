@@ -94,7 +94,8 @@ def test_the_echo_does_not_show_the_dropped_id(name):
 
 
 def test_the_echo_reads_back_as_the_outline_written():
-    from logseq_cli.helpers import outline_text, parse_hierarchical_content, tree_without_block_ids
+    from logseq_cli.ids import tree_without_block_ids
+    from logseq_cli.outlinetext import outline_text, parse_hierarchical_content
     tree = tree_without_block_ids(parse_hierarchical_content(
         f"- a\n  k:: v\n  id:: {ID}\n\t- b\n\t\t- c\n- d"))
     assert outline_text(tree) == "- a\n  k:: v\n\t- b\n\t\t- c\n- d"

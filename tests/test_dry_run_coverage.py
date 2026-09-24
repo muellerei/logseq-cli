@@ -592,7 +592,7 @@ class TestEveryWriteHasADryRun:
         source = pathlib.Path(module.__file__).read_text(encoding="utf-8")
         tree = ast.parse(source)
         # Sliced by line number from one split: ast.get_source_segment splits
-        # the whole file again for every function, which on helpers.py cost
+        # the whole file again for every function, which on the old helpers.py cost
         # most of a second. Top-level functions start at column 0, so the
         # text is the same.
         lines = source.splitlines(keepends=True)

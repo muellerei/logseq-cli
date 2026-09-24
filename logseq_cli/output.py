@@ -208,3 +208,13 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
     else:
         click.echo(f"Error: {message}", err=True)
     sys.exit(exit_code)
+
+
+def uuid_fields(uuids: list) -> dict:
+    """Standard {uuid, uuids} pair for command JSON output.
+
+    uuid = root/first created block (or None); uuids = all created in DFS pre-order.
+    Single source of truth for the creation-command output shape so add-note-content,
+    insert-block, add-journal-block and add-journal-content stay consistent.
+    """
+    return {"uuid": uuids[0] if uuids else None, "uuids": list(uuids)}

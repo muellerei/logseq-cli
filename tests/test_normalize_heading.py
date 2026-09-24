@@ -6,7 +6,7 @@ properties (id::, collapsed::, ...) on the lines after the heading text, e.g.
 the bare ``## Focus Topics W24`` query — otherwise get-page --heading silently
 returns nothing for exactly the headings that matter most.
 """
-from logseq_cli.helpers import normalize_heading
+from logseq_cli.headings import normalize_heading
 
 
 def _match(stored, query):

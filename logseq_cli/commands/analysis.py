@@ -5,13 +5,9 @@ import re
 from logseq_cli.group import cli
 from collections import Counter, defaultdict
 from logseq_cli.config import get, load_config
-from logseq_cli.helpers import (
-    extract_topics,
-    format_journal_date,
-    get_page_content,
-    journal_day_to_date,
-    parse_date_range,
-)
+from logseq_cli.dates import format_journal_date, journal_day_to_date, parse_date_range
+from logseq_cli.lookup import get_page_content
+from logseq_cli.render import extract_topics
 from logseq_cli.output import fail, handle_connection_error, output
 
 

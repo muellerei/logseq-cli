@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import quote_break_lines
+from logseq_cli.outlinetext import quote_break_lines
 from tests.conftest import fake_api, split_runner
 
 B1 = "6650d3a4-1b2c-4d5e-8f90-0a1b2c3d4e5f"
@@ -149,14 +149,14 @@ def test_json_output_stays_parseable():
 def test_outline_text_has_no_quote_to_break(text):
     """Outline text puts each line in a block of its own: the quote and the
     line after it are two blocks, and neither holds a blank line."""
-    from logseq_cli.helpers import parse_hierarchical_content, quote_break_note
+    from logseq_cli.outlinetext import parse_hierarchical_content, quote_break_note
     tree = parse_hierarchical_content(text)
     assert all("\n" not in node["content"] for node in tree)
     assert quote_break_note(tree) is None
 
 
 def test_a_child_node_is_checked_and_named():
-    from logseq_cli.helpers import quote_break_note
+    from logseq_cli.outlinetext import quote_break_note
     note = quote_break_note([{"content": "parent", "children": [
         {"content": "> quoted\n\nafter", "children": []}]}])
     assert note is not None and '"> quoted" line 3' in note

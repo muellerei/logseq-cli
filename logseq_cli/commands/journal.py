@@ -6,55 +6,56 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
 
+from logseq_cli.blockprops import kept_properties
 from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, without_block_ids
+from logseq_cli.cliinput import content_or_file, read_content_file, require_content
 from logseq_cli.config import load_config, resolve_heading
+from logseq_cli.dates import (
+    format_journal_date,
+    journal_day_to_date,
+    parse_date_keyword,
+    parse_date_range,
+)
 from logseq_cli.group import cli
-from logseq_cli.helpers import (
+from logseq_cli.headings import find_or_create_heading, normalize_heading, strip_title_heading
+from logseq_cli.ids import (
     BESIDES_IDS,
     BlockIdError,
-    append_in_page,
     check_block_ids,
     collect_block_ids,
+    require_text_besides_ids,
+    tree_without_block_ids,
+    without_block_ids_noted,
+)
+from logseq_cli.lookup import get_page_content
+from logseq_cli.outlinetext import (
     contains_hierarchical_content,
-    content_or_file,
     count_blocks,
-    extract_page_links,
-    find_or_create_heading,
-    format_journal_date,
-    get_page_content,
     has_mixed_indentation,
-    insert_block_tree_as_siblings,
-    insert_block_tree_at_page_top,
-    insert_block_tree_with_uuids,
-    insert_block_at,
-    insert_tree_at_page_end,
-    journal_day_to_date,
-    kept_properties,
-    normalize_heading,
     normalize_indentation,
     note_quote_breaks,
     outline_text,
-    parse_date_keyword,
-    parse_date_range,
     parse_hierarchical_content,
-    process_blocks,
-    read_content_file,
-    require_content,
-    require_insert,
-    require_text_besides_ids,
-    strip_title_heading,
-    tree_without_block_ids,
-    uuid_fields,
-    without_block_ids_noted,
 )
-from logseq_cli.output import fail, handle_connection_error, json_text, output
+from logseq_cli.output import fail, handle_connection_error, json_text, output, uuid_fields
 from logseq_cli.render import (
     blocks_to_markdown,
     bound,
     count_unresolved_refs,
+    extract_page_links,
     extract_section,
     first_uuids,
+    process_blocks,
     resolve_refs_in_blocks,
+)
+from logseq_cli.strictinsert import (
+    append_in_page,
+    insert_block_at,
+    insert_block_tree_as_siblings,
+    insert_block_tree_at_page_top,
+    insert_block_tree_with_uuids,
+    insert_tree_at_page_end,
+    require_insert,
 )
 
 

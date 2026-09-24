@@ -16,10 +16,7 @@ from click.testing import CliRunner
 
 from tests.conftest import fake_api
 from logseq_cli.cli import cli
-from logseq_cli.helpers import (
-    insert_block_tree_with_uuids,
-    insert_block_tree_at_page_top,
-)
+from logseq_cli.strictinsert import insert_block_tree_at_page_top, insert_block_tree_with_uuids
 
 
 TREE = [{"content": "Head", "children": [{"content": "Detail"}]}]

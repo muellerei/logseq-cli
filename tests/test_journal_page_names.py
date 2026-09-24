@@ -19,7 +19,7 @@ import datetime
 
 import pytest
 
-from logseq_cli.helpers import format_journal_date, get_day_suffix
+from logseq_cli.dates import format_journal_date, get_day_suffix
 
 
 class TestOrdinalSuffix:
