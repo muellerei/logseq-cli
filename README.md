@@ -455,10 +455,10 @@ stdout stays pure payload. Without truncation there is no note.
 
 ## Design notes
 
-Seven decisions that shaped the tool more than any feature did. Most came out of
+The decisions that shaped the tool more than any feature did. Most came out of
 a defect; the [CHANGELOG](CHANGELOG.md) carries the full account of what was
-wrong, how it was found and what the fix cost. The last two are about what the
-tool deliberately does not do — one a mechanism not built, one the edge of what
+wrong, how it was found and what the fix cost. The last three are about what the
+tool deliberately does not do — two mechanisms not built, one the edge of what
 it is for.
 
 They are all the same rule applied in different places: **an answer must not
@@ -612,6 +612,28 @@ event that has not yet happened. Instead the abort names the damage: how many
 blocks are already in the graph, that there is no rollback, and that retrying
 the same input will duplicate them. If the count ever stops being zero, that is
 the signal to build the mechanism, and the measurement is cheap to repeat.
+
+### A write takes its target by name, not from a pipe
+
+Every command that writes to the graph is told where — a uuid, a page name, a
+date, or text that must match exactly one block — one target per call. Content
+may come from stdin (`--content-file -`); a list of targets never does. Bulk
+work is a shell loop over explicit ids, and that is deliberate. A loop gives
+every write its own checks and its own exit status. A pipe into `remove-block`
+would carry one `--ignore-refs` for every block in it — the blanket override
+the ref check is built to refuse, which is why not even `--force` switches it
+off. And a preview has to be of the call that runs: whatever produces a list of
+targets reads the graph, and stdin can be read once, so dry-running a pipe
+means running its producer twice. If the graph moves in between, the preview
+showed other uuids than the ones then written. With the ids on the command
+line, `--dry-run` and the write take the same arguments.
+
+The use does not ask for it. Agent sessions working with the tool loop over
+explicit ids, some of them around a writer, and carry values from one call to
+the next in shell variables; none has read another call's output on its stdin.
+If that changes, it is the signal to design a batch mode, with the preview,
+partial failures and the exit status worked out before any command reads its
+targets from stdin.
 
 ### This is a tool for file-based graphs
 
