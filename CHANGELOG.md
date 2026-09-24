@@ -85,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the command modules by name. It now reads every module in the package, so a
   function that writes is still found after it moves.
 
+  Two tests in `tests/test_package_layering.py` keep the new layout from
+  drifting: the package's import graph has no cycle, imports inside functions
+  included, and `dates`, `outlinetext` and `cliinput` take no `api` and
+  import no module that does. Each was shown to fail on the change it guards
+  against.
+
 ### Fixed
 
 - `find-block --with-children` and `get-backlinks --with-context` printed a
