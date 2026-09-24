@@ -155,7 +155,7 @@ Notes:
 @click.option("--match", "match", default=None, help="Filter by what the task says: a regular expression, case-insensitive, searched in the task text (not its properties)")
 @click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal pages a task stands on — the one its block lives on and the ones it was carried into by ((block-ref)) — so tasks found only on ordinary pages are excluded whenever a range is given.")
 @click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
-@click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. Repeating tasks are excluded and reported — Logseq stores their first occurrence, not the next")
+@click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. A repeating task is placed by its next occurrence, derived from the date in its text; one whose interval cannot be read is left out and named on stderr")
 @click.option("--due-to", "due_to", default=None, help="Only tasks due on or before this date. Same rule as --due-from")
 @click.option("--include-done", is_flag=True, help="Also include DONE tasks")
 @click.option("--refs-limit", "refs_limit", type=int, default=10, show_default=True,
@@ -260,9 +260,9 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                     pass
         if block_data.get("repeated?"):
             record["repeating"] = True
-            # Logseq stores the date as written, never the next occurrence, so
-            # the next one is derived with the source's own formula (see
-            # next_occurrence). A repeater whose interval cannot be read is
+            # Logseq stores the date as written, which is the next occurrence
+            # only if the task was ticked off by its checkbox, so the next one
+            # is derived with the source's own formula (see next_occurrence). A repeater whose interval cannot be read is
             # left without next_due and reported rather than guessed at.
             repeater = parse_repeater(content)
             stored = record.get("deadline") or record.get("scheduled")
@@ -353,12 +353,13 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
     # Filter by due date. Separate from --from/--to on purpose: those date a
     # task by the journal page it sits on, which is when it was written down.
     #
-    # Repeating tasks are excluded rather than placed. Measured against a live
-    # graph: :block/scheduled holds the date written in the text, not the next
-    # occurrence, so a weekly task created in 2020 still reads 20200106. Logseq
-    # does not store the next date anywhere, and computing it here would put a
-    # second answer beside the graph's own - and could not be done at all for
-    # the `.+` form, which repeats from completion. They are reported instead.
+    # A repeating task is placed by its next occurrence (next_due, derived
+    # above), not by the date in its text. Logseq moves that date on only when
+    # the task is ticked off by its checkbox; one never ticked still reads the
+    # date it was written with (measured: a weekly task from 2020 reads
+    # 20200106).
+    # A repeater whose interval cannot be read has no next occurrence, so it
+    # is left out and reported rather than placed on a date it does not have.
     repeating_excluded = []
     if due_from or due_to:
         due_start = parse_date_keyword(due_from) if due_from else None
@@ -366,12 +367,10 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
         kept = []
         for t in todos:
             # A deadline is the commitment; a schedule is when work starts. A
-            # task carrying both is placed by its deadline.
-            # A deadline is the commitment; a schedule is when work starts. A
             # task carrying both is placed by its deadline. For a repeater the
-            # derived next occurrence replaces the stored date, which is its
-            # first one — filtering on that would place a live weekly task in
-            # the year it was created.
+            # derived next occurrence replaces the date in its text, which may
+            # be long past — filtering on that would place a live weekly task
+            # in the year it was created.
             due = t.get("next_due") or t.get("deadline") or t.get("scheduled")
             if not due:
                 continue

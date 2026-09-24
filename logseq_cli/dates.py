@@ -66,8 +66,9 @@ def journal_day_to_date(jd: int) -> datetime.date:
 
 # Repeating tasks
 # ---------------
-# Logseq stores a repeater's date as written, never the next occurrence, and
-# :block/scheduled follows that. The next one is therefore derived — using the
+# Logseq stores a repeater's date as written in the text, and :block/scheduled
+# follows that. The text holds the next occurrence only once Logseq's checkbox
+# has rewritten it on ticking the task off; otherwise it is an earlier date. The next one is therefore derived — using the
 # source's own formula rather than a second answer invented here.
 #
 # From frontend/handler/repeated.cljs (0.10.12), next-timestamp-text. All three
