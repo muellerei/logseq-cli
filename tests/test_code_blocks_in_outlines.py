@@ -18,7 +18,7 @@ its own. The closing fence is the next line without a bullet that starts with
 from unittest.mock import patch
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import parse_hierarchical_content
+from logseq_cli.outlinetext import parse_hierarchical_content
 from tests.conftest import PageGraph, page_graph_api, split_runner
 
 

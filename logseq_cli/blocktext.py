@@ -1,6 +1,6 @@
 """How Logseq reads the lines of one block's text, and what that asks of a write.
 
-Kept apart from helpers so that LogseqAPI, which checks every write, depends
+Kept in a module of its own so that LogseqAPI, which checks every write, depends
 on this rule and nothing else. Measured against Logseq 0.10.15 throughout.
 """
 import re
@@ -54,7 +54,7 @@ def code_block_lines(lines: list) -> tuple:
 # 'k::' and an indented '  k:: v' are properties; 'std::cout', 'k::v' and
 # 'a,b:: x' are text. The stop characters are the ones #21 measured for the
 # writer, so what set-property writes and what this reads cannot disagree;
-# '/' alone differs, see helpers._PROPERTY_KEY_FORBIDDEN. What may indent the line is
+# '/' alone differs, see blockprops._PROPERTY_KEY_FORBIDDEN. What may indent the line is
 # measured too (#43): spaces, tabs, form feeds and carriage returns, not a
 # no-break space or a vertical tab. Missing one here is the unsafe direction:
 # an id:: line the CLI took for text would still be the block's id.

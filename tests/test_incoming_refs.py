@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import incoming_block_refs
+from logseq_cli.lookup import incoming_block_refs
 
 
 ROOT = "00000000-0000-4000-8000-000000000001"

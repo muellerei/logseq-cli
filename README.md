@@ -699,16 +699,23 @@ See `examples/` directory:
 ```
 logseq-cli/
 ├── logseq_cli/
-│   ├── api.py        # HTTP API client (requests.post against Logseq)
-│   ├── blocktext.py  # How Logseq reads a block's lines: code blocks, block boundaries
-│   ├── config.py     # Config file discovery, loading and lookup
-│   ├── datalog.py    # EDN/datalog query building (value quoting, keywords)
-│   ├── helpers.py    # Date parsing, block processing, backlink search
-│   ├── group.py      # The click group: global options, API client
-│   ├── output.py     # Results on stdout, failures on stderr, --json
-│   ├── pagenames.py  # Which page a name means: an alias as Logseq resolves it
-│   ├── render.py     # Blocks to text, and resolving block references
-│   ├── commands/     # One module per group of commands
+│   ├── api.py          # HTTP API client (requests.post against Logseq)
+│   ├── blockprops.py   # Property keys and values: what Logseq reads back, what a write keeps
+│   ├── blocktext.py    # How Logseq reads a block's lines: code blocks, block boundaries
+│   ├── cliinput.py     # --content, --content-file and --tree, taken from the command line
+│   ├── config.py       # Config file discovery, loading and lookup
+│   ├── datalog.py      # EDN/datalog query building (value quoting, keywords)
+│   ├── dates.py        # Date keywords, journal days, repeaters, journal title formats
+│   ├── group.py        # The click group: global options, API client
+│   ├── headings.py     # Compare, find and add a heading on a page
+│   ├── ids.py          # id:: lines in written text: dropped with a note, or kept by --keep-ids
+│   ├── lookup.py       # Blocks by content, backlinks, incoming block refs, page text
+│   ├── outlinetext.py  # Indented outline text to a block tree, and back
+│   ├── output.py       # Results on stdout, failures on stderr, --json
+│   ├── pagenames.py    # Which page a name means: an alias as Logseq resolves it
+│   ├── render.py       # Blocks to text; finding and resolving references
+│   ├── strictinsert.py # Strict Insert: writes checked to land where asked, moves included
+│   ├── commands/       # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page
 │   │   ├── blocks.py       # read a block, find blocks
 │   │   ├── edit.py         # write, move, copy and remove blocks
@@ -718,7 +725,7 @@ logseq-cli/
 │   │   ├── analysis.py     # graph-wide analysis and suggestions
 │   │   ├── query.py        # smart-query
 │   │   └── meta.py         # init and doctor
-│   └── cli.py        # Entry point: imports every command module
+│   └── cli.py          # Entry point: imports every command module
 ├── examples/         # Shell scripts for scripting/cronjobs
 ├── skills/logseq-cli/SKILL.md  # The skill agents find the tool by
 └── pyproject.toml

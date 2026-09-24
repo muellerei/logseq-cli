@@ -5,13 +5,13 @@ import click
 from logseq_cli.blocktext import refuse_split_property, with_property_line
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
-from logseq_cli.helpers import (
+from logseq_cli.blockprops import (
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
-    require_insert,
     stored_properties,
 )
+from logseq_cli.strictinsert import require_insert
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import is_properties_block
 

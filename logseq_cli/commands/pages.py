@@ -4,37 +4,35 @@ import sys
 import click
 import requests
 
-from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
-from logseq_cli.group import cli
-from logseq_cli.helpers import (
-    BlockIdError,
+from logseq_cli.blockprops import (
     apply_block_properties,
-    check_block_ids,
     check_property_pairs,
-    content_or_file,
-    count_blocks,
-    extract_page_links,
-    find_backlinks,
-    find_heading,
-    find_or_create_heading,
-    incoming_block_refs,
-    insert_block_tree_with_uuids,
-    insert_tree_at_page_end,
-    is_journal_date,
-    note_quote_breaks,
-    parse_hierarchical_content,
     parse_property_pairs,
-    process_blocks,
-    refs_refusal,
-    require_insert,
+)
+from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
+from logseq_cli.cliinput import content_or_file
+from logseq_cli.dates import is_journal_date
+from logseq_cli.group import cli
+from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
+from logseq_cli.ids import (
+    BlockIdError,
+    check_block_ids,
     require_text_besides_ids,
-    strip_title_heading,
     tree_without_block_ids,
-    uuid_fields,
     without_block_ids_noted,
 )
-from logseq_cli.output import (ambiguous_message, fail, follow_page, follow_pages,
-                               handle_connection_error, json_text, output)
+from logseq_cli.lookup import find_backlinks, incoming_block_refs, refs_refusal
+from logseq_cli.outlinetext import count_blocks, note_quote_breaks, parse_hierarchical_content
+from logseq_cli.output import (
+    ambiguous_message,
+    fail,
+    follow_page,
+    follow_pages,
+    handle_connection_error,
+    json_text,
+    output,
+    uuid_fields,
+)
 from logseq_cli.pagenames import AmbiguousAliasError, refuse_alias, resolve_page
 from logseq_cli.render import (
     blocks_to_markdown,
@@ -42,12 +40,19 @@ from logseq_cli.render import (
     bound,
     count_unresolved_refs,
     extract_backlink_names,
+    extract_page_links,
     extract_section,
     first_uuids,
     hanging,
     is_properties_block,
     outline_blocks,
+    process_blocks,
     resolve_refs_in_blocks,
+)
+from logseq_cli.strictinsert import (
+    insert_block_tree_with_uuids,
+    insert_tree_at_page_end,
+    require_insert,
 )
 
 

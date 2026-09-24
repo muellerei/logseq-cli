@@ -3,6 +3,7 @@ import sys
 
 import click
 
+from logseq_cli.blockprops import apply_block_properties, check_property_pairs, kept_properties
 from logseq_cli.blocktext import (
     property_line_mask,
     refuse_id_lines,
@@ -11,47 +12,45 @@ from logseq_cli.blocktext import (
     refuse_split_tree,
     without_block_ids,
 )
-from logseq_cli.config import load_config, resolve_heading
-from logseq_cli.group import cli
-from logseq_cli.helpers import (
-    BlockIdError,
-    append_in_page,
-    apply_block_properties,
-    check_block_ids,
-    check_move,
-    check_property_pairs,
-    contains_hierarchical_content,
+from logseq_cli.cliinput import (
     content_or_file,
+    parse_tree_input,
+    read_content_file,
+    require_content,
+)
+from logseq_cli.config import load_config, resolve_heading
+from logseq_cli.dates import format_journal_date, parse_date_keyword
+from logseq_cli.group import cli
+from logseq_cli.headings import find_heading, find_or_create_heading
+from logseq_cli.ids import (
+    BlockIdError,
+    check_block_ids,
+    require_text_besides_ids,
+    tree_without_block_ids,
+    without_foreign_block_ids,
+)
+from logseq_cli.lookup import incoming_block_refs, refs_refusal, resolve_single_block
+from logseq_cli.outlinetext import (
+    contains_hierarchical_content,
     count_blocks,
-    find_heading,
-    find_or_create_heading,
-    format_journal_date,
-    incoming_block_refs,
+    note_quote_breaks,
+    outline_text,
+    parse_hierarchical_content,
+)
+from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
+from logseq_cli.strictinsert import (
+    append_in_page,
+    check_move,
+    insert_block_at,
     insert_block_tree_as_first_children,
     insert_block_tree_as_siblings,
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
-    insert_block_at,
     insert_tree_at_page_end,
-    kept_properties,
     move_block_verified,
-    note_quote_breaks,
-    outline_text,
-    parse_date_keyword,
-    parse_hierarchical_content,
-    parse_tree_input,
-    read_content_file,
-    refs_refusal,
-    require_content,
     require_insert,
-    require_text_besides_ids,
-    resolve_single_block,
     subtree_uuids,
-    tree_without_block_ids,
-    uuid_fields,
-    without_foreign_block_ids,
 )
-from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
 @cli.command("update-block", epilog="""\b
@@ -327,7 +326,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # graph), so the write cannot be checked from its return value. Counting the
     # matches instead would report "Replaced N block(s)" for writes that never
     # landed, complete with a before/after diff computed locally. Read the
-    # blocks back and compare. See the note above require_insert() in helpers.py
+    # blocks back and compare. See the note above require_insert() in strictinsert.py
     # for when this read can be dropped.
     failed = []
     if replacements and not dry_run:

@@ -250,7 +250,7 @@ class LogseqAPI:
         per node. It answers ``null`` both when it wrote and when it did not, so
         the return value carries no success signal at all: callers must verify by
         reading the anchor's children back (see
-        :func:`helpers.insert_block_tree_batched`).
+        :func:`strictinsert.insert_block_tree_batched`).
 
         Positioning also differs from :meth:`insert_block`: with
         ``sibling: false`` the batch lands at the HEAD of the child list and
@@ -288,14 +288,14 @@ class LogseqAPI:
 
         Logseq writes each entry out as ``key:: value`` text, so what goes in
         decides what lands in the file. Pass the original text under the keys
-        the database stores (``helpers.stored_properties``), not the block's
+        the database stores (``blockprops.stored_properties``), not the block's
         own ``properties`` map: that one is camel-cased by the API and parsed,
         and writing it back turned ``due-date::`` into ``duedate::`` and
         ``zip:: 01234`` into ``zip:: 1234`` (measured, Logseq 0.10.15). ``id::``
         is part of the map and is written back unchanged, so block references
         stay intact. A passed key wins over a line of ``content`` with the same
         key (#66): a caller replacing a block's text takes the set from
-        ``helpers.kept_properties``, which leaves out what the text sets.
+        ``blockprops.kept_properties``, which leaves out what the text sets.
 
         ``replacing`` is the text this replaces, for a caller that changes a
         block rather than writing one: a line it already had passes the check

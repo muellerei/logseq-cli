@@ -8,15 +8,17 @@ from click.testing import CliRunner
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import (
-    parse_tree_input,
-    insert_block_tree_with_uuids,
-    insert_block_tree_as_siblings,
-    block_uuid_from_result,
-    require_insert,
+from logseq_cli.cliinput import parse_tree_input
+from logseq_cli.outlinetext import (
     has_mixed_indentation,
     normalize_indentation,
     parse_hierarchical_content,
+)
+from logseq_cli.strictinsert import (
+    block_uuid_from_result,
+    insert_block_tree_as_siblings,
+    insert_block_tree_with_uuids,
+    require_insert,
 )
 import click
 

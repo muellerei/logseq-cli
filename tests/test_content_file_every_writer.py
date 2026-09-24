@@ -135,7 +135,7 @@ def test_insert_block_content_file_and_tree_are_exclusive(tmp_path):
 def test_the_file_text_is_passed_on_verbatim(tmp_path):
     """Only the trailing newline an editor adds goes; leading indentation and
     trailing spaces are the caller's text, as they are in --content."""
-    from logseq_cli.helpers import content_or_file
+    from logseq_cli.cliinput import content_or_file
     f = tmp_path / "entry.md"
     f.write_text("\tindented  \n", encoding="utf-8")
     assert content_or_file(None, str(f)) == "\tindented  "

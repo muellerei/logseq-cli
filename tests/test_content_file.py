@@ -18,7 +18,7 @@ from click.testing import CliRunner
 
 from tests.conftest import split_runner, fake_api
 from logseq_cli.cli import cli
-from logseq_cli.helpers import read_content_file
+from logseq_cli.cliinput import read_content_file
 
 import click
 

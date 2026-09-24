@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from logseq_cli.helpers import resolve_single_block
+from logseq_cli.lookup import resolve_single_block
 
 import click
 

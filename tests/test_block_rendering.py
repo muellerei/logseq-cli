@@ -19,8 +19,8 @@ through both, rather than by writing the expected tab runs out twice.
 """
 
 
-from logseq_cli.helpers import outline_text, process_blocks
-from logseq_cli.render import blocks_to_markdown, blocks_with_ids
+from logseq_cli.outlinetext import outline_text
+from logseq_cli.render import blocks_to_markdown, blocks_with_ids, process_blocks
 
 
 def _block(content, uuid="u", children=()):

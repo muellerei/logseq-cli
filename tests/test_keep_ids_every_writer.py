@@ -74,7 +74,7 @@ def _ids_asked_for(api):
     """Every uuid a write asked Logseq to keep, whichever call carried it:
     ``customUUID`` on insertBlock/appendBlockInPage, or ``keepUUID`` on a
     batch, which keeps the ``id::`` lines of the nodes it carries."""
-    from logseq_cli.helpers import collect_block_ids
+    from logseq_cli.ids import collect_block_ids
     asked = []
     for call in api.append_block_in_page.call_args_list + api.insert_block.call_args_list:
         opts = call.kwargs.get("options") or (call.args[2] if len(call.args) > 2 else None) or {}

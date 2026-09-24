@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what CI checks. The 57 findings were fixed, not ignored: unused imports,
   a variable and f-strings without placeholders, `l` as a name, and lambdas
   assigned to a name.
+
 - `--content-file FILE` on `update-block`, `insert-block`, `add-note-content`
   and `add-journal-content`, where only `add-journal-block` had it. A call
   reaching for it on `update-block` failed with "No such option", and the way
@@ -58,6 +59,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   note, and `replace-text` changes text already in the graph, where a note
   could not tell a quote it made from one that was there.
   See [#50](https://github.com/muellerei/logseq-cli/issues/50).
+
+### Changed
+
+- `helpers.py` is gone. 97 of its 101 functions and constants now live in
+  eight new modules named for what they decide: `dates`, `headings`,
+  `outlinetext`, `ids`, `cliinput`, `blockprops`, `strictinsert` and
+  `lookup`. The other four went to modules that already asked the same
+  question: `process_blocks`, `extract_page_links` and `extract_topics` to
+  `render.py`, and `uuid_fields` to `output.py`. ADR 0003 says why the split
+  follows what the code decides rather than whether it needs the API, and
+  which other layouts were measured.
+
+  Nothing about using the tool changes. Every function and constant moved as
+  it was. A script compared each one's syntax tree with the one it had in
+  `helpers.py`, and every other file with its previous version. It allowed
+  only imports, the docstrings and comments that named `helpers`, the
+  description at the top of `render.py`, and the two test changes below
+  (#87). The `--help` output of all 38 command names was captured before the
+  first commit and diffed after every one of them. `logseq_cli.helpers` no
+  longer exists as an import path, and `git blame -C` follows the moved lines
+  to their origin.
+
+  The test that finds every command that writes used to read `helpers.py` and
+  the command modules by name. It now reads every module in the package, so a
+  function that writes is still found after it moves.
+
+  Two tests in `tests/test_package_layering.py` keep the new layout from
+  drifting: the package's import graph has no cycle, imports inside functions
+  included, and `dates`, `outlinetext` and `cliinput` take no `api` and
+  import no module that does. Each was shown to fail on the change it guards
+  against.
 
 ### Fixed
 

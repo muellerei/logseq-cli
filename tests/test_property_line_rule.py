@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 from logseq_cli.cli import cli
 from logseq_cli.blocktext import PROPERTY_LINE_RE
-from logseq_cli.helpers import parse_hierarchical_content
+from logseq_cli.outlinetext import parse_hierarchical_content
 from logseq_cli.render import is_properties_block
 
 

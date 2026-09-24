@@ -25,7 +25,7 @@ Derived rather than stored: Logseq keeps no "next occurrence" anywhere, and
 import datetime
 
 
-from logseq_cli.helpers import parse_repeater, next_occurrence
+from logseq_cli.dates import next_occurrence, parse_repeater
 
 
 class TestParseRepeater:
@@ -101,7 +101,7 @@ class TestNextOccurrence:
 
     def test_month_interval_clamps_to_the_shorter_month(self):
         """31 January plus one month is 28 February, as a calendar reads it."""
-        from logseq_cli.helpers import _add_interval
+        from logseq_cli.dates import _add_interval
         assert _add_interval(datetime.date(2026, 1, 31), 1, "m") == datetime.date(2026, 2, 28)
 
     def test_month_repeat_lands_in_the_future(self):
