@@ -2,11 +2,8 @@
 
 from unittest.mock import MagicMock
 
-from logseq_cli.helpers import (
-    contains_hierarchical_content,
-    parse_hierarchical_content,
-    find_or_create_heading,
-)
+from logseq_cli.headings import find_or_create_heading
+from logseq_cli.outlinetext import contains_hierarchical_content, parse_hierarchical_content
 
 
 class TestContainsHierarchicalContent:

@@ -10,7 +10,7 @@ import requests
 
 from logseq_cli.config import ConfigError, config_search_paths, get, load_config
 from logseq_cli.group import cli, resolve_version
-from logseq_cli.helpers import normalize_heading
+from logseq_cli.headings import normalize_heading
 from logseq_cli.output import fail, handle_connection_error, output
 
 

@@ -235,7 +235,7 @@ class TestInjectionPerCaller:
     """One test per rewritten call site, checking the built query."""
 
     def test_find_block_content(self):
-        from logseq_cli.helpers import find_blocks_by_content
+        from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
         find_blocks_by_content(rec, INJECTION)
         q = rec.queries[0]
@@ -245,7 +245,7 @@ class TestInjectionPerCaller:
         assert q.count('"') % 2 == 0
 
     def test_find_block_content_backslash_bypass(self):
-        from logseq_cli.helpers import find_blocks_by_content
+        from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
         find_blocks_by_content(rec, BACKSLASH_BYPASS)
         q = rec.queries[0]
@@ -254,7 +254,7 @@ class TestInjectionPerCaller:
         assert edn_string(BACKSLASH_BYPASS) in q
 
     def test_find_block_page_scoped(self):
-        from logseq_cli.helpers import find_blocks_by_content
+        from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
         find_blocks_by_content(rec, "text", page='Sei"te [?x :block/name ?y]')
         q = rec.queries[0]
@@ -262,7 +262,7 @@ class TestInjectionPerCaller:
         assert page_name_literal('Sei"te [?x :block/name ?y]') in q
 
     def test_find_block_regex_page_scoped(self):
-        from logseq_cli.helpers import find_blocks_by_content
+        from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
         find_blocks_by_content(rec, ".*", page='Sei"te', use_regex=True)
         assert page_name_literal('Sei"te') in rec.queries[0]

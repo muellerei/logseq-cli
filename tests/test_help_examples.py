@@ -19,8 +19,8 @@ import shlex
 import click
 import pytest
 
+from logseq_cli.blockprops import normalize_property_key
 from logseq_cli.cli import cli
-from logseq_cli.helpers import normalize_property_key
 
 # Commands whose --key is a key they write. remove-property takes any key, so
 # that one stored before the rule existed can still be removed, and

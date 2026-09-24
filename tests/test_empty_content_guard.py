@@ -21,7 +21,7 @@ import click
 
 from tests.conftest import split_runner, fake_api
 from logseq_cli.cli import cli
-from logseq_cli.helpers import require_content
+from logseq_cli.cliinput import require_content
 
 
 BLOCK = "abcdef12-3456-7890-abcd-ef1234567890"
