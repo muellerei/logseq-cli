@@ -113,13 +113,12 @@ BODY_UUID = "00000000-0000-4000-8000-0000000000f2"
 
 
 class TestGetPropertiesFallback:
-    """Page properties may live on the first block, not on the page object.
+    """Page properties may sit in the first block, not on the page object.
 
-    Logseq exposes properties written via set-property on the page's first
-    block (the property block) while page_data["properties"] stays empty.
+    Before #80, set-property wrote into the first block without Logseq taking
+    the lines as the page's, and page_data["properties"] stayed empty.
     Reading only the page object made get-properties report "No properties"
-    for pages whose properties were perfectly intact on disk — which in turn
-    made set-property look like it had silently failed.
+    for them, which made set-property look like it had silently failed.
     """
 
     def test_falls_back_to_first_block(self, api):
@@ -151,6 +150,30 @@ class TestGetPropertiesFallback:
         payload = json.loads(result.stdout)
         assert payload["properties"] == {"type": "Project"}
         api.get_page_blocks_tree.assert_not_called()
+
+    def test_the_first_blocks_own_built_in_keys_are_not_the_pages(self, api):
+        """A first block that is a heading with an ``id::`` carries ``heading``
+        and ``id`` of its own, which Logseq hides from view. Reported as the
+        page's they were wrong on 754 of 918 pages of a real graph (#82)."""
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
+        api.get_page_blocks_tree.return_value = [
+            {"uuid": FIRST_UUID,
+             "content": f"## Heading #card\nid:: {FIRST_UUID}\ncollapsed:: true\ncard-repeats:: 1",
+             "properties": {"heading": 2, "id": FIRST_UUID, "collapsed": True, "card-repeats": 1}}]
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["properties"] == {} and payload["text_values"] == {}
+        text = CliRunner().invoke(cli, ["get-properties", "--name", "X"])
+        assert "No properties" in text.output
+
+    def test_a_user_key_next_to_them_is_still_shown(self, api):
+        api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
+        api.get_page_blocks_tree.return_value = [
+            {"uuid": FIRST_UUID, "content": f"type:: Person\nid:: {FIRST_UUID}",
+             "properties": {"type": "Person", "id": FIRST_UUID}}]
+        result = CliRunner().invoke(cli, ["get-properties", "--name", "X", "--json"])
+        assert json.loads(result.stdout)["properties"] == {"type": "Person"}
 
     def test_genuinely_empty_page_reports_none(self, api):
         api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}

@@ -133,23 +133,33 @@ class TestDryRunSeesAKeyThatIsSet:
         assert payload["value"] == "x"
 
 
+def _page_level_api():
+    """Page A carrying the properties itself, as its property block makes it."""
+    api = _api()
+    api.get_page.return_value = {"uuid": PAGE, "name": "page a",
+                                 "originalName": "Page A", "properties": CAMEL}
+    api.datascript_query.side_effect = lambda query: (
+        [[{"properties": STORED, "properties-text-values": TEXTS}]] if PAGE in query else [[None]])
+    return api
+
+
 class TestGetPropertiesListsStoredKeys:
     def test_listing_uses_stored_keys(self):
-        r = _run(["get-properties", "--name", "Page A", "--json"], _api())
+        r = _run(["get-properties", "--name", "Page A", "--json"], _page_level_api())
         payload = json.loads(r.stdout)
         assert payload["properties"] == STORED
         assert payload["text_values"] == TEXTS
 
-    def test_page_level_properties_use_stored_keys_too(self):
-        # the page object itself carries camel-cased keys when the page has them
-        api = _api()
-        api.get_page.return_value = {"uuid": PAGE, "name": "page a",
-                                     "originalName": "Page A", "properties": CAMEL}
+    def test_the_first_block_fallback_uses_stored_keys_too(self):
+        """Without the block's own created-at, a key Logseq keeps for the
+        block itself (#82)."""
+        r = _run(["get-properties", "--name", "Page A", "--json"], _api())
+        payload = json.loads(r.stdout)
+        assert payload["properties"] == {k: v for k, v in STORED.items() if k != "created-at"}
 
-        def pull(query):
-            return [[{"properties": STORED, "properties-text-values": TEXTS}]] \
-                if PAGE in query else [[None]]
-        api.datascript_query.side_effect = pull
+    def test_page_level_properties_need_no_block_read(self):
+        # the page object itself carries camel-cased keys when the page has them
+        api = _page_level_api()
         r = _run(["get-properties", "--name", "Page A", "--json"], api)
         assert json.loads(r.stdout)["properties"] == STORED
         api.get_page_blocks_tree.assert_not_called()
@@ -161,7 +171,7 @@ class TestGetPropertiesListsStoredKeys:
 
     def test_single_property_by_stored_key(self):
         r = _run(["get-properties", "--name", "Page A", "--property", "created-at",
-                  "--json"], _api())
+                  "--json"], _page_level_api())
         payload = json.loads(r.stdout)
         assert payload["property"] == "created-at"
         assert payload["text"] == "x"

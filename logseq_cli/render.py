@@ -107,6 +107,18 @@ def blocks_to_markdown(blocks, indent=0, page_start=True):
             lines.append(blocks_to_markdown(children, indent + 1))
     return "\n".join(lines)
 
+def hanging(text: str, prefix: str, deeper: int = 0) -> str:
+    """``text`` after ``prefix``, its further lines under its first (#77).
+
+    At column 0 a reader cannot tell which entry of a listing a line belongs
+    to, and a property line there reads like part of the listing. Where
+    entries follow one another at the same column, the further lines go
+    ``deeper``, or where one entry ends is lost.
+    """
+    first, *rest = text.split("\n")
+    pad = " " * (len(prefix) + deeper)
+    return "\n".join([prefix + first, *(pad + line for line in rest)])
+
 def blocks_with_ids(blocks, indent=0, first_line=False):
     """Render block tree as ``<uuid>\\t<indent-tabs>\\t<content>`` lines.
 

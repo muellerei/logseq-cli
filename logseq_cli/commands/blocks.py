@@ -4,6 +4,7 @@ import click
 
 from logseq_cli.group import cli
 from logseq_cli.helpers import find_blocks_by_content, process_blocks
+from logseq_cli.render import hanging
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
@@ -197,7 +198,7 @@ def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, wi
                 if with_children:
                     # full content, not a preview: truncating the head of a
                     # subtree would defeat the point of asking for its children
-                    click.echo(f"  content: {block.get('content') or ''}")
+                    click.echo(hanging(block.get("content") or "", "  content: "))
                     children = block.get("children") or []
                     if children:
                         click.echo(process_blocks(children, indent=2))
