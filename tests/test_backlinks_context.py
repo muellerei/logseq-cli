@@ -54,6 +54,16 @@ class TestWithContext:
         assert result.exit_code == 0, result.output
         assert "met [[Alice]] at noon" in result.output
 
+    def test_further_lines_of_a_block_sit_deeper_than_its_first(self):
+        """At column 0 a property line of the block reads like part of the
+        listing (#77); at the blocks' own column, where one block ends and
+        the next begins would be lost."""
+        api = _api({"Alice": [("Journal", ["met [[Alice]] at noon\nwhere:: office",
+                                           "saw [[Alice]] again"])]})
+        result = _run(["get-backlinks", "--name", "Alice", "--with-context"], api)
+        assert ("       met [[Alice]] at noon\n         where:: office\n"
+                "       saw [[Alice]] again\n") in result.output
+
     def test_block_uuid_is_included(self):
         """So a caller can act on the block, not just read it."""
         api = _api({"Alice": [("Journal", ["met [[Alice]]"])]})
