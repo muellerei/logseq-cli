@@ -12,7 +12,6 @@ found" or "ambiguous selector" would report a write that could never succeed.
 import ast
 import functools
 import importlib
-import inspect
 import json
 import pathlib
 from unittest.mock import MagicMock, patch
@@ -638,20 +637,24 @@ class TestEveryWriteHasADryRun:
     @classmethod
     @functools.lru_cache(maxsize=None)
     def _writing_helpers(cls):
-        """Functions in helpers.py and the command modules that write, directly
-        or through each other.
+        """Functions in any module of the package that write, directly or
+        through each other.
 
         A command may write only through a helper: since #31 every
         ``--keep-ids`` write of insert-block goes through one, and a scan for
         ``api.<call>(`` in the command body alone lost the command. Derived
         from the source to a fixed point, so a new writing helper counts
         without being listed.
+
+        Every module is read, found on disk rather than listed, so a writer
+        still counts after it moves to another module. A command module's own
+        helpers count as well: set-property writes through one since #80.
         """
-        # A command module's own helpers count too: set-property writes
-        # through one since #80.
-        from logseq_cli.cli import cli as root
-        modules = {"logseq_cli.helpers"} | {
-            inspect.unwrap(c.callback).__module__ for c in root.commands.values()}
+        import logseq_cli
+        package = pathlib.Path(logseq_cli.__file__).parent
+        modules = {
+            ".".join(("logseq_cli",) + path.relative_to(package).with_suffix("").parts)
+            for path in package.rglob("*.py") if path.name != "__init__.py"}
         functions = {}
         for module in sorted(modules):
             functions.update(cls._module_functions(module))
