@@ -111,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `set-block-property` reported a property on a block id that does not
+  exist as updated, with exit 0, and wrote nothing. Logseq answers the write
+  with `null` whether it landed or not (measured against a live graph, for
+  both cases), so the write path could not tell; only `--dry-run` read the
+  block first. Both paths read it now and fail with `reason:
+  "block_not_found"`. One more read per call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `replace-text --json` exited 0 when a replacement did not reach the graph:
   the blocks are read back to check, and a miss only showed as a `failed`
   field in the output. Without `--json` the same case already exited

@@ -297,16 +297,14 @@ from one that was there.
 
 On the in-place writes the preview shows the state that would be replaced —
 the old marker, the property value about to be overwritten, or (for
-`rename-page`) the pages whose `[[links]]` would be rewritten. One of them
-catches a mistake the live path cannot see at all: `set-block-property
---dry-run` fails on an unknown UUID. Every check of the input still applies
-under `--dry-run`, and `add-block-ref` refuses a source uuid no block has
-either way. The previews of `delete-page` and `rename-page` fail on a missing
-page as the real call would, and `delete-page` also on incoming block refs.
-`create-page --dry-run` on a page that exists does not: it reports
-`would_create: false` and exits 0, since a preview that failed would look like
-one that could not run. The confirmation is not checked either: `delete-page
---dry-run` works without `--force`.
+`rename-page`) the pages whose `[[links]]` would be rewritten. Every check of
+the input still applies under `--dry-run`: `set-block-property` and
+`add-block-ref` refuse a uuid no block has either way. The previews of
+`delete-page` and `rename-page` fail on a missing page as the real call would,
+and `delete-page` also on incoming block refs. `create-page --dry-run` on a
+page that exists does not: it reports `would_create: false` and exits 0, since
+a preview that failed would look like one that could not run. The confirmation
+is not checked either: `delete-page --dry-run` works without `--force`.
 
 ```bash
 # Preview first
