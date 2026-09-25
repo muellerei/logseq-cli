@@ -398,8 +398,8 @@ LOGSEQ_CLI_CACHE_TTL=120 logseq-cli get-journal-range --from ... --to ...
 # 7. Parallel pool for get-journal-range (5 workers default)
 LOGSEQ_CLI_RANGE_WORKERS=10 logseq-cli get-journal-range \
   --from 2026-01-01 --to 2026-04-30 --resolve-refs
-# Order is stable (sorted by date). Per-day errors embed an `error` field
-# and the range continues.
+# Order is stable (sorted by date). Per-day errors embed an `error` field;
+# the other days are still printed, and the call then fails, naming the days.
 ```
 
 ## Bounded output
