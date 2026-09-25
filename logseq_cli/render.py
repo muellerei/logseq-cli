@@ -14,12 +14,10 @@ them, and a helper three modules import is not private to any of them.
 """
 import re
 
-from logseq_cli.blocktext import PROPERTY_LINE_RE
+from logseq_cli.blocktext import BLOCK_REF_RE, PROPERTY_LINE_RE
 from logseq_cli.headings import normalize_heading
 from logseq_cli.outlinetext import bullet_lines
 
-
-BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 
 def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
     """Resolve one block UUID to its content text; the UUID unchanged if the block is gone.
