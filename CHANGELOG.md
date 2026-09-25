@@ -111,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `replace-text --json` exited 0 when a replacement did not reach the graph:
+  the blocks are read back to check, and a miss only showed as a `failed`
+  field in the output. Without `--json` the same case already exited
+  non-zero. Both modes now print their report and then fail, under `--json`
+  with an error object carrying `reason: "write_not_verified"` and the
+  `failed` ids.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `get-todos --help` said `--due-from/--due-to` exclude repeating tasks
   because Logseq stores only their first occurrence, and the comment above
   the due filter said the same. Both described an earlier design: a
