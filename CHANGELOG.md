@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-25
+
 ### Added
 
 - An Agent Skill, `skills/logseq-cli/SKILL.md`, for an agent that has not met
