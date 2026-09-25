@@ -165,12 +165,14 @@ class TestTheRefusalIsMachineReadable:
     @pytest.mark.parametrize("command,param",
                              [(n, p) for n, p in _bounded_options()],
                              ids=lambda v: v if isinstance(v, str) else v.name)
-    def test_the_refusal_exits_one_not_two(self, command, param):
+    def test_the_refusal_goes_through_fail(self, command, param):
+        # The exit code is the trace of the channel here, not a promise to a
+        # caller (ADR 0004): fail() exits 1, Click's BadParameter exits 2.
         flag = param.opts[0]
         result, _ = _run([command, flag, "-1"] + REQUIRED_ARGS.get(command, []))
         assert result.exit_code == 1, (
-            f"{command} {flag} -1 exited {result.exit_code}; a rejected value is "
-            "an error the command reports, not a usage failure"
+            f"{command} {flag} -1 exited {result.exit_code}; the value was "
+            "rejected by Click rather than reported through fail()"
         )
 
     @pytest.mark.parametrize("command,param",

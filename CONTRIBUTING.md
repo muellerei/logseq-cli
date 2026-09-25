@@ -133,7 +133,7 @@ logseq-cli/
 - **Named parameters only.** No positional arguments. Every parameter uses `--flag value`.
 - **Locale-independent.** Weekday/month names are always English, regardless of system locale.
 - **Env var fallbacks.** User-configurable defaults via environment variables, not hardcoded values.
-- **Graceful degradation.** Connection errors print a clear message and exit with code 1.
+- **Graceful degradation.** Connection errors print a clear message and exit non-zero.
 - **A numeric option validates its lower bound, before the first read.** Below
   zero nothing here has a meaning, and an accepted nonsense value does not fail
   loudly — it slices from the wrong end or moves a cutoff into the future and
@@ -152,10 +152,18 @@ logseq-cli/
   parse. This applies to what a command checks itself; the shared parsers
   still raise `BadParameter` (dates in `dates.py`; tree JSON, `--content-file`
   and an empty `--content` in `cliinput.py`; and in `ids.py` the check that
-  text is left besides its `id::` lines), so an unparseable `--from` exits 2
-  while a reversed range exits 1, and the
-  either/or of `--content` and `--content-file` raises `UsageError`. That is a
-  known inconsistency, not a pattern to copy.
+  text is left besides its `id::` lines), and the either/or of `--content`
+  and `--content-file` raises `UsageError`. Those errors come as a usage dump
+  rather than a JSON object; that is a known gap in form, not a pattern to
+  copy.
+- **An error does not choose its exit code.** A command exits 0 when it did
+  what it says and non-zero when it did not; the number carries no meaning
+  (see "Exit status: done or not done" in the README, and ADR 0004). So
+  `fail()` is called with its default, never with `exit_code=`. The two
+  places that set 2 predate the rule and stay, because changing them would
+  change behaviour for nothing; `tests/test_exit_status_rule.py` keeps them
+  the only ones. And `0` is never a lie: a call that did not do what it says
+  exits non-zero, even when some of its output was already printed.
 - **German + English.** `smart-query` keywords support both languages.
 - **References name symbols, not line numbers.** A comment pointing at
   `helpers.py:855` outlived its meaning within two commits; the function name

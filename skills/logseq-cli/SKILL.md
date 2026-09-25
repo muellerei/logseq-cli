@@ -30,7 +30,7 @@ running, the tool cannot work, and AGENTS.md says how to use the files.
 ## First: `logseq-cli doctor`
 
 Run it before anything else. It checks Python, the port, the token, the API
-and the graph kind, and on failure names the step that is missing (exit 1),
+and the graph kind, and on failure names the step that is missing (non-zero exit),
 for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
 
 ## Habits that prevent damage
@@ -50,9 +50,11 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
   their UUIDs, `get-page --heading "## X"` returns one section, and
   `get-page --max-chars N` cuts the output to size and names how to go on.
   `find-block --limit N` caps what is printed.
-- **Trust the exit status**: 0 is success, 1 a failure, 2 input the tool
-  refused. With `--json`, stdout holds only data; errors go to stderr,
-  mostly as a JSON object, some as a plain `Error:` line.
+- **Trust the exit status**: 0 means the call did what it says, anything
+  else means it did not, and the error says why. Read the error, not the
+  number: 1 and 2 carry no meaning. With `--json`, stdout holds only data;
+  errors go to stderr, mostly as a JSON object, some as a plain `Error:`
+  line.
 
 ## Everything else
 

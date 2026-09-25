@@ -64,6 +64,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The documentation promised three different things about exit codes, and
+  the code kept none of them. The README said there was deliberately no
+  second exit code; AGENTS.md and the agent skill said 1 meant a failure and
+  2 a refused call, and told agents to rely on that; in the code most refused
+  calls exited 1 and a few exited 2. All of them now say what the code keeps:
+  0 means the call did what it says, non-zero means it did not, the error
+  says why, and the number itself carries no meaning. No exit code changed.
+  AGENTS.md also promised that a `--dry-run` exiting 0 means the real call
+  would succeed; `create-page --dry-run` on an existing page reports
+  `would_create: false` with exit 0, and a preview needs no `--force`, so it
+  now says that instead. A test checks that no document or help text gives
+  1 or 2 a meaning again and that no new error sets its code by hand. Three
+  exit codes derived from the kind of error were worked out and deferred,
+  because nothing in use showed a caller needing them; ADR 0004 records why
+  and when to revisit.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `helpers.py` is gone. 97 of its 101 functions and constants now live in
   eight new modules named for what they decide: `dates`, `headings`,
   `outlinetext`, `ids`, `cliinput`, `blockprops`, `strictinsert` and

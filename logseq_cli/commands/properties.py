@@ -254,7 +254,7 @@ Note:
   Properties go into the page's property block, the lines above its first
   block; a page without one gets one, before its first block. Logseq reads the
   page's properties from there, so query-pages-by-property finds them at
-  once. The page is read back, and a write it does not show exits 1.
+  once. The page is read back, and a write it does not show fails.
   "title" is refused: saved there, it renames the page, past every check
   rename-page makes. Use rename-page. "collapsed" is refused too: Logseq
   reads it as the block's folded state, never as the page's.
