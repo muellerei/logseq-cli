@@ -353,11 +353,13 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
                 mark = "  !! not written" if r["id"] in failed else ""
                 click.echo(f"  {r['id'][:8]}..  {old_preview}{mark}")
                 click.echo(f"         →  {new_preview}")
-            if failed:
-                fail(f"{len(failed)} of {len(replacements)} replacement(s) did not "
-                     "reach the graph. Logseq reports no error for this, so the "
-                     "blocks were read back to check.", as_json=as_json,
-                     failed=failed)
+    # After the report, in both modes: the payload says which blocks changed,
+    # and a caller who stops at the exit status must not read 0 as done.
+    if failed:
+        fail(f"{len(failed)} of {len(replacements)} replacement(s) did not "
+             "reach the graph. Logseq reports no error for this, so the "
+             "blocks were read back to check.", as_json=as_json,
+             reason="write_not_verified", failed=failed)
 
 @cli.command("insert-block", epilog="""\b
 Examples:
