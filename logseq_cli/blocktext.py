@@ -164,6 +164,31 @@ def without_block_ids(content: str) -> str:
     return "\n".join(line for line, value in id_lines(content) if not value)
 
 
+# A Block Ref is what Logseq gives the target an Id Line for (#95), measured
+# against 0.10.15: ((uuid)) in text, in an embed, in [label](((uuid))) and as a
+# property value, in capitals too. Inside a code block or inline code it is
+# code and the target gets nothing. Inline code is taken as a run of backticks
+# up to the next run of the same length; where that reads a span differently
+# from Logseq, the error is a ref counted too many, and storing a real block's
+# id is what Logseq does on every copied ref. BLOCK_REF_RE is the one pattern
+# for a ref, which the reads that resolve and count refs use too; the code rule
+# is block_ref_uuids' alone, so those reads still take a ref in code for one.
+BLOCK_REF_RE = re.compile(
+    r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)', re.IGNORECASE)
+_INLINE_CODE_RE = re.compile(r'(`+)(?:(?!\1).)+?\1')
+
+
+def block_ref_uuids(content: str) -> list:
+    """The uuids of the Block Refs in one block's ``content``, lower-cased,
+    each once, in order; none from code."""
+    lines = (content or "").split("\n")
+    inside, _ = code_block_lines(lines)
+    return list(dict.fromkeys(
+        uuid.lower()
+        for line, is_code in zip(lines, inside) if not (is_code or is_fence(line))
+        for uuid in BLOCK_REF_RE.findall(_INLINE_CODE_RE.sub("", line))))
+
+
 def refuse_id_lines(content: str, *, own: str = None, replacing: str = None,
                     where: str = "The text") -> None:
     """Refuse ``content`` if it carries an ``id::`` line, other than one naming
@@ -355,6 +380,13 @@ def refuse_split_tree(tree: list, *, command: str, label: str = "The block",
     for content, where in _labelled_blocks(tree, label):
         refuse_split_block(content, command=command,
                            where=single_label if alone else where)
+
+
+def tree_texts(tree: list):
+    """The content of every node in ``tree``, DFS pre-order."""
+    for block in tree:
+        yield block.get("content", "")
+        yield from tree_texts(block.get("children") or [])
 
 
 def _labelled_blocks(tree: list, label: str):
