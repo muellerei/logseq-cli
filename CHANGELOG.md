@@ -111,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `analyze-graph`, `find-knowledge-gaps`, `analyze-journal-patterns` and
+  `suggest-connections` counted a page they could not read as empty, so a
+  connection that dropped halfway through a scan gave wrong numbers with
+  exit 0. Reading every page of a real graph raised nothing, so such an
+  error means the connection: it now reaches the caller instead of a wrong
+  number.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `add-journal-block` with several `--content` values under a heading it
   could not find or create wrote the blocks at the top of the page, as the
   single-value path does, but reported `position: "under '<heading>'"` and
