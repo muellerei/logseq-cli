@@ -111,6 +111,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-page --heading` with a heading the page does not have printed a
+  warning and then "(empty page)" with exit 0: asked for one section and
+  got none, which is not an empty page. It now fails, names the page (under
+  `--json` in `heading_not_found`), and still prints the other pages of a
+  batch first; in text mode the page reads "(no heading '...')".
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - Example scripts hid failures. `backup-graph.sh` ended each page in
   `|| true` with stderr discarded, so a page that failed left an empty file
   and the backup was reported done; it now names the page, leaves no file
