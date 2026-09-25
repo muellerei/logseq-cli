@@ -667,6 +667,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             return
 
         heading_uuid = find_or_create_heading(api, page_name, under_heading) if under_heading else None
+        if under_heading and not heading_uuid:
+            click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
         uuids = []
         for kind, payload in planned:
             if kind == "tree":
@@ -690,7 +692,14 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         if any_hierarchical:
             click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
 
-        position = f"under '{under_heading}'" if under_heading else "top-level"
+        # From where the blocks went, not from what was asked: the heading may
+        # not exist, and the blocks then went to the page (#93).
+        if heading_uuid:
+            position = f"under '{under_heading}'"
+        elif under_heading:
+            position = "top-level (heading not found)"
+        else:
+            position = "top-level"
         if as_json:
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)
         else:

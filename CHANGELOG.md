@@ -111,6 +111,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `add-journal-block` with several `--content` values under a heading it
+  could not find or create wrote the blocks at the top of the page, as the
+  single-value path does, but reported `position: "under '<heading>'"` and
+  gave no warning. It now warns and reports `top-level (heading not
+  found)`, like the single-value path.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `get-page --heading` with a heading the page does not have printed a
   warning and then "(empty page)" with exit 0: asked for one section and
   got none, which is not an empty page. It now fails, names the page (under
