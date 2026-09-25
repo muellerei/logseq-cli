@@ -373,6 +373,13 @@ block that already exists (that block keeps its uuid and, as with
 `update-block`, its properties), and with
 `--no-preserve`, which joins the lines and turns `id::` into plain text.
 
+A write whose text holds a `((uuid))` also gives the block it points at an
+`id::` line, if it has none yet, as Logseq's editor does when a ref is copied.
+So the target's file changes too, and `get-block --json` shows `id` in its
+`properties`. Left to Logseq, the line lands in column 0 and outside its
+database, and the next property write on the target drops it (#95). A ref in
+a code block or inline code is code and changes nothing.
+
 ### 6. Connection Errors
 
 If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. In this case, fall back to direct filesystem access:
