@@ -161,6 +161,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     api = ctx.obj["api"]
     missing = []
     no_heading = []
+    unread_backlinks = {}
     dead_refs = []
 
     # Before any read: a refused call should cost nothing and say why.
@@ -211,11 +212,12 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
         if no_backlinks or heading or outline:
             backlinks = []
         else:
-            try:
-                refs = api.get_page_linked_references(page_name)
-                backlinks = extract_backlink_names(refs)
-            except Exception:
-                backlinks = find_backlinks(api, page_name)
+            # The page itself was read; its backlinks are the extra. If they
+            # cannot be read, the content is still printed and the call fails
+            # after it, as get-backlinks does (#93).
+            backlinks, error = _backlinks(api, page_name)
+            if error:
+                unread_backlinks[name] = error
         if heading and name not in missing:
             blocks = extract_section(blocks, heading) if blocks else []
             if not blocks:
@@ -237,6 +239,8 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     for result in results:
         if result["page"] in missing:
             result["exists"] = False
+        if result["page"] in unread_backlinks:
+            result["backlinks_error"] = unread_backlinks[result["page"]]
 
     def _dead_in(result):
         return [u for u in dead_refs
@@ -279,7 +283,9 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             else:
                 out.append(f"=== {p} ===\n\n")
                 out.append((process_blocks(blocks) if blocks else placeholder) + "\n")
-                if backlinks:
+                if p in unread_backlinks:
+                    out.append(f"\nBacklinks: could not be read ({unread_backlinks[p]})\n")
+                elif backlinks:
                     out.append(f"\nBacklinks ({len(backlinks)}):\n")
                     for bl in backlinks:
                         out.append(f"  <- {bl}\n")
@@ -322,7 +328,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     # page that does exist first, so one typo does not cost the whole result.
     # The payload already went to stdout; the error goes to stderr only.
     # One error object for both, so stderr stays one JSON document.
-    if missing or ambiguous or no_heading:
+    if missing or ambiguous or no_heading or unread_backlinks:
         summary, lines, fields = [], [], {}
         if missing:
             summary.append("Page(s) not found")
@@ -336,6 +342,10 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             summary.append(f"Heading '{heading}' not found in: {', '.join(no_heading)}")
             lines.append(summary[-1])
             fields["heading_not_found"] = no_heading
+        if unread_backlinks:
+            summary.append(f"Could not read the backlinks of: {', '.join(unread_backlinks)}")
+            lines.append(summary[-1])
+            fields["backlinks_unread"] = sorted(unread_backlinks)
         if as_json:
             fail(". ".join(summary), True, **fields)
         for line in lines:
@@ -383,6 +393,31 @@ def search_pages(ctx, query, as_json):
             for p in sorted(matches, key=lambda x: (x.get("name") or "").lower()):
                 click.echo(f"  {p.get('originalName') or p.get('name', '')}")
 
+def _backlinks(api, page_name, extract=extract_backlink_names, note=None):
+    """Logseq's backlink request, and a scan of every page when it fails.
+
+    Returns ``(backlinks, error)``. If the scan fails as well, ``error`` names
+    why and ``backlinks`` is empty; that empty list used to be the answer,
+    "no backlinks" with exit 0 for a page never read (#93). The callers print
+    what they have and fail after it, naming the page. A timeout is not
+    caught: Logseq is hanging, and the next page would wait just as long.
+    """
+    try:
+        refs = api.get_page_linked_references(page_name)
+        return (extract(refs) if refs else []), None
+    except requests.Timeout:
+        raise
+    except Exception as e:
+        if note:
+            note(f"Warning: Native backlinks request failed ({e}), trying brute-force...")
+        try:
+            return find_backlinks(api, page_name), None
+        except requests.Timeout:
+            raise
+        except Exception as scan_error:
+            return [], f"{type(scan_error).__name__}: {scan_error}"
+
+
 @cli.command("get-backlinks", epilog="""\b
 Examples:
   logseq-cli --token TOKEN get-backlinks --name "Alice"
@@ -401,23 +436,25 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
     if limit < 0:
         fail("--limit must be 0 or greater (0 keeps all).", as_json)
 
-    def _fetch_one(page_name):
-        try:
-            refs = api.get_page_linked_references(page_name)
-            if not refs:
-                return []
-            if with_context:
-                return _extract_backlink_context(refs, limit)
-            return extract_backlink_names(refs)
-        except (ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            click.echo("Native backlinks API unavailable, using brute-force scan...", err=True)
-            return find_backlinks(api, page_name)
-        except Exception as e:
-            click.echo(f"Warning: Native backlinks API returned unexpected format ({e}), trying brute-force...", err=True)
-            try:
-                return find_backlinks(api, page_name)
-            except Exception:
-                return []
+    unreadable = {}
+
+    def _note(message):
+        # Not under --json: a line in front of a later error object would
+        # break the one JSON document stderr is meant to hold.
+        if not as_json:
+            click.echo(message, err=True)
+
+    def _extract(refs):
+        if with_context:
+            return _extract_backlink_context(refs, limit)
+        return extract_backlink_names(refs)
+
+    def _fetch_one(ref):
+        backlinks, error = _backlinks(api, ref.page, _extract, note=_note)
+        if error:
+            # Keyed by the name asked for, which is what results carry.
+            unreadable[ref.requested] = error
+        return backlinks
 
     # Logseq merges an alias group's references, but asked for the alias it
     # also lists the page itself, by its alias:: line (measured); asked for
@@ -425,8 +462,11 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
     # as get-page does, so the other names still answer.
     refs, ambiguous = follow_pages(api, page, as_json)
     results = [{"page": name, "ambiguous": ambiguous[name]} if ref is None else
-               {**ref.fields(), "backlinks": (bl := _fetch_one(ref.page)), "count": len(bl)}
+               {**ref.fields(), "backlinks": (bl := _fetch_one(ref)), "count": len(bl)}
                for name, ref in zip(page, refs)]
+    for result in results:
+        if result["page"] in unreadable:
+            result["backlinks_error"] = unreadable[result["page"]]
 
     if as_json:
         output(results if len(results) > 1 else results[0], True)
@@ -436,6 +476,8 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
             if p in ambiguous:
                 click.echo(f"'{p}': an alias of more than one page: "
                            f"{', '.join(ambiguous[p])}")
+            elif p in unreadable:
+                click.echo(f"!! could not read the backlinks of '{p}': {unreadable[p]}")
             elif not backlinks:
                 click.echo(f"No backlinks found for '{p}'.")
             else:
@@ -451,8 +493,17 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
                         click.echo(f"  <- {bl}")
             if len(results) > 1:
                 click.echo()
-    if ambiguous:
-        fail(ambiguous_message(ambiguous), as_json, ambiguous=ambiguous)
+    # One failure for both causes, so neither message is lost behind the other.
+    if unreadable or ambiguous:
+        messages, fields = [], {}
+        if unreadable:
+            messages.append(f"Could not read the backlinks of {len(unreadable)} page(s): "
+                            f"{', '.join(unreadable)}.")
+            fields.update(reason="partial_read", backlinks_unread=sorted(unreadable))
+        if ambiguous:
+            messages.append(ambiguous_message(ambiguous))
+            fields["ambiguous"] = ambiguous
+        fail(" ".join(messages), as_json, **fields)
 
 @cli.command("create-page", epilog="""\b
 Example:
@@ -906,12 +957,13 @@ def get_page_stats(ctx, page, as_json):
 
     block_count, word_count, outbound_links, _ = _collect(blocks)
 
-    # Inbound links via native API
-    try:
-        refs = api.get_page_linked_references(page)
-        inbound = extract_backlink_names(refs)
-    except Exception:
-        inbound = []
+    # Inbound links as get-page reads them. A count is the whole answer here,
+    # so a failure to read them fails the call; it used to become
+    # inbound_count 0 with exit 0, also on a dropped connection (#93).
+    inbound, error = _backlinks(api, page)
+    if error:
+        fail(f"Could not read the backlinks of '{page}': {error}", as_json,
+             reason="partial_read", backlinks_unread=[page])
 
     stats = {
         **ref.fields(),

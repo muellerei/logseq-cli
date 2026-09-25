@@ -111,6 +111,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A page's backlinks that could not be read came back as none, with exit 0.
+  `get-backlinks` printed "No backlinks found" when Logseq's backlink request
+  and the fallback scan both failed, `get-page-stats` reported
+  `inbound_count: 0`, and the scan skipped pages it could not read.
+  `get-backlinks` now names the page, answers the other pages and fails
+  after them; `get-page` prints the page, marks its backlinks
+  (`backlinks_error`) and fails after the output; `get-page-stats` fails.
+  All three name the pages in `backlinks_unread`. A timeout ends the call at
+  once instead of being waited for again on every further page.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - Two errors that now reach the caller more often ended as a traceback: a
   read timeout and an answer that is not JSON. They end with reasons
   `timeout` and `bad_response`. `get-page --resolve-refs` called a ref dead

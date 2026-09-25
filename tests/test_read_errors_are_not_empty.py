@@ -20,6 +20,7 @@ import requests
 
 from logseq_cli.api import BadResponseError
 from logseq_cli.cli import cli
+from logseq_cli.lookup import find_backlinks
 from tests.conftest import split_runner
 
 
@@ -54,6 +55,21 @@ def _run(api, *args):
         return split_runner().invoke(cli, [*args, "--json"])
 
 
+def test_the_fallback_scan_does_not_skip_a_page_it_could_not_read():
+    api = _api("Beta")
+    with pytest.raises(requests.ConnectionError):
+        find_backlinks(api, "Alpha")
+
+
+def test_get_page_stats_does_not_report_zero_inbound_links_after_an_error():
+    api = _api("Beta")
+    api.get_page_linked_references.side_effect = RuntimeError("HTTP 500")
+    result = _run(api, "get-page-stats", "--page", "Alpha")
+    assert result.exit_code != 0
+    assert '"inbound_count"' not in result.stdout
+    assert json.loads(result.stderr)["backlinks_unread"] == ["Alpha"]
+
+
 @pytest.mark.parametrize("command", [
     ["analyze-graph"],
     ["find-knowledge-gaps"],
@@ -69,6 +85,19 @@ def test_journal_patterns_do_not_count_an_unreadable_day_as_empty():
     result = _run(_api(JOURNAL), "analyze-journal-patterns", "--timeframe", "last 7 days")
     assert result.exit_code != 0, result.stdout
     assert json.loads(result.stderr)["reason"] == "connection_refused"
+
+
+def test_get_page_prints_the_content_when_only_the_backlinks_fail():
+    """The page was read; its backlinks are the extra. Both ways of reading
+    them failing must not cost the content, nor pass as "no backlinks"."""
+    api = _api("Beta")
+    api.get_page_linked_references.side_effect = RuntimeError("HTTP 500")
+    result = _run(api, "get-page", "--page", "Alpha")
+    assert result.exit_code != 0
+    page = json.loads(result.stdout)
+    assert page["blocks"][0]["content"] == "see [[Alpha]] #topic"
+    assert "backlinks_error" in page
+    assert json.loads(result.stderr)["backlinks_unread"] == ["Alpha"]
 
 
 @pytest.mark.parametrize("error,reason", [
