@@ -51,6 +51,16 @@ _MUTATING_METHODS = frozenset({
 })
 
 
+class BadResponseError(RuntimeError):
+    """Logseq answered with something that is not JSON.
+
+    A RuntimeError as before, so nothing that caught one changes; its own type
+    lets the error handler report it like a transport failure rather than as a
+    traceback, now that read errors reach the caller instead of being counted
+    as an empty page (#93).
+    """
+
+
 class DatalogQueryError(RuntimeError):
     """A datalog query was rejected by Logseq instead of being executed.
 
@@ -176,7 +186,7 @@ class LogseqAPI:
         try:
             data = resp.json()
         except requests.exceptions.JSONDecodeError:
-            raise RuntimeError(f"Logseq API returned non-JSON response: {resp.text[:200]}")
+            raise BadResponseError(f"Logseq API returned non-JSON response: {resp.text[:200]}")
 
         if cacheable and key is not None:
             # Error payloads must not outlive their cause: a cached

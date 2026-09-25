@@ -111,6 +111,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Two errors that now reach the caller more often ended as a traceback: a
+  read timeout and an answer that is not JSON. They end with reasons
+  `timeout` and `bad_response`. `get-page --resolve-refs` called a ref dead
+  when looking up its block failed; only a lookup that answers null means
+  that now, and a failed one fails the call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - A failed read was taken for absence. The journal writers and
   `add-note-content` asked whether the page exists and read any error as
   "no", then created the page, which may well have been there; `get-properties`
