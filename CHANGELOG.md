@@ -111,6 +111,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get-journal-range` caught the error of each day into an `error` field
+  and exited 0, even when the connection dropped halfway through the range.
+  It still prints every day, and then fails with `reason: "partial_read"`
+  and the days it could not read, also when `--max-chars` cut those days
+  from the output.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `set-block-property` reported a property on a block id that does not
   exist as updated, with exit 0, and wrote nothing. Logseq answers the write
   with `null` whether it landed or not (measured against a live graph, for

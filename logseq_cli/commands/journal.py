@@ -159,7 +159,8 @@ Notes:
   --max-chars it needs.
   Parallel pool (default 5 workers, 1-16 via LOGSEQ_CLI_RANGE_WORKERS).
   Always pass --resolve-refs if downstream parses ((uuid)) refs.
-  Per-day errors embed as {error: "..."} per entry; range continues.
+  Per-day errors embed as {error: "..."} per entry; the other days are still
+  printed, and the call then fails, naming the days it could not read.
 """)
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
@@ -269,6 +270,10 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
                 entries.append(future.result())
 
     entries.sort(key=lambda e: e["date"])
+    # Counted before --max-chars can cut a failed day from view: the read did
+    # not complete either way.
+    unread = [e["date"] for e in entries if e.get("error")]
+    fetched = len(entries)
 
     # Never truncate silently: a shortened result must not read as the full range.
     if omitted > 0:
@@ -330,6 +335,13 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
             )
 
     click.echo(_render(entries), nl=False)
+
+    # A range with holes is not the range asked for. The days that were read
+    # stay on stdout; exit 0 here read as a complete result (#93).
+    if unread:
+        fail(f"{len(unread)} of {fetched} journal day(s) could not be read: "
+             f"{', '.join(unread)}.", as_json,
+             reason="partial_read", days=unread)
 
 @cli.command("add-journal-entry", epilog="""\b
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
