@@ -13,7 +13,7 @@ import re
 
 import click
 
-from logseq_cli.blocktext import block_id_property, id_lines, without_block_ids
+from logseq_cli.blocktext import block_id_property, id_lines, tree_texts, without_block_ids
 
 
 # Logseq stores block ids as RFC 4122 UUIDs. A value that is not one cannot
@@ -154,13 +154,6 @@ def without_foreign_block_ids(content: str, own: str) -> tuple:
         "moves a block with its uuid.")
 
 
-def _tree_texts(tree: list):
-    """The content of every node in ``tree``, DFS pre-order."""
-    for block in tree:
-        yield block.get("content", "")
-        yield from _tree_texts(block.get("children") or [])
-
-
 def check_block_ids(api, tree: list, keep_ids: bool):
     """Apply the ``id::`` contract to ``tree`` before any of it is written.
 
@@ -184,7 +177,7 @@ def check_block_ids(api, tree: list, keep_ids: bool):
         # empty block, or with --upsert-heading an emptied one, is no success
         # (#67). One empty block among others stays: a copied block that held
         # only its id was empty.
-        if not any(without_block_ids(t).strip() for t in _tree_texts(tree)):
+        if not any(without_block_ids(t).strip() for t in tree_texts(tree)):
             raise BlockIdError(NOTHING_BESIDES_IDS, "dropped_ids", ids)
         return dropped_ids_note(len(ids))
     several = blocks_with_several_ids(tree)

@@ -9,11 +9,13 @@ import requests
 # (#56). The commands check first, for their own way out in the message; this
 # is the net no write path can go around.
 from logseq_cli.blocktext import (
+    block_ref_uuids,
     refuse_id_lines,
     refuse_id_lines_tree,
     refuse_split_block,
     refuse_split_property,
     refuse_split_tree,
+    tree_texts,
 )
 
 
@@ -48,6 +50,7 @@ _MUTATING_METHODS = frozenset({
     "logseq.Editor.removeBlockProperty",
     "logseq.Editor.insertBatchBlock",
     "logseq.Editor.moveBlock",
+    "logseq.Editor.setBlocksId",
 })
 
 
@@ -240,6 +243,7 @@ class LogseqAPI:
         # instead (#31).
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
+        self._store_ref_target_ids([content])
         args = [page_name, content]
         if options:
             args.append(options)
@@ -248,6 +252,7 @@ class LogseqAPI:
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
+        self._store_ref_target_ids([content])
         return self.call(
             "logseq.Editor.insertBlock", [block_uuid, content, options or {}]
         )
@@ -273,6 +278,7 @@ class LogseqAPI:
         # should arrive: one that does was decided on by no command.
         if not (options or {}).get("keepUUID"):
             refuse_id_lines_tree(batch)
+        self._store_ref_target_ids(tree_texts(batch))
         return self.call(
             "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}]
         )
@@ -313,10 +319,47 @@ class LogseqAPI:
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
+        # Properties carried along are written again, a ref among them too.
+        self._store_ref_target_ids([content, *map(str, (properties or {}).values())],
+                                   own=block_uuid)
         args = [block_uuid, content]
         if properties:
             args.append({"properties": properties})
         return self.call("logseq.Editor.updateBlock", args)
+
+    def _store_ref_target_ids(self, contents: list, own: str = None) -> None:
+        """Store the id of every Block Ref target in ``contents`` that has
+        none yet, before the text holding the refs is written (#95).
+
+        Logseq's editor does this when a ref is copied (``set-blocks-id!``,
+        exported as ``setBlocksId``). Without it Logseq adds the Id Line to the
+        target itself, in column 0 and outside the database, and the next
+        property write on the target drops it from the file (measured,
+        0.10.15). A page uuid, a dead ref and a target that has its id are
+        left alone, as is ``own``: the block being written replaces its text.
+
+        Before the write, not after: then Logseq adds no column-0 line at all
+        (measured), and updateBlock and insertBatchBlock answer null either
+        way, so "after it landed" cannot be told. A write that then fails
+        leaves the target with its id, as a copied ref in the editor does.
+        """
+        wanted = []
+        for uuid in dict.fromkeys(u for c in contents for u in block_ref_uuids(c)):
+            if uuid == (own or "").lower():
+                continue
+            block = self.get_block(uuid, include_children=False)
+            if block and block.get("page") and not (block.get("properties") or {}).get("id"):
+                wanted.append(block["uuid"])
+        if wanted:
+            self.set_blocks_id(wanted)
+
+    def set_blocks_id(self, block_uuids: list):
+        """Store each block's uuid as its ``id`` property, as Logseq's editor
+        does for a copied ref. Not in the plugin API's declarations, but
+        exported (``logseq.api/set_blocks_id``, 0.10.15); it skips a uuid no
+        block has and a page's property block, and leaves a stored id as it
+        is, file untouched (measured)."""
+        return self.call("logseq.Editor.setBlocksId", [block_uuids])
 
     def remove_block(self, block_uuid: str):
         return self.call("logseq.Editor.removeBlock", [block_uuid])
@@ -328,6 +371,7 @@ class LogseqAPI:
     def upsert_block_property(self, block_uuid: str, key: str, value):
         """Set or update a property on a block."""
         refuse_split_property(key, value)
+        self._store_ref_target_ids([str(value)], own=block_uuid)
         return self.call("logseq.Editor.upsertBlockProperty", [block_uuid, key, value])
 
     def remove_block_property(self, block_uuid: str, key: str):
