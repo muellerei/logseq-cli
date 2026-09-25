@@ -111,6 +111,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Example scripts hid failures. `backup-graph.sh` ended each page in
+  `|| true` with stderr discarded, so a page that failed left an empty file
+  and the backup was reported done; it now names the page, leaves no file
+  and exits non-zero. `export-all-pages.sh` counted such empty files as
+  exported and now does the same. Both wrote two pages whose names sanitize
+  alike (`a/b`, `a_b`) to one file, the second overwriting the first; the
+  second is now reported as not exported. `daily-todos.sh` never listed a
+  task, because it read the result rows as blocks, and said "No results or
+  Logseq not running" for any failure; it lists them now, and with
+  `pipefail` a failed query says so and exits non-zero.
+  `top-pages-pipeline.sh` was headed "Top 10 Pages by Reference Count" but
+  lists the first 20 pages by name; the heading now says so.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `delete-page`, asked interactively and answered with "n", printed
   `Aborted.` and exited 0, though nothing was deleted. It now fails with
   `reason: "declined"`. Scripts are not affected: without a terminal the
