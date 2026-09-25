@@ -328,11 +328,14 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # landed, complete with a before/after diff computed locally. Read the
     # blocks back and compare. See the note above require_insert() in strictinsert.py
     # for when this read can be dropped.
+    # Compared without id:: lines: a ref another replacement wrote may have
+    # stored this block's id meanwhile, and Logseq keeps it through the update
+    # (#95, measured). A replacement never changes an id:: line (masked above).
     failed = []
     if replacements and not dry_run:
         for r in replacements:
             after = api.get_block(r["id"], include_children=False) or {}
-            if after.get("content") != r["new"]:
+            if without_block_ids(after.get("content") or "") != without_block_ids(r["new"]):
                 failed.append(r["id"])
 
     if as_json:

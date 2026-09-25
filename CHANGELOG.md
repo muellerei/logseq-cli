@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A `((uuid))` written by any command now gives the block it points at an
+  `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
+  Logseq, the target got the line in column 0 and not in its database
+  (`get-block --json` showed `properties: {}`), and a later
+  `set-block-property` on the target dropped it from the file; parsed again
+  without it, the block would get a new uuid and the ref would point at
+  nothing (not measured: that needs a re-index). The CLI now stores the id the
+  way the editor does before it writes the ref; measured on 0.10.15 for
+  `update-block`, `insert-block` (`--content`, `--tree`), `add-note-content`,
+  `add-block-ref` and a ref as a `set-block-property` value. A ref in a code
+  block or in inline code is no ref to Logseq and changes nothing, a target
+  that has its id is not written again, and a dead ref stays as written.
+  Measured along the way, and so no longer feared: when Logseq reads such a
+  file again, it takes a column-0 `id::` line as the block's id.
+
 ## [0.15.0] - 2026-09-25
 
 ### Added
