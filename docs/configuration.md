@@ -13,7 +13,7 @@ code cannot guess them:
 - the words and tags `analyze-journal-patterns` looks for.
 
 The first four have no defaults: a command that needs one and does not find it
-says so and exits 1. The last has English defaults that work out of the box and
+says so and exits non-zero. The last has English defaults that work out of the box and
 silently find nothing in a journal written in another language, which is why it
 is worth setting.
 
@@ -46,7 +46,7 @@ is not valid TOML raises an error instead — you meant to configure something,
 so failing quietly would hide the mistake.
 
 Errors from this layer come back like every other CLI error: a message on
-stderr, exit 1, and with `--json` a `"reason": "config_error"` so a script can
+stderr, a non-zero exit, and with `--json` a `"reason": "config_error"` so a script can
 tell a broken setting apart from a broken connection.
 
 If `LOGSEQ_CLI_CONFIG` is set but the file it names is gone — deleted, renamed,
@@ -132,7 +132,7 @@ projects_namespace = "projects/"
 
 Used by `smart-query --request "projects"` only.
 
-**Without it:** that one query reports the missing setting and exits 1:
+**Without it:** that one query reports the missing setting and exits non-zero:
 
 ```
 smart-query --request 'projects' needs 'projects_namespace' under [graph] in your config.
@@ -160,7 +160,7 @@ Used by `smart-query --request "persons"` only. Both are required — the
 property name alone does not identify a person page.
 
 **Without them:** same as above, the query names the missing setting and exits
-1. Nothing else changes.
+non-zero. Nothing else changes.
 
 ### `[analysis]`
 
@@ -223,7 +223,7 @@ single call, `--top-level` ignores both.
 ### I have no project pages in a namespace
 
 Leave `projects_namespace` out. The consequence is scoped to one query:
-`smart-query --request "projects"` prints the message shown above and exits 1.
+`smart-query --request "projects"` prints the message shown above and exits non-zero.
 
 It fails rather than returning nothing on purpose. A guessed prefix would
 produce an empty result that looks exactly like a graph without projects, and
@@ -389,8 +389,8 @@ needs it:
 logseq-cli --token "TOKEN" smart-query --request "projects"
 ```
 
-Exit 0 with results means the namespace matches. Exit 1 with a message naming
-`projects_namespace` means the setting is missing. Exit 0 with no results means
+Exit 0 with results means the namespace matches. A non-zero exit with a message
+naming `projects_namespace` means the setting is missing. Exit 0 with no results means
 the setting is there but the prefix matches no page — check the spelling
 against the namespace listing above.
 

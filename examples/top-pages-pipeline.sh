@@ -1,11 +1,14 @@
 #!/bin/bash
-# Pipeline: Top 10 most referenced pages
+# Pipeline: the first 20 pages by name, and graph statistics
 # Usage: ./top-pages-pipeline.sh
 
-echo "=== Top 10 Pages by Reference Count ==="
+set -eo pipefail
+
+echo "=== First 20 Pages by Name (journals excluded) ==="
+# Limited in jq rather than with `head`: head closing the pipe early would
+# end jq with SIGPIPE, which pipefail reports as a failure.
 logseq-cli get-all-pages --json | \
-    jq -r '[.[] | select(.["journal?"] != true)] | sort_by(.name) | .[].name' | \
-    head -20
+    jq -r '[.[] | select(.["journal?"] != true)] | sort_by(.name) | .[:20][].name'
 
 echo ""
 echo "=== Graph Statistics ==="

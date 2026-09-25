@@ -127,10 +127,7 @@ def analyze_graph(ctx, days, as_json):
             updated_str = datetime.datetime.fromtimestamp(updated_at / 1000).strftime('%Y-%m-%d %H:%M')
             recently_updated.append({"page": name, "updated": updated_str, "updated_at": updated_at})
 
-        try:
-            content = get_page_content(api, name)
-        except Exception:
-            content = ""
+        content = get_page_content(api, name)
 
         # count TODOs
         todos = todo_pattern.findall(content)
@@ -281,10 +278,7 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
     # Pass 1: collect all references and content lengths
     for page in pages:
         name = page.get("originalName") or page.get("name", "")
-        try:
-            content = get_page_content(api, name)
-        except Exception:
-            content = ""
+        content = get_page_content(api, name)
         page_content_lengths[name.lower()] = len(content)
         links = link_pattern.findall(content)
         for link in links:
@@ -460,10 +454,7 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
             continue
 
         page_name = page.get("originalName") or page.get("name", "")
-        try:
-            content = get_page_content(api, page_name)
-        except Exception:
-            content = ""
+        content = get_page_content(api, page_name)
 
         date_str = format_journal_date(d)
         month_key = d.strftime("%Y-%m")
@@ -698,10 +689,7 @@ def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus,
         if page.get("journalDay") or page.get("journal-day") or page.get("journal?"):
             continue
         name = page.get("originalName") or page.get("name", "")
-        try:
-            content = get_page_content(api, name)
-        except Exception:
-            content = ""
+        content = get_page_content(api, name)
 
         topics_found = set(extract_topics(content))
         # Also add the page name itself as a topic

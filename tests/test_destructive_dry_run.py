@@ -148,6 +148,18 @@ class TestDeletePageGate:
         assert "--force" in payload["error"]
         _assert_no_mutation(api)
 
+    def test_declining_the_prompt_is_not_a_success(self, api, monkeypatch):
+        # "Aborted." with exit 0 read as done, though nothing was deleted (#93).
+        api.get_page.return_value = {"name": "X"}
+        api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "a"}]
+        # CliRunner swaps sys.stdin for its own wrapper during invoke; make
+        # that wrapper a terminal, the one case that prompts.
+        monkeypatch.setattr("click.testing._NamedTextIOWrapper.isatty", lambda self: True, raising=False)
+        result = split_runner().invoke(cli, ["delete-page", "--name", "X", "--json"], input="n\n")
+        assert result.exit_code != 0
+        assert json.loads(result.stderr[result.stderr.index("{"):])["reason"] == "declined"
+        _assert_no_mutation(api)
+
     def test_force_deletes_without_prompt(self, api):
         api.get_page.return_value = {"name": "X"}
         api.get_page_blocks_tree.return_value = [{"uuid": "00000000-0000-4000-8000-0000000000b1", "content": "a"}]

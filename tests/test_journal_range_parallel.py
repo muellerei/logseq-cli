@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 def _make_journal_pages(dates):
@@ -74,7 +75,7 @@ class TestJournalRangeParallel:
         assert len(data) == 1
         assert data[0]["date"] == "2026-04-20"
 
-    def test_failing_day_does_not_abort_range(self):
+    def test_failing_day_does_not_abort_range_but_fails_the_call(self):
         dates = [f"2026-04-{d:02d}" for d in range(20, 23)]
         api = MagicMock()
         api.get_all_pages.return_value = _make_journal_pages(dates)
@@ -87,7 +88,7 @@ class TestJournalRangeParallel:
 
         api.get_page_blocks_tree.side_effect = maybe_fail
 
-        runner = CliRunner()
+        runner = split_runner()
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = runner.invoke(cli, [
                 "get-journal-range",
@@ -95,14 +96,41 @@ class TestJournalRangeParallel:
                 "--to", "2026-04-22",
                 "--json",
             ])
-        assert result.exit_code == 0, result.output
-        data = _json.loads(result.output)
+        # The other days are still printed, but a range with a hole is not
+        # the range asked for, so the call fails after them (#93).
+        assert result.exit_code != 0
+        assert _json.loads(result.stderr) == {
+            "error": "1 of 3 journal day(s) could not be read: 2026-04-21.",
+            "reason": "partial_read", "days": ["2026-04-21"]}
+        data = _json.loads(result.stdout)
         # We must still see all 3 dates in the output
         out_dates = [e["date"] for e in data]
         assert out_dates == dates
         # The failed day must be marked as error
         bad = [e for e in data if e["date"] == "2026-04-21"][0]
         assert bad.get("error") is not None
+
+    def test_a_failed_day_cut_by_max_chars_still_fails_the_call(self):
+        """--max-chars may hide the failed day; the read still did not complete."""
+        dates = [f"2026-04-{d:02d}" for d in range(20, 23)]
+        api = MagicMock()
+        api.get_all_pages.return_value = _make_journal_pages(dates)
+        api.get_page_linked_references.return_value = []
+
+        def maybe_fail(page_name):
+            if page_name == "2026-04-22":
+                raise RuntimeError("simulated error")
+            return [{"content": "x" * 200, "uuid": f"u-{page_name}", "children": []}]
+
+        api.get_page_blocks_tree.side_effect = maybe_fail
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            result = split_runner().invoke(cli, [
+                "get-journal-range", "--from", "2026-04-20", "--to", "2026-04-22",
+                "--max-chars", "300", "--json"])
+        assert result.exit_code != 0
+        error = _json.loads(result.stderr[result.stderr.rindex('{\n  "error"'):])
+        assert error["days"] == ["2026-04-22"]
+        assert error["error"].startswith("1 of 3 journal day(s)")
 
     def test_workers_env_respected(self, monkeypatch):
         """LOGSEQ_CLI_RANGE_WORKERS=1 forces sequential execution."""

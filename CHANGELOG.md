@@ -64,6 +64,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The documentation promised three different things about exit codes, and
+  the code kept none of them. The README said there was deliberately no
+  second exit code; AGENTS.md and the agent skill said 1 meant a failure and
+  2 a refused call, and told agents to rely on that; in the code most refused
+  calls exited 1 and a few exited 2. All of them now say what the code keeps:
+  0 means the call did what it says, non-zero means it did not, the error
+  says why, and the number itself carries no meaning. No exit code changed.
+  AGENTS.md also promised that a `--dry-run` exiting 0 means the real call
+  would succeed; `create-page --dry-run` on an existing page reports
+  `would_create: false` with exit 0, and a preview needs no `--force`, so it
+  now says that instead. A test checks that no document or help text gives
+  1 or 2 a meaning again and that no new error sets its code by hand. Three
+  exit codes derived from the kind of error were worked out and deferred,
+  because nothing in use showed a caller needing them; ADR 0004 records why
+  and when to revisit.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `helpers.py` is gone. 97 of its 101 functions and constants now live in
   eight new modules named for what they decide: `dates`, `headings`,
   `outlinetext`, `ids`, `cliinput`, `blockprops`, `strictinsert` and
@@ -95,6 +111,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A page's backlinks that could not be read came back as none, with exit 0.
+  `get-backlinks` printed "No backlinks found" when Logseq's backlink request
+  and the fallback scan both failed, `get-page-stats` reported
+  `inbound_count: 0`, and the scan skipped pages it could not read.
+  `get-backlinks` now names the page, answers the other pages and fails
+  after them; `get-page` prints the page, marks its backlinks
+  (`backlinks_error`) and fails after the output; `get-page-stats` fails.
+  All three name the pages in `backlinks_unread`. A timeout ends the call at
+  once instead of being waited for again on every further page.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- Two errors that now reach the caller more often ended as a traceback: a
+  read timeout and an answer that is not JSON. They end with reasons
+  `timeout` and `bad_response`. `get-page --resolve-refs` called a ref dead
+  when looking up its block failed; only a lookup that answers null means
+  that now, and a failed one fails the call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- A failed read was taken for absence. The journal writers and
+  `add-note-content` asked whether the page exists and read any error as
+  "no", then created the page, which may well have been there; `get-properties`
+  read an error on the page's first block as "no properties", exit 0. Logseq
+  answers null for a page that does not exist, so an error there is a failed
+  read, and it now fails the call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `analyze-graph`, `find-knowledge-gaps`, `analyze-journal-patterns` and
+  `suggest-connections` counted a page they could not read as empty, so a
+  connection that dropped halfway through a scan gave wrong numbers with
+  exit 0. Reading every page of a real graph raised nothing, so such an
+  error means the connection: it now reaches the caller instead of a wrong
+  number.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `add-journal-block` with several `--content` values under a heading it
+  could not find or create wrote the blocks at the top of the page, as the
+  single-value path does, but reported `position: "under '<heading>'"` and
+  gave no warning. It now warns and reports `top-level (heading not
+  found)`, like the single-value path.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `get-page --heading` with a heading the page does not have printed a
+  warning and then "(empty page)" with exit 0: asked for one section and
+  got none, which is not an empty page. It now fails, names the page (under
+  `--json` in `heading_not_found`), and still prints the other pages of a
+  batch first; in text mode the page reads "(no heading '...')".
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- Example scripts hid failures. `backup-graph.sh` ended each page in
+  `|| true` with stderr discarded, so a page that failed left an empty file
+  and the backup was reported done; it now names the page, leaves no file
+  and exits non-zero. `export-all-pages.sh` counted such empty files as
+  exported and now does the same. Both wrote two pages whose names sanitize
+  alike (`a/b`, `a_b`) to one file, the second overwriting the first; the
+  second is now reported as not exported. `daily-todos.sh` never listed a
+  task, because it read the result rows as blocks, and said "No results or
+  Logseq not running" for any failure; it lists them now, and with
+  `pipefail` a failed query says so and exits non-zero.
+  `top-pages-pipeline.sh` was headed "Top 10 Pages by Reference Count" but
+  lists the first 20 pages by name; the heading now says so.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `delete-page`, asked interactively and answered with "n", printed
+  `Aborted.` and exited 0, though nothing was deleted. It now fails with
+  `reason: "declined"`. Scripts are not affected: without a terminal the
+  command never asks and requires `--force`.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `get-journal-range` caught the error of each day into an `error` field
+  and exited 0, even when the connection dropped halfway through the range.
+  It still prints every day, and then fails with `reason: "partial_read"`
+  and the days it could not read, also when `--max-chars` cut those days
+  from the output.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `set-block-property` reported a property on a block id that does not
+  exist as updated, with exit 0, and wrote nothing. Logseq answers the write
+  with `null` whether it landed or not (measured against a live graph, for
+  both cases), so the write path could not tell; only `--dry-run` read the
+  block first. Both paths read it now and fail with `reason:
+  "block_not_found"`. One more read per call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
+- `replace-text --json` exited 0 when a replacement did not reach the graph:
+  the blocks are read back to check, and a miss only showed as a `failed`
+  field in the output. Without `--json` the same case already exited
+  non-zero. Both modes now print their report and then fail, under `--json`
+  with an error object carrying `reason: "write_not_verified"` and the
+  `failed` ids.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `get-todos --help` said `--due-from/--due-to` exclude repeating tasks
   because Logseq stores only their first occurrence, and the comment above
   the due filter said the same. Both described an earlier design: a

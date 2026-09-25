@@ -260,17 +260,26 @@ class TestSetBlockPropertyDryRun:
         assert payload["existed"] is True
         _assert_no_mutation(api)
 
-    def test_without_dry_run_writes_without_reading_first(self, api):
+    def test_without_dry_run_reads_the_block_then_writes(self, api):
+        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000b1"}
         result = CliRunner().invoke(cli, ["set-block-property", "--id", "00000000-0000-4000-8000-0000000000b1",
                                           "--key", "prio", "--value", "3"])
         assert result.exit_code == 0
         api.upsert_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "prio", 3)
-        # The extra read exists only for the preview; the write path is unchanged.
-        api.get_block.assert_not_called()
+        api.get_block.assert_called_once()
+
+    def test_missing_block_fails_without_dry_run(self, api):
+        # upsert answers null whether it wrote or not, and writes nothing for a
+        # uuid no block has (measured), so the live path used to report a
+        # typo'd UUID as updated with exit 0 (#93). It reads first now.
+        api.get_block.return_value = None
+        result = split_runner().invoke(cli, ["set-block-property", "--id", "nope",
+                                             "--key", "prio", "--value", "3", "--json"])
+        assert result.exit_code != 0
+        assert json.loads(result.stderr)["reason"] == "block_not_found"
+        _assert_no_mutation(api)
 
     def test_missing_block_fails_under_dry_run(self, api):
-        # The live path cannot notice a typo'd UUID (upsert answers the same
-        # either way); the preview reads the block and does.
         api.get_block.return_value = None
         result = split_runner().invoke(cli, ["set-block-property", "--id", "nope",
                                              "--key", "prio", "--value", "3",
