@@ -38,14 +38,13 @@ def find_backlinks(api, page_name: str) -> list:
         name = page.get("originalName") or page.get("name", "")
         if name.lower() == page_name.lower():
             continue
-        try:
-            content = get_page_content(api, name)
-            if not content:
-                continue
-            if pattern.search(content):
-                backlink_pages.append(name)
-        except Exception:
-            continue
+        # Not caught: a page that could not be read was skipped, so the list
+        # came back short without a word (#93). Reading every page of a real
+        # graph raised nothing (measured 2026-09-25), so an error
+        # here means the connection, and the caller hears of it.
+        content = get_page_content(api, name)
+        if content and pattern.search(content):
+            backlink_pages.append(name)
     return sorted(backlink_pages)
 
 

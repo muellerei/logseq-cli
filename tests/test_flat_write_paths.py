@@ -11,11 +11,13 @@ success or aborted depending on whether the content happened to carry a tab:
 Every command guarded here writes into the journal or the block-ref network, so a
 silent miss means a log entry or a TODO link that looks present and is not.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 def _dead_api():
@@ -169,6 +171,19 @@ class TestReplaceTextVerifiesByReading:
                 "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 1
         assert "did not reach the graph" in r.output
+
+    def test_write_that_did_not_land_fails_under_json_too(self):
+        """--json exited 0 here, with the miss only in a `failed` field (#93)."""
+        api = self._api("old here")
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, [
+                "replace-text", "--page", "P", "--find", "old", "--replace", "new",
+                "--json"])
+        assert r.exit_code != 0
+        assert json.loads(r.stdout)["failed"] == ["b1"]
+        error = json.loads(r.stderr)
+        assert error["reason"] == "write_not_verified"
+        assert error["failed"] == ["b1"]
 
     def test_write_that_landed_is_counted(self):
         api = self._api("new here")

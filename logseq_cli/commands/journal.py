@@ -159,7 +159,8 @@ Notes:
   --max-chars it needs.
   Parallel pool (default 5 workers, 1-16 via LOGSEQ_CLI_RANGE_WORKERS).
   Always pass --resolve-refs if downstream parses ((uuid)) refs.
-  Per-day errors embed as {error: "..."} per entry; range continues.
+  Per-day errors embed as {error: "..."} per entry; the other days are still
+  printed, and the call then fails, naming the days it could not read.
 """)
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
@@ -269,6 +270,10 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
                 entries.append(future.result())
 
     entries.sort(key=lambda e: e["date"])
+    # Counted before --max-chars can cut a failed day from view: the read did
+    # not complete either way.
+    unread = [e["date"] for e in entries if e.get("error")]
+    fetched = len(entries)
 
     # Never truncate silently: a shortened result must not read as the full range.
     if omitted > 0:
@@ -331,6 +336,13 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
 
     click.echo(_render(entries), nl=False)
 
+    # A range with holes is not the range asked for. The days that were read
+    # stay on stdout; exit 0 here read as a complete result (#93).
+    if unread:
+        fail(f"{len(unread)} of {fetched} journal day(s) could not be read: "
+             f"{', '.join(unread)}.", as_json,
+             reason="partial_read", days=unread)
+
 @cli.command("add-journal-entry", epilog="""\b
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
 --under-heading / --upsert-heading.
@@ -364,10 +376,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     page_name = format_journal_date(d, date_fmt)
 
     # Ensure journal page exists with journal property
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     content = strip_title_heading(content, page_name)
     # The blocks as they are written: checked to come back as one each (#47),
     # counted for the preview and written, from this one list.
@@ -613,10 +622,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
-        try:
-            existing = api.get_page(page_name)
-        except Exception:
-            existing = None
+        existing = api.get_page(page_name)
         # Creating the journal page is a write, so it waits for the dry-run
         # check below: a preview that brings a page into existence is not a
         # preview. The flag is reported instead, because "the page does not
@@ -655,6 +661,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             return
 
         heading_uuid = find_or_create_heading(api, page_name, under_heading) if under_heading else None
+        if under_heading and not heading_uuid:
+            click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
         uuids = []
         for kind, payload in planned:
             if kind == "tree":
@@ -678,7 +686,14 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         if any_hierarchical:
             click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
 
-        position = f"under '{under_heading}'" if under_heading else "top-level"
+        # From where the blocks went, not from what was asked: the heading may
+        # not exist, and the blocks then went to the page (#93).
+        if heading_uuid:
+            position = f"under '{under_heading}'"
+        elif under_heading:
+            position = "top-level (heading not found)"
+        else:
+            position = "top-level"
         if as_json:
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)
         else:
@@ -691,10 +706,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # Ensure journal page exists with journal property. Deferred when only
     # previewing: a dry run must not bring the page into existence.
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     would_create_page = not existing
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
@@ -934,10 +946,7 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
         content = outline_text(tree)  # what the preview shows
 
     # Ensure journal page exists with journal property
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
 

@@ -10,7 +10,7 @@ import sys
 import click
 import requests
 
-from logseq_cli.api import DatalogQueryError
+from logseq_cli.api import BadResponseError, DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.blocktext import IdLineError, SplitBlockError
@@ -46,6 +46,21 @@ def handle_connection_error(func):
                 "Is Logseq running with the HTTP API enabled?",
                 as_json=as_json,
                 reason="connection_refused",
+            )
+        except requests.Timeout:
+            # A read that took longer than the request timeout. It used to be
+            # a traceback, and a rare one, while scans swallowed read errors;
+            # they reach the caller now (#93), so it gets a reason like the rest.
+            fail(
+                "Logseq did not answer in time.",
+                as_json=as_json,
+                reason="timeout",
+            )
+        except BadResponseError as e:
+            fail(
+                str(e),
+                as_json=as_json,
+                reason="bad_response",
             )
         except requests.HTTPError as e:
             status = e.response.status_code

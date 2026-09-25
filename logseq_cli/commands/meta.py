@@ -292,7 +292,7 @@ Examples:
   logseq-cli --token TOKEN doctor
   logseq-cli --token TOKEN doctor --json
 Note:
-  Read-only. Exit 0 = ready to read and write, 1 = something is wrong.
+  Read-only. Exits 0 when ready to read and write, non-zero otherwise.
   Distinguishes "Logseq not running" from "running but HTTP API off" and
   from "API up but token rejected" - each needs a different fix.
 """)
