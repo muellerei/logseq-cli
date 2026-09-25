@@ -495,15 +495,18 @@ def set_block_property(ctx, block_id, key, value, dry_run, as_json):
     # Sent as typed unless it is a number that prints back the same (#35)
     value = coerce_property_value(value)
 
+    # Read before writing, on both paths. upsertBlockProperty answers null
+    # whether the property landed or not, and on a uuid no block has it writes
+    # nothing (measured against a live graph), so without this read a mistyped
+    # UUID was reported as "updated" with exit 0 (#93).
+    block = api.get_block(block_id, include_children=False)
+    if not block:
+        fail(f"Block not found: {block_id}", as_json=as_json,
+             reason="block_not_found", id=block_id)
+
     if dry_run:
-        # The write path sets the property blind — upsert needs no prior read.
-        # The preview does need one: without it there is no old value to show,
-        # and it also turns a mistyped UUID into an error instead of a silent
-        # no-op. Two extra reads, only on this path: the block, then its
+        # The preview also shows the old value: one more read, for the
         # properties under their stored keys (see stored_properties).
-        block = api.get_block(block_id, include_children=False)
-        if not block:
-            fail(f"Block not found: {block_id}", as_json=as_json, id=block_id)
         existing, _texts = stored_properties(api, block.get("uuid") or block_id)
         had = key in existing
         old_value = existing.get(key)
