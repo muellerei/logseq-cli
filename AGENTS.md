@@ -8,10 +8,12 @@ What makes it scriptable:
 
 - `--json` on **every** command; payload goes to stdout, nothing else does
 - errors go to **stderr**, so stdout can be parsed unconditionally; under
-  `--json` mostly as a JSON object, some (a refused option, a write Logseq
-  dropped) as a plain `Error:` line
-- non-zero exit on failure, including "not found": 1 for a failure, 2 for
-  input the tool refused. The exit status is the signal to rely on
+  `--json` mostly as a JSON object, some (errors from the command line
+  itself, some input checks, and a write Logseq did not take) as a plain
+  `Error:` line
+- exit 0 when the call did what it says, non-zero when it did not, including
+  "not found"; the error says why. The number itself carries no meaning, so
+  do not branch on 1 versus 2
 - `--dry-run` on every command that writes, showing the state it would replace
 
 This file is the reference for an agent that has chosen the tool. The one
@@ -44,7 +46,7 @@ carries — see [docs/configuration.md](docs/configuration.md).
 Requires Python 3.10 or newer. `click`, `requests` and (on 3.10 only) `tomli`
 are installed with the package; nothing else is needed at runtime.
 Both also surface on any other command as `{"error": ..., "reason":
-"connection_refused" | "http_error"}` on stderr with exit 1.
+"connection_refused" | "http_error"}` on stderr, with a non-zero exit.
 
 If Logseq is not running, fall back to direct filesystem access on the graph's markdown files.
 
@@ -138,7 +140,7 @@ logseq-cli smart-query --advanced --request '[:find (pull ?b [*]) :where [?b :bl
 # Find backlinks
 logseq-cli get-backlinks --name "Page Name"
 
-# The uuid of the one block to write to; exits 1 on no match and on several
+# The uuid of the one block to write to; fails on no match and on several
 # (--first would pick one of several without a word on stdout)
 U=$(logseq-cli find-block --content "tag support" --page "Project Alpha" --exactly-one --uuid-only)
 ```
@@ -189,7 +191,7 @@ logseq-cli get-properties --name "Page"
 logseq-cli get-properties --name "Page" --property status
 
 # Set property. Keys are stored as Logseq reads them back: "Status" becomes
-# "status" (noted on stderr); a key Logseq would drop is refused, exit 1, and
+# "status" (noted on stderr); a key Logseq would drop is refused, and
 # so are "id" and "custom-id", which Logseq reads as the block's uuid, and
 # "title", which would rename the page (use rename-page), and "collapsed",
 # which Logseq reads as the block's folded state.
@@ -262,7 +264,7 @@ also `copy-block`, `replace-text` and the heading of `--under-heading`. Inside
 a closed code block these lines are fine. Indent sub-bullets to write children,
 or pass `--content` several times (`add-journal-block`) for blocks side by
 side. `--json` gives `{"reason": "splits_into_blocks", "line": N, "kind": ...}`
-with exit code 2.
+and a non-zero exit.
 
 A property value (`set-property`, `set-block-property`, `--property`) is one
 line: Logseq writes it into the block as `key:: value`, so a line break in it
@@ -297,9 +299,14 @@ On the in-place writes the preview shows the state that would be replaced —
 the old marker, the property value about to be overwritten, or (for
 `rename-page`) the pages whose `[[links]]` would be rewritten. One of them
 catches a mistake the live path cannot see at all: `set-block-property
---dry-run` fails on an unknown UUID. Every validation still applies under
-`--dry-run`, so a preview that exits 0 means the real call would too;
-`add-block-ref` refuses a source uuid no block has either way.
+--dry-run` fails on an unknown UUID. Every check of the input still applies
+under `--dry-run`, and `add-block-ref` refuses a source uuid no block has
+either way. The previews of `delete-page` and `rename-page` fail on a missing
+page as the real call would, and `delete-page` also on incoming block refs.
+`create-page --dry-run` on a page that exists does not: it reports
+`would_create: false` and exits 0, since a preview that failed would look like
+one that could not run. The confirmation is not checked either: `delete-page
+--dry-run` works without `--force`.
 
 ```bash
 # Preview first
@@ -346,7 +353,7 @@ a line naming another uuid is dropped with a note, since it would become this
 block's uuid. `copy-block` drops the source's lines without a word: the copy
 gets uuids of its own, and refs stay with the original. `replace-text` refuses
 a replacement that turns a line into an `id::` line, before any block is
-written (`--json`: `{"reason": "id_line", "line": N}`, exit code 2). A value
+written (`--json`: `{"reason": "id_line", "line": N}`, non-zero exit). A value
 with spaces in it (`id:: a b c`) counts as well: Logseq takes it as the uuid.
 An `id::` line inside a code block (between two lines that start with
 ```` ``` ```` or `~~~`) is code, as it is to Logseq, and is written as is. Pass
@@ -370,7 +377,7 @@ block that already exists (that block keeps its uuid and, as with
 
 ### 6. Connection Errors
 
-If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit with code 1. In this case, fall back to direct filesystem access:
+If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. In this case, fall back to direct filesystem access:
 
 - Journals: `journals/YYYY_MM_DD.md`
 - Pages: `pages/Page Name.md`
@@ -385,10 +392,10 @@ page used, so match results by `page` and use `alias_of` where you need the
 page's own name. `get-todos --page` is a substring filter and matches the
 text as given.
 
-- An alias two pages claim: exit 1, `reason: "ambiguous_alias"`, with the
+- An alias two pages claim: refused, `reason: "ambiguous_alias"`, with the
   candidates in `ambiguous`. In a batch `get-page` or `get-backlinks` it is
   reported per name, like a missing page.
-- `delete-page` and `rename-page` refuse an alias (`reason: "alias"`, exit 1)
+- `delete-page` and `rename-page` refuse an alias (`reason: "alias"`)
   and name the page: use its own name.
 
 ## Environment Variables

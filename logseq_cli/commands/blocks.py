@@ -90,7 +90,7 @@ Note:
 @click.option("--exactly-one", "exactly_one", is_flag=True, help="Fail unless exactly one block matches, listing the matches otherwise")
 @click.option("--limit", "limit", type=int, default=None, help="Print at most N matches (1 or greater); the number withheld is reported on stderr")
 @click.option("--with-children", "with_children", is_flag=True, help="Print each match with its sub-blocks (one extra API read per match)")
-@click.option("--uuid-only", "uuid_only", is_flag=True, help="Print only the uuids, one per line; exit 1 when nothing matches")
+@click.option("--uuid-only", "uuid_only", is_flag=True, help="Print only the uuids, one per line; fails when nothing matches")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error

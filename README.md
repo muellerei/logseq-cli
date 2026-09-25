@@ -220,7 +220,7 @@ graph.
 | `get-all-pages` | List all pages |
 | `get-page --page NAME [--no-backlinks] [--resolve-refs] [--with-ids] [--heading "## X"] [--outline] [--max-chars N] [--from-block UUID] [--format markdown]` | Page content with backlinks; optionally inline `((uuid))` refs or prefix UUIDs per line. `--no-backlinks` skips the backlink lookup, `--heading` returns only that section (searched recursively). `--outline` lists the headings with their uuids; `--max-chars` cuts the output to size and `--from-block` continues it — see [Bounded output](#bounded-output). With `--resolve-refs`, a ref whose target was deleted is named on stderr — on stdout it renders exactly like an unresolved one |
 | `get-block --id UUID [--no-children]` | Block by UUID; `--no-children` returns the block alone |
-| `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N \| --exactly-one] [--with-children \| --uuid-only]` | Find blocks by content. `--uuid-only` prints bare uuids, one per line, and exits 1 on no match. `--exactly-one` fails unless exactly one block matches and lists the matches otherwise; use it for a block to write to, `U=$(... --exactly-one --uuid-only)`, where `--first` would pick one of several. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
+| `find-block --content TEXT [--page NAME] [--regex] [--first \| --limit N \| --exactly-one] [--with-children \| --uuid-only]` | Find blocks by content. `--uuid-only` prints bare uuids, one per line, and fails on no match. `--exactly-one` fails unless exactly one block matches and lists the matches otherwise; use it for a block to write to, `U=$(... --exactly-one --uuid-only)`, where `--first` would pick one of several. A common word matches thousands of blocks, so `--limit N` caps the output and the number withheld goes to stderr; `--first` is the same with N=1. `--with-children` prints each match with its sub-blocks indented, instead of guessing a line count with `get-page \| grep -A<n>`; costs one extra read per match, capped at 25 with the remainder reported |
 | `get-journal-range --from DATE --to DATE [--resolve-refs] [--tail N] [--limit N] [--heading "## Log"] [--max-chars N] [--from-block UUID]` | Batch journal read; parallel (5 workers default). `--tail/--limit/--heading/--max-chars` bound the output, `--from-block` continues a cut one — see [Bounded output](#bounded-output) |
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder; `0` keeps all |
@@ -328,10 +328,10 @@ logseq-cli rename-page --page "Project Alpha" --new-name "Project Beta" --dry-ru
 # 2. delete-page: --json is no longer an implicit --force
 logseq-cli delete-page --page "Old Page" --json < /dev/null
 #   {"error": "Refusing to delete page 'Old Page' non-interactively without --force. ..."}
-#   exit 1 — the output format no longer doubles as a confirmation.
+#   non-zero exit — the output format no longer doubles as a confirmation.
 
 # 3. get-page separates "missing" from "empty"
-logseq-cli get-page --page "Typo Page"     # (page does not exist) -> exit 1
+logseq-cli get-page --page "Typo Page"     # (page does not exist) -> fails
 logseq-cli get-page --page "Empty Page"    # (empty page)          -> exit 0
 
 # 4. Bounded journal reads (see "Bounded output" below)
@@ -587,16 +587,31 @@ beyond the cap, and occurrences outside the range itself. Lifting the cap with
 since March still reports the days before the queried week. That is the reading
 a range query wants, because the alternative is a task that looks new.
 
-### Failure has one exit code, and no resume
+### Exit status: done or not done, and no resume
 
-A command exits `0` when it did what it said, and non-zero when it did not.
-There is deliberately no second exit code separating "your input was wrong" from
-"the operation failed": with `--json`, the error object already carries the
-reason as text, and a numeric code repeating that classification is a second
-view that can drift away from the first. Callers that need to distinguish the
-cases read the JSON on stderr; callers that only need to know whether to stop
-read the exit status. A non-zero status is not on its own a reason to retry — a
-missing UUID fails identically on the second attempt.
+A command exits `0` when it did what it says, and non-zero when it did not;
+the error on stderr says why, under `--json` mostly as an object. The number
+itself carries no meaning. Some errors end with 1 and some with 2, but
+nothing promises which, so do not branch on it.
+
+This used to be less honest. The documentation promised, in different places,
+that there was no second exit code and that 2 meant "refused, fix the call";
+the code kept neither. Separating a refused call from a failed one by its exit
+status would be possible, but nothing showed that a caller needed it: in a
+month of agent sessions with this tool, agents read the error text and
+corrected their calls, and most calls ran through a pipe, where the status
+never reached them. So the number stays without a meaning for now, which also
+means it can gain one later without breaking a caller.
+[ADR 0004](docs/adr/0004-a-non-zero-exit-means-not-done.md) records the
+decision and when to revisit it.
+
+What the rule does demand is that `0` is never a lie: a call that exits `0`
+without having done what it says, such as a replacement that did not reach
+the graph or a read that failed and came back empty, is a bug
+([#93](https://github.com/muellerei/logseq-cli/issues/93) collected the ones
+found). Where part of the answer was already read, it still appears on
+stdout, followed by the error. A non-zero status is not on its own a reason
+to retry: a missing UUID fails identically on the second attempt.
 
 The harder question is what happens when a multi-block write dies halfway.
 `insertBatchBlock` is not atomic — verified against a live graph, a malformed
