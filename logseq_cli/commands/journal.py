@@ -376,10 +376,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     page_name = format_journal_date(d, date_fmt)
 
     # Ensure journal page exists with journal property
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     content = strip_title_heading(content, page_name)
     # The blocks as they are written: checked to come back as one each (#47),
     # counted for the preview and written, from this one list.
@@ -625,10 +622,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # --- Batch path: multiple --content values ---
     if len(contents) > 1:
-        try:
-            existing = api.get_page(page_name)
-        except Exception:
-            existing = None
+        existing = api.get_page(page_name)
         # Creating the journal page is a write, so it waits for the dry-run
         # check below: a preview that brings a page into existence is not a
         # preview. The flag is reported instead, because "the page does not
@@ -712,10 +706,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     # Ensure journal page exists with journal property. Deferred when only
     # previewing: a dry run must not bring the page into existence.
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     would_create_page = not existing
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
@@ -955,10 +946,7 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
         content = outline_text(tree)  # what the preview shows
 
     # Ensure journal page exists with journal property
-    try:
-        existing = api.get_page(page_name)
-    except Exception:
-        existing = None
+    existing = api.get_page(page_name)
     if not existing and not dry_run:
         api.create_page(page_name, {"journal?": True})
 

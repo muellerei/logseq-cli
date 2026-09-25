@@ -601,12 +601,10 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     ref = follow_page(api, page, as_json)
     page = ref.page
 
-    # Check if page exists
-    existing = None
-    try:
-        existing = api.get_page(page)
-    except Exception:
-        pass
+    # Check if page exists. Not caught: Logseq answers null for a page that
+    # does not exist, so an exception is a failed read, and taking it for
+    # absence would create a page that may be there (#93).
+    existing = api.get_page(page)
 
     if not existing and not create:
         fail(f"Page '{page}' not found. Use --create to create it.",

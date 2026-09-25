@@ -117,10 +117,8 @@ def get_properties(ctx, page, prop_name, as_json):
     # empty got its lines in a block Logseq did not take them from. Without
     # this fallback the command reported "No properties" for them.
     if not properties:
-        try:
-            blocks = api.get_page_blocks_tree(page) or []
-        except Exception:
-            blocks = []
+        # Not caught: a failed read is not "no properties" (#93).
+        blocks = api.get_page_blocks_tree(page) or []
         first = (blocks[0] or {}) if blocks else {}
         if first.get("uuid"):
             # Not the keys Logseq keeps for the block itself: a heading's

@@ -111,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed read was taken for absence. The journal writers and
+  `add-note-content` asked whether the page exists and read any error as
+  "no", then created the page, which may well have been there; `get-properties`
+  read an error on the page's first block as "no properties", exit 0. Logseq
+  answers null for a page that does not exist, so an error there is a failed
+  read, and it now fails the call.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `analyze-graph`, `find-knowledge-gaps`, `analyze-journal-patterns` and
   `suggest-connections` counted a page they could not read as empty, so a
   connection that dropped halfway through a scan gave wrong numbers with
