@@ -827,8 +827,10 @@ def delete_page(ctx, page, force, ignore_refs, dry_run, as_json):
     if not force:
         if sys.stdin.isatty():
             if not click.confirm(f"Delete page '{page}' ({block_count} block(s))?"):
-                click.echo("Aborted.")
-                return
+                # Declined: nothing was deleted, so the call did not do what it
+                # says. "Aborted." with exit 0 read as done (#93).
+                fail(f"Declined: page '{page}' was not deleted.", as_json=as_json,
+                     reason="declined", page=page)
         else:
             fail(
                 f"Refusing to delete page '{page}' non-interactively without --force. "

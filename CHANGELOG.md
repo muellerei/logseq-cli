@@ -111,6 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `delete-page`, asked interactively and answered with "n", printed
+  `Aborted.` and exited 0, though nothing was deleted. It now fails with
+  `reason: "declined"`. Scripts are not affected: without a terminal the
+  command never asks and requires `--force`.
+  See [#93](https://github.com/muellerei/logseq-cli/issues/93).
 - `get-journal-range` caught the error of each day into an `error` field
   and exited 0, even when the connection dropped halfway through the range.
   It still prints every day, and then fails with `reason: "partial_read"`
