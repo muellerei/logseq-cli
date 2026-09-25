@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from logseq_cli.api import BadResponseError
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 
@@ -68,6 +69,36 @@ def test_journal_patterns_do_not_count_an_unreadable_day_as_empty():
     result = _run(_api(JOURNAL), "analyze-journal-patterns", "--timeframe", "last 7 days")
     assert result.exit_code != 0, result.stdout
     assert json.loads(result.stderr)["reason"] == "connection_refused"
+
+
+@pytest.mark.parametrize("error,reason", [
+    (requests.exceptions.ReadTimeout("read timed out"), "timeout"),
+    (BadResponseError("Logseq API returned non-JSON response: <html>"), "bad_response"),
+], ids=["timeout", "not-json"])
+def test_a_scan_that_hits_a_timeout_or_a_broken_answer_fails_cleanly(error, reason):
+    """These were tracebacks, rare while the scans swallowed read errors."""
+    api = _api("Beta")
+
+    def tree(name):
+        if name == "Beta":
+            raise error
+        return [{"uuid": f"u-{name}", "content": "text", "children": []}]
+
+    api.get_page_blocks_tree.side_effect = tree
+    result = _run(api, "analyze-graph")
+    assert result.exit_code != 0
+    assert json.loads(result.stderr)["reason"] == reason
+
+
+def test_a_ref_whose_lookup_fails_is_not_called_dead():
+    """Only a lookup that answers null means the block is gone."""
+    api = _api("Beta")
+    api.get_page_blocks_tree.side_effect = lambda name: [
+        {"uuid": "u1", "content": "see ((00000000-0000-4000-8000-0000000000aa))", "children": []}]
+    api.get_block.side_effect = requests.ConnectionError("connection dropped")
+    result = _run(api, "get-page", "--page", "Alpha", "--resolve-refs", "--no-backlinks")
+    assert result.exit_code != 0
+    assert "no longer exists" not in result.stderr
 
 
 @pytest.mark.parametrize("args", [

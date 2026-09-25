@@ -22,25 +22,24 @@ from logseq_cli.outlinetext import bullet_lines
 BLOCK_REF_RE = re.compile(r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)')
 
 def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
-    """Resolve one block UUID to its content text. Returns UUID unchanged on failure.
+    """Resolve one block UUID to its content text; the UUID unchanged if the block is gone.
 
-    A failed lookup means the target is gone — Logseq answers ``null`` for a
-    deleted block. The fallback then renders the ref exactly as an unresolved
-    one, so two different things end up spelled the same way in the output.
-    ``dead`` collects those uuids so the caller can say which is which.
+    A lookup that answers ``null`` means the target is gone — Logseq answers
+    that for a deleted block. The fallback then renders the ref exactly as an
+    unresolved one, so two different things end up spelled the same way in the
+    output. ``dead`` collects those uuids so the caller can say which is which.
+    A lookup that raises is not caught: calling the ref dead would be a claim
+    about the graph made from a failed read (#93).
     """
-    try:
-        block = api.get_block(uuid, include_children=False)
-        if block:
-            ref_content = (block.get("content") or "").strip()
-            page_info = block.get("page") or {}
-            page_name = ""
-            if isinstance(page_info, dict):
-                page_name = page_info.get("originalName") or page_info.get("name") or ""
-            source = f" ↳ {page_name}" if page_name else ""
-            return f"{ref_content}{source}"
-    except Exception:
-        pass
+    block = api.get_block(uuid, include_children=False)
+    if block:
+        ref_content = (block.get("content") or "").strip()
+        page_info = block.get("page") or {}
+        page_name = ""
+        if isinstance(page_info, dict):
+            page_name = page_info.get("originalName") or page_info.get("name") or ""
+        source = f" ↳ {page_name}" if page_name else ""
+        return f"{ref_content}{source}"
     if dead is not None and uuid not in dead:
         dead.append(uuid)
     return f"(({uuid}))"
