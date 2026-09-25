@@ -1,9 +1,11 @@
 """Tests for get-page command flags: --resolve-refs, --with-ids."""
 
+import json
 from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from logseq_cli.pagenames import PageRef
 from tests.conftest import split_runner
 
 
@@ -178,18 +180,48 @@ class TestGetPageHeading:
         assert result.exit_code == 0, result.output
         assert "Notes" in result.output
 
-    def test_heading_not_found_emits_warning(self):
+    def test_heading_not_found_fails(self):
+        # It used to warn and print "(empty page)" with exit 0: asked for one
+        # section and got none, which is not an empty page (#93).
         blocks = [{"content": "## Other", "uuid": "h", "children": []}]
         api = _api_with_blocks(blocks)
-        runner = CliRunner()
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            result = runner.invoke(
+            result = split_runner().invoke(
                 cli, ["get-page", "--name", "X", "--heading", "## Tasks"]
             )
-        assert result.exit_code == 0, result.output
-        # Either stderr (mix_stderr default) or stdout carries a not-found warning.
-        combined = result.output.lower()
-        assert "not found" in combined or "warning" in combined
+        assert result.exit_code != 0
+        assert "(empty page)" not in result.stdout
+        assert "(no heading '## Tasks')" in result.stdout
+        assert "Heading '## Tasks' not found in: X" in result.stderr
+
+    def test_heading_not_found_names_the_page_under_json(self):
+        blocks = [{"content": "## Other", "uuid": "h", "children": []}]
+        api = _api_with_blocks(blocks)
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "X", "--heading", "## Tasks", "--json"]
+            )
+        assert result.exit_code != 0
+        assert json.loads(result.stdout)["blocks"] == []
+        assert json.loads(result.stderr)["heading_not_found"] == ["X"]
+
+    def test_in_a_batch_the_page_with_the_heading_still_answers(self):
+        trees = {"A": [{"content": "## Tasks", "uuid": "h", "children": [
+                     {"content": "TODO a", "uuid": "t", "children": []}]}],
+                 "B": [{"content": "## Other", "uuid": "o", "children": []}]}
+        api = _api_with_blocks([])
+        api.get_page_blocks_tree.side_effect = lambda name: trees[name]
+        with patch("logseq_cli.group.LogseqAPI", return_value=api), \
+             patch("logseq_cli.commands.pages.follow_pages",
+                   return_value=([PageRef("A", "A"), PageRef("B", "B")], {})):
+            result = split_runner().invoke(
+                cli, ["get-page", "--name", "A", "--name", "B", "--heading", "## Tasks", "--json"]
+            )
+        assert result.exit_code != 0
+        pages = {p["page"]: p for p in json.loads(result.stdout)}
+        assert pages["A"]["blocks"][0]["content"] == "## Tasks"
+        assert pages["B"]["blocks"] == []
+        assert json.loads(result.stderr)["heading_not_found"] == ["B"]
 
 
 class TestGetPageUnresolvedRefWarning:

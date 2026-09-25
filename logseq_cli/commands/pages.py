@@ -148,7 +148,7 @@ Notes:
 @click.option("--no-backlinks", is_flag=True, help="Skip backlink computation")
 @click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
 @click.option("--with-ids", "with_ids", is_flag=True, help="Prefix each block line with its UUID (format: <uuid>\\t<indent>\\t<content>)")
-@click.option("--heading", default=None, help="Return only the section under this heading (e.g. '## Focus Topics W17'). Searches recursively.")
+@click.option("--heading", default=None, help="Return only the section under this heading (e.g. '## Focus Topics W17'). Searches recursively; fails when the page has no such heading.")
 @click.option("--outline", is_flag=True, help="Only the headings, one line each with its UUID, indented by how they nest: a heading inside another's section one tab deeper. A heading is what Logseq reads as one. No backlinks; not with --format markdown")
 @click.option("--max-chars", "max_chars", type=int, default=None, help="Cut the blocks so the output fits in N characters, 1 or greater. The cut falls between blocks; what is withheld is reported on stderr and, with --json, as 'withheld'/'cut' fields. Page headers and backlinks are not cut")
 @click.option("--from-block", "from_block", default=None, help="Start at this block, as named by a --max-chars note: pages and blocks before it are skipped, its ancestors kept as context")
@@ -160,6 +160,7 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     """Get page content with backlinks. Pass --name multiple times for batch reads."""
     api = ctx.obj["api"]
     missing = []
+    no_heading = []
     dead_refs = []
 
     # Before any read: a refused call should cost nothing and say why.
@@ -215,10 +216,13 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
                 backlinks = extract_backlink_names(refs)
             except Exception:
                 backlinks = find_backlinks(api, page_name)
-        if heading and blocks:
-            blocks = extract_section(blocks, heading)
+        if heading and name not in missing:
+            blocks = extract_section(blocks, heading) if blocks else []
             if not blocks:
-                click.echo(f"Warning: heading '{heading}' not found in '{page_name}'", err=True)
+                # Asked for one section and got none: that is not an empty
+                # page. A warning and "(empty page)" with exit 0 read as done
+                # (#93); it fails below, after the other pages are printed.
+                no_heading.append(name)
         if outline and blocks:
             # Before resolving: refs in the blocks the outline drops would
             # cost a lookup each and never be printed.
@@ -253,6 +257,8 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             p, blocks, backlinks = result["page"], result.get("blocks"), result.get("backlinks")
             if p in missing:
                 placeholder = "(page does not exist)"
+            elif p in no_heading:
+                placeholder = f"(no heading '{heading}')"
             elif p in ambiguous:
                 placeholder = ("(an alias of more than one page: "
                                f"{', '.join(ambiguous[p])})")
@@ -316,17 +322,24 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     # page that does exist first, so one typo does not cost the whole result.
     # The payload already went to stdout; the error goes to stderr only.
     # One error object for both, so stderr stays one JSON document.
-    if missing or ambiguous:
+    if missing or ambiguous or no_heading:
+        summary, lines, fields = [], [], {}
+        if missing:
+            summary.append("Page(s) not found")
+            lines += [f"Page '{name}' not found" for name in missing]
+            fields["missing"] = missing
+        if ambiguous:
+            summary.append(ambiguous_message(ambiguous))
+            lines.append(ambiguous_message(ambiguous))
+            fields["ambiguous"] = ambiguous
+        if no_heading:
+            summary.append(f"Heading '{heading}' not found in: {', '.join(no_heading)}")
+            lines.append(summary[-1])
+            fields["heading_not_found"] = no_heading
         if as_json:
-            fail(". ".join((["Page(s) not found"] if missing else [])
-                          + ([ambiguous_message(ambiguous)] if ambiguous else [])),
-                 True, **({"missing": missing} if missing else {}),
-                 **({"ambiguous": ambiguous} if ambiguous else {}))
-        else:
-            for page_name in missing:
-                click.echo(f"Error: Page '{page_name}' not found", err=True)
-            if ambiguous:
-                click.echo(f"Error: {ambiguous_message(ambiguous)}", err=True)
+            fail(". ".join(summary), True, **fields)
+        for line in lines:
+            click.echo(f"Error: {line}", err=True)
         sys.exit(1)
 
 @cli.command("search-pages", epilog="""\b
