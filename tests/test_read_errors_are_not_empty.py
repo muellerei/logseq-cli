@@ -68,3 +68,46 @@ def test_journal_patterns_do_not_count_an_unreadable_day_as_empty():
     result = _run(_api(JOURNAL), "analyze-journal-patterns", "--timeframe", "last 7 days")
     assert result.exit_code != 0, result.stdout
     assert json.loads(result.stderr)["reason"] == "connection_refused"
+
+
+@pytest.mark.parametrize("args", [
+    ["add-journal-block", "--date", "2026-01-05", "--content", "x"],
+    ["add-journal-block", "--date", "2026-01-05", "--content", "x", "--content", "y"],
+    ["add-journal-content", "--date", "2026-01-05", "--content", "x"],
+    ["add-journal-entry", "--date", "2026-01-05", "--content", "x"],
+], ids=["journal-block", "journal-block-batch", "journal-content", "journal-entry"])
+def test_a_failed_existence_check_does_not_create_the_page(args):
+    """A read that failed was taken for "no such page", and the page was
+    created, when it may well have been there."""
+    api = _api("Beta")
+    api.get_page.side_effect = requests.ConnectionError("connection dropped")
+    result = _run(api, *args)
+    assert result.exit_code != 0
+    api.create_page.assert_not_called()
+
+
+def _resolved(name):
+    """follow_page reads the page itself; patched so the read under test is
+    the first one that can fail."""
+    from logseq_cli.pagenames import PageRef
+    return patch(f"logseq_cli.commands.{name}.follow_page",
+                 return_value=PageRef("Alpha", "Alpha"))
+
+
+def test_note_content_does_not_create_a_page_it_failed_to_look_up():
+    api = _api("Beta")
+    api.get_page.side_effect = requests.ConnectionError("connection dropped")
+    with _resolved("pages"):
+        result = _run(api, "add-note-content", "--page", "Alpha", "--content", "x", "--create")
+    assert result.exit_code != 0
+    api.create_page.assert_not_called()
+
+
+def test_a_failed_read_of_the_first_block_is_not_no_properties():
+    api = _api("Beta")
+    api.get_page.side_effect = lambda n: {"name": "alpha", "originalName": "Alpha"}
+    api.get_page_blocks_tree.side_effect = requests.ConnectionError("connection dropped")
+    with _resolved("properties"):
+        result = _run(api, "get-properties", "--page", "Alpha")
+    assert result.exit_code != 0
+    assert json.loads(result.stderr)["reason"] == "connection_refused"
