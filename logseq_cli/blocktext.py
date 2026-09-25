@@ -170,7 +170,9 @@ def without_block_ids(content: str) -> str:
 # code and the target gets nothing. Inline code is taken as a run of backticks
 # up to the next run of the same length; where that reads a span differently
 # from Logseq, the error is a ref counted too many, and storing a real block's
-# id is what Logseq does on every copied ref.
+# id is what Logseq does on every copied ref. BLOCK_REF_RE is the one pattern
+# for a ref, which the reads that resolve and count refs use too; the code rule
+# is block_ref_uuids' alone, so those reads still take a ref in code for one.
 BLOCK_REF_RE = re.compile(
     r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)', re.IGNORECASE)
 _INLINE_CODE_RE = re.compile(r'(`+)(?:(?!\1).)+?\1')

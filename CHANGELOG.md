@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that has its id is not written again, and a dead ref stays as written.
   Measured along the way, and so no longer feared: when Logseq reads such a
   file again, it takes a column-0 `id::` line as the block's id.
+- `--resolve-refs`, the unresolved-ref count and `set-todo-status
+  --follow-refs` read a ref in capitals, `((8F2A…))`, as the ref it is to
+  Logseq (measured, 0.10.15); they took lower case only and left it as a
+  hole. One pattern now defines a Block Ref for every reader and writer.
 
 ## [0.15.0] - 2026-09-25
 
