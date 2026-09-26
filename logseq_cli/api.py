@@ -1079,7 +1079,12 @@ class LogseqAPI:
         moved or not; ``_prove_move`` reads the block back where it was sent
         (``before``: right in front of ``target_uuid``; else among its
         children) and raises WriteNotVerified otherwise.
+
+        Both uuids go in lower case, as Logseq's are: the proof compares them
+        with what Logseq reads back, and one typed in capitals failed a move
+        that landed.
         """
+        src_uuid, target_uuid = src_uuid.lower(), target_uuid.lower()
         options = options or {}
         return self._write(
             "logseq.Editor.moveBlock", [src_uuid, target_uuid, options],
