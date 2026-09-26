@@ -35,15 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `reason: "editor_state_unknown"`. A block entered in the milliseconds
   between the question and the write is not covered.
 - A block the CLI inserts no longer opens in Logseq's editor. Logseq takes an
-  unset `focus` as true and edits the new block (`api.cljs:603`,
-  `editor.cljs:647`); on the page you were looking at, your cursor jumped
+  unset `focus` as true and edits the new block (`api.cljs` `insert_block`,
+  `editor.cljs` `api-insert-new-block!`, 0.10.15); on the page you were
+  looking at, your cursor jumped
   into the agent's block and whatever you typed next landed there (measured,
   0.10.15). Every `insertBlock` and `appendBlockInPage` now goes with
   `focus: false`, and the cursor stays where it was.
 - A write of several blocks at once no longer leaves the last of them open
   in Logseq's editor, and no longer pulls your cursor out of the block you
   are typing in. `insertBatchBlock` opens its last block once the page is on
-  screen, with no option against it (`editor.cljs:1998`; measured, 0.10.15:
+  screen, with no option against it (`editor.cljs`
+  `edit-last-block-after-inserted!`; measured, 0.10.15:
   16–34 ms after it answered). With nobody typing, the agent locked itself
   out: its next write to its own block ended in `open_in_editor`. The CLI
   now watches for that block after each batch, ten pauses of 10 ms with a
@@ -56,8 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `reason: "open_in_editor"` before anything is written. Only a block
   of the batch is closed: one someone else enters within that window stays
   open, since Logseq does not save a block left while its last editor
-  operation is the batch (`lifecycle.cljs:35-43`, `editor.cljs:2024`; read
-  in the code, not measured). Should `checkEditing` give no usable answer
+  operation is the batch (`lifecycle.cljs` `will-unmount`, `editor.cljs`
+  `paste-blocks`; read in the code, not measured). Should `checkEditing` give no usable answer
   after the batch, the write fails with `reason: "editor_state_unknown"`,
   and the blocks that landed count in `writes_landed`.
 - A page or journal the CLI creates no longer turns Logseq's view to it.
@@ -139,8 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `replace-text` counted a replacement that changed a task marker as not
   written when Logseq's time tracking is on, its default: Logseq then
   appends a `:LOGBOOK:` drawer or rewrites its last `CLOCK:` line
-  (upstream `editor.cljs:256-285`, `util/clock.cljs:75-93`; read in the
-  code, not measured, since time tracking is off in the measured graph),
+  (upstream `editor.cljs` `with-marker-time`, `util/clock.cljs` `clock-in`
+  and `clock-out`, 0.10.15; read in the code, not measured, since time tracking is off in the measured graph),
   and the text read back no longer equalled the text sent. The drawer is
   now left out of the comparison on both sides.
 - `remove-block`, `delete-block`, `copy-block --remove`, `delete-page`,
@@ -155,7 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that other pages name as their namespace (`Project` beside
   `Project/Alpha`) stays without blocks, as Logseq keeps it (measured,
   0.10.15), and counts as deleted. A page a block of another page links to
-  is removed whole (`page.cljs:352-371`; measured, 0.10.15).
+  is removed whole (`page.cljs` `delete!`; measured, 0.10.15).
 - Storing the id of a ref's target (#95, above) is read back too: each
   target must then hold `id` among its properties, or the write fails with
   `reason: "write_not_verified"`. Each stored id counts in `writes_landed`.

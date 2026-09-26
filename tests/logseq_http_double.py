@@ -66,12 +66,13 @@ _MARKERS = ("TODO", "DOING", "DONE", "LATER", "NOW", "WAITING", "CANCELED", "CAN
 # The date format of the measured graph.
 DATE_FORMAT = "yyyy-MM-dd, EEEE"
 # The journal titles Logseq takes as such whatever the graph's format, besides
-# the graph's own (safe-journal-title-formatters, date_time_util.cljs:15-19,
-# read in the code). Only "MMM do, yyyy" was measured (with "Jan 1st, 2099").
+# the graph's own (date_time_util.cljs safe-journal-title-formatters,
+# 0.10.15, read in the code). Only "MMM do, yyyy" was measured (with "Jan 1st, 2099").
 _OTHER_JOURNAL_FORMATS = ("MMM do, yyyy", "yyyy-MM-dd", "yyyy_MM_dd")
 
 # Assumed, not measured (time tracking is off in the measured graph):
-# the clock lines as upstream util/clock.cljs:75-93 writes them, at a fixed
+# the clock lines as upstream util/clock.cljs clock-in and clock-out
+# (0.10.15) write them, at a fixed
 # time so a test can spell them out.
 CLOCK_IN = "CLOCK: [2026-09-26 Sat 14:00]"
 CLOCK_OUT = "CLOCK: [2026-09-26 Sat 14:00]--[2026-09-26 Sat 14:05] =>  00:05:00"
@@ -109,8 +110,8 @@ class Response:
 
 def _key(name) -> str:
     """How Logseq compares page names: lower case, a slash at either end
-    dropped, NFC (``page-name-sanity-lc``, graph_parser/util.cljs:134-165;
-    the slashes measured, 0.10.15: getPage on "/X/" finds X)."""
+    dropped, NFC (graph_parser/util.cljs ``page-name-sanity-lc``; the
+    slashes measured, 0.10.15: getPage on "/X/" finds X)."""
     return unicodedata.normalize("NFC", _without_boundary_slashes(str(name).lower()))
 
 
@@ -121,7 +122,7 @@ def _without_boundary_slashes(name: str) -> str:
 
 
 def _created_title(name: str) -> str:
-    """The title ``create!`` makes of a name (handler/page.cljs:137-142):
+    """The title ``create!`` makes of a name (handler/page.cljs, 0.10.15):
     trimmed, ``[[...]]`` unwrapped, leading ``#`` dropped, a slash at either
     end dropped. Measured, 0.10.15, for each of the four."""
     title = name.strip()
@@ -782,8 +783,8 @@ class LogseqHttpDouble:
         format is created under the graph's name and answered with null.
 
         The name is looked up as sent, then created as ``create!`` makes it
-        (``_created_title``) and answered under that (api.cljs:555-572;
-        measured, 0.10.15): ``[[X]]`` answers the page X, a page X that
+        (``_created_title``) and answered under that (api.cljs
+        ``create_page``; measured, 0.10.15): ``[[X]]`` answers the page X, a page X that
         exists included, its properties sent dropped.
         """
         name = args[0]
@@ -817,7 +818,7 @@ class LogseqHttpDouble:
 
     def _delete_page(self, args):
         """Answers null, a missing page too. A page other pages name as their
-        namespace keeps its entity without blocks (page.cljs:352-371;
+        namespace keeps its entity without blocks (page.cljs ``delete!``;
         measured, 0.10.15: getPage answers it, getPageBlocksTree [])."""
         page = self._find_page(args[0])
         if page is None:
@@ -874,7 +875,7 @@ class LogseqHttpDouble:
 
     def _opened(self, page, node, options):
         """An insert opens its block on a visible page unless
-        ``focus: false`` (editor.cljs:647)."""
+        ``focus: false`` (editor.cljs ``api-insert-new-block!``, 0.10.15)."""
         if options.get("focus", True) and page["id"] in self._visible:
             self.editing = node["uuid"]
 
@@ -882,7 +883,8 @@ class LogseqHttpDouble:
         """The new block. A missing page is made first, with its empty first
         block, and the block goes after it (strictinsert.py, measured). It is
         made through createPage's ``create!`` and then looked up under the
-        name as sent (api.cljs:830-845, read in the code): a journal title in
+        name as sent (api.cljs ``append_block_in_page``, 0.10.15, read in
+        the code): a journal title in
         another format makes the journal and answers null."""
         name, content = args[0], args[1]
         options = (args[2] if len(args) > 2 else None) or {}
@@ -934,7 +936,7 @@ class LogseqHttpDouble:
         first block or on a page with none, every node gets "* " in front.
 
         On a visible page Logseq then opens the last inserted block
-        (``edit-last-block-after-inserted!``, editor.cljs:1998; measured).
+        (editor.cljs ``edit-last-block-after-inserted!``, 0.10.15; measured).
         """
         anchor, batch = args[0], args[1]
         options = (args[2] if len(args) > 2 else None) or {}
@@ -971,8 +973,8 @@ class LogseqHttpDouble:
     def _track_time(self, old, new):
         """With time tracking on, a marker change to DOING/NOW clocks in, one
         to DONE/LATER/TODO closes the open CLOCK line (upstream
-        util/clock.cljs:75-93; format assumed: time tracking was off in the
-        measured graph)."""
+        util/clock.cljs ``clock-in`` and ``clock-out``, 0.10.15; format
+        assumed: time tracking was off in the measured graph)."""
         before, after = _marker(old), _marker(new)
         if not self.time_tracking or before == after:
             return new
@@ -995,7 +997,8 @@ class LogseqHttpDouble:
         The text is trimmed on both sides ("new  " → "new"; at the start
         measured for spaces, a tab and blank lines, 0.10.15), and a ref to
         the block itself is dropped ("see ((own)) here" → "see  here",
-        measured; editor.cljs:323-324 replaces the lower-case form). ``{"properties":
+        measured; editor.cljs ``wrap-parse-block`` replaces the lower-case
+        form). ``{"properties":
         {k: v}}`` writes ``k:: v`` lines below the text, a passed key winning
         over the text's own line (#30, #66). A stored id:: line stays when
         the text sent has none (#95). An id:: line becomes the

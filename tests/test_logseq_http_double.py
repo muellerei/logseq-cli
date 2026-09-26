@@ -631,7 +631,8 @@ def test_exit_editing_mode(double):
 
 
 def test_insert_batch_block_opens_the_last_block_on_a_visible_page(double):
-    # editor.cljs:1998, measured: only where the page is shown.
+    # editor.cljs edit-last-block-after-inserted!, 0.10.15, measured: only
+    # where the page is shown.
     double.add_page("Probe Page", ["anchor"])
     anchor = double.uuid_of("anchor")
     tree = [{"content": "r1", "children": [{"content": "r1a"}]}, {"content": "r2"}]
@@ -662,7 +663,8 @@ def test_time_tracking_off_by_default(double):
 
 
 def test_time_tracking_clocks_in_and_out(double):
-    # Upstream util/clock.cljs:75-93; the format is assumed, not measured.
+    # Upstream util/clock.cljs clock-in and clock-out, 0.10.15; the format
+    # is assumed, not measured.
     double.time_tracking = True
     double.add_page("Probe Page", ["TODO task"])
     uuid = double.uuid_of("TODO task")

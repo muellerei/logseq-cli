@@ -14,7 +14,7 @@ import re
 
 import click
 
-from logseq_cli.blocktext import id_lines
+from logseq_cli.blocktext import id_lines, unwrap_block_id
 from logseq_cli.ids import collect_block_ids
 from logseq_cli.outlinetext import (
     collect_child_uuids,
@@ -299,7 +299,7 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
         raise
     if stand_in:
         # The batch landed: a stand-in left behind is an error of its own.
-        _remove_uncounted(api, stand_in)
+        api.remove_block(stand_in, written_here=True)
 
     expected = count_blocks(tree)
     after_tree = api.get_page_blocks_tree(page_name) or []
@@ -343,22 +343,13 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
     return new
 
 
-def _remove_uncounted(api, stand_in: str) -> None:
-    """Remove the stand-in, and take back its two writes from the call's
-    count: appended and removed, nothing of it remains, and a refusal that
-    counted them would tell a retry of writes that are gone. A removal that
-    fails raises before this, and the stand-in, which stays, counts."""
-    api.remove_block(stand_in)
-    api.writes_landed -= 2
-
-
 def _remove_stand_in(api, stand_in: str, failed: Exception) -> None:
     """Remove the stand-in after the batch raised ``failed``; a refusal of
     the removal is added to ``failed``'s message rather than raised over it,
     which would hide why the batch failed. Any WriteRefused: the removal can
     meet an error object, an open editor, or a removal that did not show."""
     try:
-        _remove_uncounted(api, stand_in)
+        api.remove_block(stand_in, written_here=True)
     except WriteRefused as refused:
         note = (f"The empty stand-in block {stand_in[:8]}... written for the batch "
                 f"stayed too: {refused}")
@@ -375,8 +366,8 @@ def check_move(api, src_uuid: str, target_uuid: str) -> None:
     """
     # In lower case, as Logseq's uuids are: the subtree it is compared with
     # is read back from Logseq.
-    src_uuid = src_uuid.strip().replace("((", "").replace("))", "").lower()
-    target_uuid = target_uuid.strip().replace("((", "").replace("))", "").lower()
+    src_uuid = unwrap_block_id(src_uuid).lower()
+    target_uuid = unwrap_block_id(target_uuid).lower()
     if src_uuid == target_uuid:
         raise click.ClickException("Source and target are the same block.")
 
@@ -414,8 +405,8 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
     case is therefore refused here before the call, where it can be named; the
     method reads the block back where it was sent.
     """
-    src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
-    target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
+    src_uuid = unwrap_block_id(src_uuid)
+    target_uuid = unwrap_block_id(target_uuid)
     check_move(api, src_uuid, target_uuid)
     api.move_block(src_uuid, target_uuid, {"before": True} if before else {"children": True})
 
