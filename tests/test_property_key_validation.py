@@ -246,3 +246,37 @@ class TestEmptyValue:
         r = _run(path("type", ""), api)
         assert r.exit_code == 0, r.stderr
         assert _written(api) == [("type", "")]
+
+
+class TestAKeyKeptAsGivenIsProvenGone:
+    """The removal of such a key is proven under the key as sent. Looked up
+    only as Logseq's parser would store it ("type project", "custom-id"), a
+    key the database holds as given was never found, and a removal Logseq
+    did not do passed as done."""
+
+    @pytest.mark.parametrize("key", ["type Project", "Custom_ID"])
+    @pytest.mark.parametrize("mode,exit_code", [("noop", 1), ("execute", 0)])
+    def test_removal_is_read_back_under_the_key_sent(self, monkeypatch, key, mode, exit_code):
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble.installed(monkeypatch, {"Page A": ["block one"]},
+                                            modes={"removeBlockProperty": mode})
+        uuid = double.uuid_of("block one")
+        # What the database holds: the key as an earlier version stored it,
+        # until Logseq did its removal.
+        held = {key: "a"}
+        real = double._handlers["logseq.Editor.removeBlockProperty"]
+
+        def remove(args):
+            if mode == "execute" and args[1] == key:
+                held.clear()
+            return real(args)
+        monkeypatch.setitem(double._handlers, "logseq.Editor.removeBlockProperty", remove)
+        monkeypatch.setattr("logseq_cli.api.stored_properties",
+                            lambda api, u: (dict(held), dict(held)))
+        r = split_runner().invoke(cli, ["--token", "t", "remove-property", "--id", uuid,
+                                        "--key", key, "--json"])
+        assert r.exit_code == exit_code, r.stderr
+        if exit_code:
+            error = json.loads(r.stderr)
+            assert (error["reason"], error["method"]) == \
+                ("write_not_verified", "removeBlockProperty")
