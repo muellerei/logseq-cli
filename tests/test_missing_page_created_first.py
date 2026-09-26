@@ -5,10 +5,11 @@ with an empty block before the one written (measured, 0.10.15). The writers
 that name a page create it first with ``createFirstBlock: false``, as
 ``add-note-content`` does, so the file holds only what was written:
 ``insert-block --page``, ``add-block-ref --page`` and ``copy-block --to-page``.
-A page that exists is not created, a preview creates nothing, and a
-``--keep-ids`` write keeps creating the page itself, once.
+A page that exists is not created, and a preview creates nothing. That a
+``--keep-ids`` write asks whether a block is open before it creates the page
+is tested in test_editor_gate against the real LogseqAPI, where the question
+is asked: a mock of it cannot see that.
 """
-import click
 import pytest
 
 from logseq_cli.cli import cli
@@ -119,15 +120,3 @@ def test_add_block_ref_under_heading_creates_the_page_before_the_heading(monkeyp
     result = _run(*WRITES["add-block-ref"], "--under-heading", "## Refs")
     assert result.exit_code == 0, result.stderr
     assert api.order[0] == ("create", MISSING, False), api.order
-
-
-
-def test_keep_ids_write_refused_for_an_open_block_creates_no_page(monkeypatch):
-    # A --keep-ids write creates the page in insert_tree_keeping_ids, after
-    # asking whether a block is open: refused there, it leaves nothing behind.
-    api = _api(monkeypatch)
-    api.check_editing.return_value = "b0b0b0b0-0000-0000-0000-000000000000"
-    api.refuse_open.side_effect = click.ClickException("open in the editor")
-    result = _run("insert-block", "--page", MISSING, "--content", "a note", "--keep-ids")
-    assert result.exit_code != 0
-    api.create_page.assert_not_called()

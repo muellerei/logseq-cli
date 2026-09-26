@@ -21,12 +21,21 @@ from logseq_cli.outlinetext import (
     count_blocks,
     page_blocks_by_uuid,
 )
-from logseq_cli.pagenames import page_to_write
+from logseq_cli.pagenames import PageToWrite
 from logseq_cli.writerefused import WriteNotVerified, WriteRefused, partial_state
 
-# Why a --keep-ids write is refused while a block is open.
-# Not "would discard": Logseq saves the open block before it inserts (measured).
-KEPT_IDS_MOVE_CURSOR = "a write with kept ids would move the cursor out of the block being edited"
+
+def create_missing_page(api, target: PageToWrite) -> None:
+    """Create ``target``'s page if it is missing, without a first block.
+
+    appendBlockInPage would create a missing page itself, with an empty block
+    before the one written (measured). Sent under the name as asked
+    (``target.asked``), which Logseq makes ``target.name`` of; the name the
+    write goes to would be cleaned once more (pagenames.title_as_created).
+    """
+    if target.page is not None:
+        return
+    api.create_page(target.asked, first_block=False)
 
 
 def _write_one_keeping_id(api, content, where, target):
@@ -230,23 +239,13 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
     """
     if not tree:
         return []
-    # Before the first write, the page made for page_end included: a kept id
-    # goes only through the batch (#31), and the batch would move the cursor
-    # out of the block being typed in.
-    editing = api.check_editing()
-    if editing is not None:
-        api.refuse_open(editing, why=KEPT_IDS_MOVE_CURSOR)
+    # No question for the open editor here: the command's first write asks
+    # it, and that may be the page or the heading written before this call
+    # (ids.check_block_ids). The batch refuses on its own as well.
     if where == "page_end":
-        # A missing page under the name Logseq creates it with, which the
-        # reads below then find: a journal title in another format is the
-        # journal (measured).
-        page_name, page = page_to_write(api, target)
-        if page is None:
-            # appendBlockInPage creates a missing page and writes to it; this
-            # position does the same, without the empty block Logseq would
-            # otherwise put first (measured). The empty page takes the
-            # stand-in below.
-            api.create_page(page_name, first_block=False)
+        # A page that exists: the caller created a missing one
+        # (create_missing_page), and an empty one takes the stand-in below.
+        page_name = target
     else:
         # Logseq's uuids are lower-case; a target typed in capitals is the
         # same block.

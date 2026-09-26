@@ -57,6 +57,7 @@ from logseq_cli.render import (
     resolve_refs_in_blocks,
 )
 from logseq_cli.strictinsert import (
+    create_missing_page,
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
 )
@@ -532,8 +533,8 @@ def create_page(ctx, page, content, as_json, dry_run):
     # The name Logseq creates the page under: [[X]] makes X, a journal title
     # in another format the journal under the graph's name (measured, 0.10.15).
     # The same name serves the check below, the preview, the write,
-    # --content and the output.
-    page = page_name_to_create(api, page)
+    # --content and the output; createPage alone is sent the name as asked.
+    asked, page = page, page_name_to_create(api, page)
 
     # Logseq answers createPage for an existing page with that page, so the
     # call alone cannot tell "created" from "was already there" — the command
@@ -597,7 +598,7 @@ def create_page(ctx, page, content, as_json, dry_run):
 
     # Logseq tells a journal by its name (measured). Without text, the first block
     # stays: a page with neither gets no file and is lost on a re-index.
-    result = api.create_page(page, first_block=content is None)
+    result = api.create_page(asked, first_block=content is None)
 
     if content:
         # Proven by the API: unchecked, this appended to a page that
@@ -663,7 +664,8 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     # absence would create a page that may be there (#93). A missing page is
     # written under the name Logseq creates it with: a journal title in
     # another format is the journal, which may exist.
-    page, existing = page_to_write(api, ref.page)
+    target = page_to_write(api, ref.page)
+    page, existing = target.name, target.page
 
     if not existing and not create:
         fail(f"Page '{page}' not found. Use --create to create it.",
@@ -685,8 +687,8 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         tree = tree_without_block_ids(tree)
 
     # "page" in the JSON is the name asked for (ref.fields), and this names
-    # the page written, which differs for a name Logseq creates otherwise:
-    # the same in the run and its preview.
+    # the page written, which differs for a name Logseq creates otherwise;
+    # the run and its preview say it alike, in the text and in the JSON.
     where = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
 
     if dry_run:
@@ -715,26 +717,19 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
                 click.echo(f"  {key}:: {value}")
         return
 
-    if not existing and create:
-        api.create_page(page, first_block=False)
+    create_missing_page(api, target)
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
         uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
-        position = f"under '{under_heading}' on '{page}'"
     else:
         uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
-        position = page
 
+    # The tree is not empty (text only of the title heading or of id:: lines
+    # is refused above), and every insert is proven, so there is a first block.
     n = len(uuids)
-    root_uuid = uuids[0] if uuids else None
-
-    applied = {}
-    if properties:
-        if root_uuid:
-            applied = apply_block_properties(api, root_uuid, properties)
-        else:
-            print_note("Warning: no block created, --property ignored")
+    root_uuid = uuids[0]
+    applied = apply_block_properties(api, root_uuid, properties) if properties else {}
 
     if as_json:
         output({
@@ -750,9 +745,8 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     else:
         if existing is None:
             click.echo(f"Created page: {page}")
-        click.echo(f"Added {n} block(s) to {position}")
-        if root_uuid:
-            click.echo(f"  uuid: {root_uuid}")
+        click.echo(f"Added {n} block(s) to {where}")
+        click.echo(f"  uuid: {root_uuid}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
 

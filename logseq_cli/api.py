@@ -26,7 +26,7 @@ from logseq_cli.blocktext import (
     tree_texts,
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
-from logseq_cli.pagenames import page_name_to_create
+from logseq_cli.pagenames import page_name_to_create, title_as_created
 # Raised by the writes below; imported here too so that callers can take them
 # from the API they call. They live in a leaf module, so that
 # strictinsert and output need not import the HTTP client for them.
@@ -152,11 +152,12 @@ class UI:
 #       did nothing, since getPage finds a page by its name in lower case.
 #   createPage  answers the page, and null for a journal title in
 #       another format, which it creates under the graph's name:
-#       create_page sends the name Logseq creates (page_name_to_create), the
-#       journal's under the graph's format. A page that exists comes back as
+#       create_page sends the name as asked, which Logseq cleans once into
+#       the name page_name_to_create predicts, and the journal's under the
+#       graph's format. A page that exists comes back as
 #       it is, the properties sent dropped, so it is refused before the
 #       write (PageExists). The answer's uuid must be the page getPage finds
-#       under the name sent (page): no names are compared here, since Logseq
+#       under the name predicted (page): no names are compared here, since Logseq
 #       normalises them further than lower() does (NFC, pagenames.py). The
 #       properties in the answer are not read; the proof needs none.
 #   setBlocksId  null; it skips a page's property block, which its
@@ -442,6 +443,10 @@ class LogseqAPI:
         # that fails before the proof holds leaves it unknown, and the error
         # handler names it beside writes_landed. None between writes.
         self.write_unproven = None
+        # Why the call's first write is refused while any block is open
+        # (refuse_open_before_first_write); None once it is sent, or when
+        # the call asked for nothing of the kind.
+        self._first_write_refuses_open = None
 
     def _cache_key(self, method, args):
         try:
@@ -542,9 +547,12 @@ class LogseqAPI:
         Every public write goes through here, so the steps below hold for all
         of them and no command can go around one:
 
-        1. ask checkEditing once, if the entry can refuse or ``texts`` hold
-           Block Refs (``editing``, when given, is that answer already, so
-           set_blocks_id does not ask again);
+        1. ask checkEditing once, if the entry can refuse, ``texts`` hold
+           Block Refs, or this is the call's first write and the call asked
+           for it (``editing``, when given, is that answer already, so
+           set_blocks_id does not ask again); refuse the first write here
+           if a block is open and the call asked for that
+           (:meth:`refuse_open_before_first_write`);
         2. find the Block Ref targets in ``texts`` that need an id, ``own``
            excepted (reads only);
         3. refuse if the open block is one the entry's ``editor`` rule
@@ -577,8 +585,11 @@ class LogseqAPI:
         kind = _METHODS[method]
         can_refuse = kind.editor != "never"
         refs = [u for t in texts for u in block_ref_uuids(t)]
+        first_refuses, self._first_write_refuses_open = self._first_write_refuses_open, None
         if editing is _UNSET:
-            editing = self.check_editing() if can_refuse or refs else None
+            editing = self.check_editing() if can_refuse or refs or first_refuses else None
+        if editing is not None and first_refuses:
+            self.refuse_open(editing, why=first_refuses)
         wanted = self._ref_targets_needing_id(refs, own=own)
         if editing is not None and can_refuse:
             getattr(self, f"_gate_{kind.editor}")(editing, target)
@@ -755,8 +766,9 @@ class LogseqAPI:
         raise _not_verified(method, target, f"it named {name!r}", got)
 
     def _prove_page(self, method, target, result):
-        """The answer names a page, and getPage under the name sent finds the
-        same one; how the name resolves is left to Logseq."""
+        """The answer names a page, and getPage under ``target``, the name
+        create_page predicts, finds the same one; how the name resolves is
+        left to Logseq."""
         uuid = result.get("uuid") if isinstance(result, dict) else None
         if not uuid:
             raise _not_verified(method, target, "the new page", "no page uuid in the answer")
@@ -928,11 +940,20 @@ class LogseqAPI:
         if page["id"] in ids:
             self.refuse_open(editing, open_block)
 
-    def refuse_open(self, editing, open_block=None, *, why=DISCARDS_TYPING):
-        """Raise EditorOpen for the open block, naming its page.
+    def refuse_open_before_first_write(self, why: str) -> None:
+        """Refuse this call's first write, whatever it is, while any block
+        is open in the editor, giving ``why``.
 
-        Public for strictinsert, which refuses a --keep-ids write before its
-        first write with its own ``why``."""
+        For a call whose later write would be refused anyway, as a batch is
+        (``_gate_any``): asked at the first one instead, a page or heading
+        written first is not left behind by the refusal. Asked in _write,
+        so no command can go around it by writing something else first.
+        Only the first: the writes after it keep their own rules.
+        """
+        self._first_write_refuses_open = why
+
+    def refuse_open(self, editing, open_block=None, *, why=DISCARDS_TYPING):
+        """Raise EditorOpen for the open block, naming its page."""
         if open_block is None:
             open_block = self.get_block(editing, include_children=False)
         page_id = ((open_block or {}).get("page") or {}).get("id")
@@ -980,24 +1001,32 @@ class LogseqAPI:
         an empty block. A page created without a first block and without
         text gets no file (measured), so a caller that writes nothing keeps it.
 
-        The name is sent as Logseq will create it (``page_name_to_create``):
-        ``[[X]]`` creates X, and a journal title in another format the
-        journal under the graph's name; the check below and the proof read
-        that name. A caller that writes to the page afterwards takes the name
-        from the same function.
+        ``page_name`` is the name as the caller was given it, never one that
+        ``page_name_to_create`` returned. The page is created under that
+        function's name for it: ``[[X]]`` creates X, and a journal title in
+        another format the journal under the graph's name; the check below
+        and the proof read that name. A caller that writes to the page
+        afterwards takes the name from the same function
+        (``pagenames.page_to_write``).
 
         Raises PageExists for a page that exists, before anything is sent,
         and WriteNotVerified unless the new page shows (``_prove_page``).
         """
-        page_name = page_name_to_create(self, page_name)
+        created = page_name_to_create(self, page_name)
+        # Sent as asked: create! cleans what it is sent in one pass, and the
+        # cleaning is not idempotent, so the name it made once would be
+        # cleaned again ("#[[X]]" makes "[[X]]", "[[X]]" makes "X"; measured).
+        # A journal title in another format goes as the graph's title, which
+        # create! keeps: sent as asked, createPage answers null (measured).
+        sent = page_name if title_as_created(page_name) == created else created
         # Logseq answers createPage on a page that exists with that page, the
         # properties sent dropped (measured). The commands ask first and refuse with
         # their own advice; this holds for a caller that did not.
-        if self.get_page(page_name):
+        if self.get_page(created):
             raise PageExists(
-                f"Page '{page_name}' already exists; createPage would leave it as it "
+                f"Page '{created}' already exists; createPage would leave it as it "
                 "is and drop the properties sent.",
-                page=page_name,
+                page=created,
             )
         # Without redirect: false, Logseq turns its view to the new page
         # (measured, 0.10.15) -- every page and journal the CLI created moved
@@ -1006,7 +1035,7 @@ class LogseqAPI:
         if not first_block:
             options["createFirstBlock"] = False
         return self._write("logseq.Editor.createPage",
-                           [page_name, properties or {}, options], target=page_name)
+                           [sent, properties or {}, options], target=created)
 
     def append_block_in_page(self, page_name: str, content: str, options: dict = None):
         # Options reach insertBlock unchanged (append_block_in_page in api.cljs),

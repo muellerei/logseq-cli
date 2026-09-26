@@ -40,10 +40,11 @@ from logseq_cli.outlinetext import (
     subtree_uuids,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
-from logseq_cli.pagenames import journal_page_name, page_to_write
+from logseq_cli.pagenames import PageToWrite, journal_page_name, page_to_write
 from logseq_cli.strictinsert import (
     append_in_page,
     check_move,
+    create_missing_page,
     insert_block_at,
     insert_block_tree_as_first_children,
     insert_block_tree_as_siblings,
@@ -424,21 +425,14 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     # --child-of it is refused or, in tree mode, not used, and must not be
     # resolved into an alias_of for a page nothing is written to.
     alias = {}
-    page_exists = True
+    target = None
     if page and not (after or before or child_of):
         ref = follow_page(api, page, as_json)
         alias = {"alias_of": ref.page} if ref.redirected else {}
         # A missing page is written under the name Logseq creates it with: a
         # journal title in another format is the journal (measured).
-        page, existing = page_to_write(api, ref.page)
-        page_exists = existing is not None
-
-    def create_missing_page():
-        # appendBlockInPage would create the page itself, with an empty block
-        # before the one written (measured). A --keep-ids write creates it
-        # in insert_tree_keeping_ids, after asking whether a block is open.
-        if not page_exists and not keep_ids:
-            api.create_page(page, first_block=False)
+        target = page_to_write(api, ref.page)
+        page = target.name
 
     # --tree-file is --tree from a file; resolve it before any other validation
     # so the rest of the command sees a single tree_input.
@@ -520,7 +514,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             return
 
         if page and top_level:
-            create_missing_page()
+            create_missing_page(api, target)
         # The tree is not empty (checked above), and every insert is proven,
         # so there is a first block.
         uuids = do_insert()
@@ -586,10 +580,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         if not page:
             refuse_missing_anchor(api, after or before or child_of, as_json)
         planned = count_blocks(tree)
-        target = page or (f"after {after[:8]}..." if after else
-                          f"before {before[:8]}..." if before else
-                          f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
-        target_desc = f"end of '{page}'" if page else target
+        target_desc = (f"end of '{page}'" if page else
+                       f"after {after[:8]}..." if after else
+                       f"before {before[:8]}..." if before else
+                       f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
         if as_json:
             output({"position": target_desc, "blocks": planned, "dry_run": True, **alias}, True)
         else:
@@ -597,7 +591,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         return
 
     if page:
-        create_missing_page()
+        create_missing_page(api, target)
         if hierarchical:
             uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
             new_uuid = uuids[0]
@@ -734,22 +728,23 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         names = ref.fields()
         # A missing page under the name Logseq creates it with, as for
         # insert-block --page.
-        page, existing = page_to_write(api, ref.page)
+        target = page_to_write(api, ref.page)
     else:
         d = parse_date_keyword(journal_date)
-        page = journal_page_name(api, d)
+        name = journal_page_name(api, d)
         # Ensure journal page exists
         try:
-            existing = api.get_page(page)
+            existing = api.get_page(name)
         except Exception:
             existing = None
+        target = PageToWrite(name, name, existing)
+    page = target.name
 
-    # appendBlockInPage would create a missing page itself, with an empty
-    # block before the ref (measured). Creating the page is itself a write,
-    # so under --dry-run it is only reported, never done.
-    would_create_page = not existing
-    if would_create_page and not dry_run:
-        api.create_page(page, first_block=False)
+    # Creating the page is itself a write, so under --dry-run it is only
+    # reported, never done.
+    would_create_page = not target.page
+    if not dry_run:
+        create_missing_page(api, target)
 
 
     if dry_run:
@@ -831,7 +826,8 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     names = ref.fields("to_page")
     # A missing page under the name Logseq creates it with, as for
     # insert-block --page.
-    to_page, existing = page_to_write(api, ref.page)
+    target = page_to_write(api, ref.page)
+    to_page = target.name
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)
     if not source:
@@ -889,10 +885,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
             copied += _copy_tree(child, new_uuid)
         return copied
 
-    # appendBlockInPage would create a missing page itself, with an empty
-    # block before the copy (measured).
-    if not existing:
-        api.create_page(to_page, first_block=False)
+    create_missing_page(api, target)
     count = _copy_tree(source)
 
     if remove:

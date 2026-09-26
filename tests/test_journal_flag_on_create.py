@@ -112,8 +112,10 @@ class TestCreatePageSendsNoProperty:
     def test_iso_date_name_sends_no_property(self, api):
         result = split_runner().invoke(cli, ["create-page", "--name", "2025-03-14"])
         assert result.exit_code == 0, result.output
-        # Sent in the graph's format, not as typed (measured).
-        assert api.create_page.call_args[0][0] == "mar 14th, 2025"
+        # Handed on as asked: LogseqAPI.create_page sends it in the graph's
+        # format (test_create_page_exists.py), the page the output names.
+        assert api.create_page.call_args[0][0] == "2025-03-14"
+        assert "Created page: mar 14th, 2025" in result.output
         assert _sent_properties(api.create_page.call_args) is None
 
 
