@@ -471,13 +471,47 @@ makes it hard.
 
 ### Writes are verified, not assumed
 
-Logseq answers a failed write with HTTP 200 and a `null` body, so a command
-that trusts the status code reports "Added N block(s)" over a journal entry
-that was never written — and for a journal entry, nothing else will ever tell
-you. Every insert path now proves the write by reading the block back, which
-costs a round trip per write and is worth it: `copy-block --remove` used to
-delete the source against a copy that had not landed. The strict path is the
-default; tolerating partial writes is something a caller now has to ask for.
+No write is taken on Logseq's word: each is proven by what Logseq returns or read back, and none overwrites a block you are editing.
+
+Logseq's HTTP API answers almost every write with `null`, whether it wrote or
+not, and a write it threw on with HTTP 200 and an error object
+(`server.cljs:97`, `listener.cljs:171`, tag 0.10.15). A command that trusts
+the status code reports "Added N block(s)" over a journal entry that was never
+written — and for a journal entry, nothing else will ever tell you;
+`copy-block --remove` once deleted its source against a copy that had not
+landed. So the proof sits in the API client, inside each write method, where
+no command can go around it, and the client refuses to send a method it has
+no rule for. An insert is proven by its answer, which carries the new block
+and is `null` for one Logseq did not write. Every other write is proven by
+reading back what it should have changed: the text of an updated block, a
+property's value, the blocks a batch added, a moved block in its new place, a
+removed block gone, a renamed page under its new name, a created page found
+under its name. The note above `_METHODS` in `logseq_cli/api.py` says how
+each one is proven and why.
+
+"Proven" has two limits. The read goes to Logseq's database, not to the
+Markdown file, which follows about 1.8 s later (measured on 0.10.15). And a
+write from elsewhere that lands between the CLI's write and its read makes a
+write that did land fail as `write_not_verified`; the error shows what was
+expected and what was read, so read the block before retrying.
+
+The second half of the sentence answers a loss no read-back can catch.
+Measured on Logseq 0.10.15: a write to the block being edited replaced the
+editor content at once and dropped what had not been saved; Logseq answered
+`null`, and a read right after still showed the old text. `updateBlock` on an
+open block writes into the editor's state (`api.cljs:676-684`). So before a
+write that changes a block, the CLI asks Logseq which block is open and
+refuses with `open_in_editor` if the write would change it: the block itself,
+for a removal or a move also a block below it, for a page deletion or a
+rename a block of the page, and for a rename also a block that links to the
+page, whose link Logseq rewrites. An insert is not refused: Logseq saves the open block before
+it inserts (measured), and the CLI inserts with `focus: false`, so the cursor
+stays where it was. The one insert refused is a text with a ref to the open
+block while that block has no `id::` yet, since storing the id writes into
+it. A write of several blocks goes block by block while a block is open,
+since Logseq's batch insert opens its last block in the editor once the page
+is on screen. What the word does not cover is a block entered in the
+milliseconds between the CLI's question and its write.
 
 `move-block` is the clearest case. `moveBlock` answers `null` for a move that
 worked, for a target that does not exist, and for one Logseq refuses — it
@@ -499,6 +533,13 @@ tidiness, because the alternative route quietly destroys data: `copy-block
 `((block-ref))` aimed at it dangles afterwards. A structural move keeps the
 UUID and the references with it.
 See [0.6.0](CHANGELOG.md#060---2026-08-07) and [0.8.0](CHANGELOG.md#080---2026-08-28).
+
+A rename had a silent loss of its own. `renamePage` onto a name that exists
+merges the two pages (`merge-pages!`, `page.cljs:637`), without the
+confirmation Logseq's own UI asks for; measured on 0.10.15, it answered
+`null` while the renamed page's blocks moved to the other page and the
+renamed page was gone. `rename-page` refuses such a name, and an empty one,
+before anything is sent.
 
 ### Query values are escaped in one place
 
@@ -714,7 +755,7 @@ See `examples/` directory:
 ```
 logseq-cli/
 ├── logseq_cli/
-│   ├── api.py          # HTTP API client (requests.post against Logseq)
+│   ├── api.py          # HTTP API client: the methods it may send, the editor gate, the proof of each write
 │   ├── blockprops.py   # Property keys and values: what Logseq reads back, what a write keeps
 │   ├── blocktext.py    # How Logseq reads a block's lines: code blocks, block boundaries
 │   ├── cliinput.py     # --content, --content-file and --tree, taken from the command line
@@ -727,9 +768,10 @@ logseq-cli/
 │   ├── lookup.py       # Blocks by content, backlinks, incoming block refs, page text
 │   ├── outlinetext.py  # Indented outline text to a block tree, and back
 │   ├── output.py       # Results on stdout, failures on stderr, --json
-│   ├── pagenames.py    # Which page a name means: an alias as Logseq resolves it
+│   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under
 │   ├── render.py       # Blocks to text; finding and resolving references
-│   ├── strictinsert.py # Strict Insert: writes checked to land where asked, moves included
+│   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible
+│   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
 │   ├── commands/       # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page
 │   │   ├── blocks.py       # read a block, find blocks
