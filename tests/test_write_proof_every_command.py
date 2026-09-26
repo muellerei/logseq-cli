@@ -139,11 +139,13 @@ ROWS = [
 # here.
 DRY_RUN_READS = {
     "insert-block-page": 1,
-    "insert-block-after": 0,
-    "insert-block-tree-after": 0,
-    "insert-block-multiline": 0,
-    "insert-block-property": 0,
-    "insert-block-keep-ids": 0,
+    # One getBlock each: the preview checks the anchor the run writes at
+    # (refuse_missing_anchor in commands/edit.py), as move-block's does.
+    "insert-block-after": 1,
+    "insert-block-tree-after": 1,
+    "insert-block-multiline": 1,
+    "insert-block-property": 1,
+    "insert-block-keep-ids": 1,
     "add-note-content": 1,
     "add-note-content-heading": 2,
     "add-note-content-multiline": 1,

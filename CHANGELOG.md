@@ -231,6 +231,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the journal. `add-block-ref --page --dry-run` now reports
   `would_create_page: true` for such a page. A `--keep-ids` write creates
   the page as before, after the check for a block open in the editor.
+- `insert-block --dry-run` with `--after`, `--before` or `--child-of` and a
+  uuid no block has no longer previews an insert the run then refuses. The
+  preview ended before reading anything, with exit 0. It now reads the
+  anchor, as `move-block --dry-run` does, and fails with exit 1, under
+  `--json` with `reason: "block_not_found"` and the `id`. One read more per
+  preview.
 
 ### Changed
 
