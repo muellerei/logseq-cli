@@ -49,6 +49,23 @@ class TestStripTitleHeading:
     def test_heading_with_text_below_keeps_the_text(self):
         assert strip_title_heading("# Reading List\nfirst entry", PAGE) == "first entry"
 
+    def test_indented_lines_below_the_heading_keep_their_levels(self):
+        # Only the first line lost its indentation, so "- first" became the
+        # parent of "- second" instead of its sibling.
+        content = "# Reading List\n  - first\n  - second\n    - detail"
+        assert strip_title_heading(content, PAGE) == "- first\n- second\n  - detail"
+
+    @pytest.mark.parametrize("content", [
+        "intro\n# Reading List\nmore",
+        "```markdown\n# Reading List\n```",
+    ], ids=["later line", "code block"])
+    def test_only_a_leading_heading_is_the_title(self, content):
+        # The heading was removed wherever a line held it, in a code block too.
+        assert strip_title_heading(content, PAGE) == content
+
+    def test_a_leading_heading_after_blank_lines_is_the_title(self):
+        assert strip_title_heading("\n\n# reading list\nfirst entry\n", PAGE) == "first entry"
+
     def test_empty_content_is_left_to_the_empty_check(self):
         # "" is refused as "--content is empty" by require_content where the
         # command checks it; this function only refuses what it emptied.
@@ -108,3 +125,13 @@ def test_refusal_is_an_error_object_under_json(monkeypatch, dry_run):
     assert error["page"] == PAGE
     assert "only the page's title heading" in error["error"]
     _nothing_written(api)
+
+
+def test_indented_notes_below_the_title_are_written_as_siblings(monkeypatch):
+    from tests.logseq_http_double import LogseqHttpDouble
+    double = LogseqHttpDouble.installed(monkeypatch, {PAGE: ["existing"]})
+    result = split_runner().invoke(cli, [
+        "--token", "t", "add-note-content", "--page", PAGE, "--content",
+        f"# {PAGE}\n  - first\n  - second", "--json"])
+    assert result.exit_code == 0, result.stderr
+    assert double.tree(PAGE) == [("existing", []), ("first", []), ("second", [])]

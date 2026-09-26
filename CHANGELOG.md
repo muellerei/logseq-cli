@@ -283,6 +283,13 @@ of about 0.1 s after a multi-block insert.
   anchor, as `move-block --dry-run` does, and fails with exit 1, under
   `--json` with `reason: "block_not_found"` and the `id`. One read more per
   preview.
+- Indented lines below a `# <page name>` title in the content now keep
+  their levels. The writers drop that title, since the page shows its
+  name, and then stripped the text, which took the indentation off the
+  first line only: `- first` and `- second`, indented alike, were written
+  as parent and child. The lines now lose the indentation they share. A
+  `# <page name>` line anywhere else, further down or in a code block, was
+  dropped too; only the first line with text is taken for the title now.
 
 ### Changed
 
