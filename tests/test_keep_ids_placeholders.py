@@ -161,14 +161,14 @@ class TestPositionsTheBatchCannotTakeDirectly:
         assert graph.tree("Linked Only") == [("restored", [("child", [])])]
         assert _restored(graph) == ("Linked Only", None, 0)
 
-    def test_a_fresh_page_keeps_its_empty_block_as_append_does(self):
-        """createPage leaves one empty block, and appendBlockInPage writes
-        after it; the restore does not remove what it did not write."""
+    def test_a_fresh_page_holds_only_what_was_written(self):
+        """The page is created without a first block, since the write follows
+        at once (M18); the stand-in that took the batch is gone again."""
         graph = _graph()
         result, _ = _run(["add-note-content", "--page", "New Page", "--content", TOP,
                           "--keep-ids"], graph)
         assert result.exit_code == 0, result.stderr
-        assert graph.tree("New Page") == [("", []), ("restored", [])]
+        assert graph.tree("New Page") == [("restored", [])]
 
 
 class TestTheWriteIsProven:
@@ -243,14 +243,15 @@ class TestTargets:
         assert result.exit_code == 0, result.output + result.stderr
         assert _restored(graph) == ("Page A", None, 1)
 
-    def test_a_missing_page_is_created_as_append_would(self):
-        """appendBlockInPage creates a missing page, with its empty block,
-        and writes after it (measured); the restore does the same."""
+    def test_a_missing_page_is_created_without_an_empty_block(self):
+        """appendBlockInPage creates a missing page and writes to it; the
+        restore creates it too, without a first block, since it writes at
+        once (M18)."""
         graph = _graph()
         result, _ = _run(["insert-block", "--page", "Nowhere Yet", "--content", TOP,
                           "--keep-ids"], graph)
         assert result.exit_code == 0, result.output + result.stderr
-        assert graph.tree("Nowhere Yet") == [("", []), ("restored", [])]
+        assert graph.tree("Nowhere Yet") == [("restored", [])]
 
 
 class TestStillRefused:

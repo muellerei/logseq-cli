@@ -305,11 +305,22 @@ class LogseqAPI:
             return None
         return result
 
-    def create_page(self, page_name: str, properties: dict = None, options: dict = None):
+    def create_page(self, page_name: str, properties: dict = None, *, first_block: bool = True):
+        """Create a page. A name in the graph's date format is a journal.
+
+        Logseq tells a journal by its name alone (M18, spec 030); a
+        ``journal?`` property is not needed and lands as a line
+        ``journal?:: true`` at the top of the file. ``first_block=False`` is
+        for a caller that writes right after: otherwise the page starts with
+        an empty block. A page created without a first block and without
+        text gets no file (measured), so a caller that writes nothing keeps it.
+        """
         # Without redirect: false, Logseq turns its view to the new page (M13,
         # spec 030) -- every page and journal the CLI created moved the view.
-        args = [page_name, properties or {}, {**(options or {}), "redirect": False}]
-        return self.call("logseq.Editor.createPage", args)
+        options = {"redirect": False}
+        if not first_block:
+            options["createFirstBlock"] = False
+        return self.call("logseq.Editor.createPage", [page_name, properties or {}, options])
 
     def append_block_in_page(self, page_name: str, content: str, options: dict = None):
         # Options reach insertBlock unchanged (append_block_in_page in api.cljs),

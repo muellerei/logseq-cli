@@ -469,8 +469,9 @@ class PageGraph:
             return {"uuid": uuid, "content": f"id:: {uuid}", "children": []}
         return None
 
-    def create_page(self, name, properties=None, options=None):
-        page = self._page(name, [{"uuid": self._fresh(), "content": "", "children": []}])
+    def create_page(self, name, properties=None, *, first_block=True):
+        blocks = [{"uuid": self._fresh(), "content": "", "children": []}] if first_block else []
+        page = self._page(name, blocks)
         return self.get_page(page["name"])
 
     def with_property_block(self, name, content, *rest):

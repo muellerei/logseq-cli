@@ -111,7 +111,7 @@ def test_create_page_sends_redirect_false(monkeypatch, double, api):
     # M13: createPage without options turns Logseq's view to the new page.
     api.create_page("New Page")
     api.create_page("Page With Properties", {"status": "a"})
-    api.create_page("Page With Options", {}, {"createFirstBlock": False})
+    api.create_page("Page Written At Once", first_block=False)
     options = _sent_options(double, "createPage")
     assert len(options) == 3
     assert all(o and o.get("redirect") is False for o in options), options

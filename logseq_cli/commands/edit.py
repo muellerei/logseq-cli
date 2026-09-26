@@ -728,7 +728,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
             # Creating the journal page is itself a write, so under --dry-run it
             # is only reported, never done.
             if not dry_run:
-                api.create_page(page, {"journal?": True})
+                api.create_page(page, first_block=False)
 
 
     if dry_run:
