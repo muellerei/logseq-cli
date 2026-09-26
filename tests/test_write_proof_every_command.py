@@ -30,7 +30,6 @@ from tests.logseq_http_double import LogseqHttpDouble
 # The task that proves each write method in LogseqAPI, for the methods not
 # proven yet; a method missing here proves its write.
 PROOF_TASK = {
-    "insertBatchBlock": "030-C3", "moveBlock": "030-C3",
     "updateBlock": "030-C4", "upsertBlockProperty": "030-C4",
     "removeBlockProperty": "030-C4",
     "removeBlock": "030-C5", "deletePage": "030-C5", "renamePage": "030-C5",

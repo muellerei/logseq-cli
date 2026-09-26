@@ -325,8 +325,8 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # graph), so the write cannot be checked from its return value. Counting the
     # matches instead would report "Replaced N block(s)" for writes that never
     # landed, complete with a before/after diff computed locally. Read the
-    # blocks back and compare. See the note "Why some writes are verified by
-    # reading them back" in strictinsert.py for when this read can be dropped.
+    # blocks back and compare. The note above api._METHODS says when a read
+    # like this can be dropped.
     # Compared without id:: lines: a ref another replacement wrote may have
     # stored this block's id meanwhile, and Logseq keeps it through the update
     # (#95, measured). A replacement never changes an id:: line (masked above).

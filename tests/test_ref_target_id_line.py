@@ -45,12 +45,31 @@ BLOCKS = {
 }
 
 
+def _read_back(nodes, made):
+    """A batch's nodes as getBlock hands them back, with fresh uuids."""
+    out = []
+    for node in nodes:
+        made.append(f"00000000-0000-4000-8000-{len(made) + 1:012d}")
+        out.append({"uuid": made[-1], "content": node["content"],
+                    "children": _read_back(node.get("children") or [], made)})
+    return out
+
+
 def _api():
     api = LogseqAPI(token="t")
+    batches = []
 
     def call(method, args=None):
+        if method == "logseq.Editor.insertBatchBlock":
+            batches.extend(args[1])
+            return None
         if method == "logseq.Editor.getBlock":
-            return BLOCKS.get(args[0].lower())
+            block = BLOCKS.get(args[0].lower())
+            if block and batches and args[0].lower() == OWN:
+                # The anchor with the batch under it: insertBatchBlock's
+                # proof reads it back (spec 030).
+                return {**block, "children": _read_back(batches, [])}
+            return block
         return {"uuid": "new"}
 
     api.call = MagicMock(side_effect=call)

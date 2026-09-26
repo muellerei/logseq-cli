@@ -120,8 +120,20 @@ class TestTheApiRefusesAnUndecidedIdLine:
     def test_a_batch_that_keeps_ids_carries_them(self):
         # --keep-ids: check_block_ids has vetted the ids before this call.
         api = self._api()
-        api.insert_batch_block(TARGET, [{"content": f"x\nid:: {FOREIGN}"}], {"keepUUID": True})
-        api.call.assert_called_once()
+        sent = []
+
+        def call(method, args=None):
+            if method == "logseq.Editor.insertBatchBlock":
+                sent.append(args[1])
+                return None
+            # The anchor, with the kept block under it once the batch is in:
+            # the batch's proof reads it before and after (spec 030).
+            return {"uuid": TARGET, "children": [
+                {"uuid": FOREIGN, "content": n["content"]} for b in sent for n in b]}
+        api.call.side_effect = call
+        assert api.insert_batch_block(
+            TARGET, [{"content": f"x\nid:: {FOREIGN}"}], {"keepUUID": True}) == [FOREIGN]
+        assert sent == [[{"content": f"x\nid:: {FOREIGN}"}]]
 
     def test_an_id_line_in_a_code_block_is_code(self):
         api = self._api()

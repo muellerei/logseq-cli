@@ -128,22 +128,23 @@ def split_runner():
 class FakeGraph:
     """Minimal in-memory stand-in for the block graph.
 
-    ``insertBatchBlock`` answers ``null`` whether it wrote or not, so
-    :func:`strictinsert.insert_block_tree_batched` proves the write by reading the
-    parent's children back. A MagicMock returns a MagicMock for that read, which
-    reads as "nothing arrived" and would make every success test fail for the
-    wrong reason. This models just enough of the real API to tell a genuine
-    write apart from a silent failure.
+    Stands in for LogseqAPI's block writes and reads, and answers the way the
+    methods do after their proofs (spec 030): ``insert_batch_block`` the new
+    uuids in DFS pre-order, counted in the owning mock's ``writes_landed``. A
+    MagicMock answers every read with a MagicMock, which reads as "nothing
+    arrived" and would make every success test fail for the wrong reason.
 
     ``fail_after`` writes only that many blocks and then stops silently, which
     is the partial-write shape the graph itself has to expose; ``insert_block``
-    then raises WriteNotVerified, as the real method does.
+    then raises WriteNotVerified, and ``insert_batch_block`` too once the
+    blocks that did land are counted, as the real methods do.
     """
 
     def __init__(self, uuids, *, fail_after=None):
         self._uuids = list(uuids)
         self._fail_after = fail_after
         self._written = 0
+        self.api = None             # the mock whose writes_landed is counted
         self.children = {}          # parent uuid -> list of child dicts
         self.batch_calls = []       # (anchor, tree, options)
         self.insert_calls = []      # (parent, content, options)
@@ -202,14 +203,16 @@ class FakeGraph:
     def insert_batch_block(self, anchor, batch, options=None):
         self.batch_calls.append((anchor, batch, options))
         opts = options or {}
+        made = None
         if opts.get("sibling"):
             # anchored on a sibling: the batch lands after it, under its parent
             for parent, kids in self.children.items():
                 if any(k["uuid"] == anchor for k in kids):
-                    self._add_tree(parent, batch)
-                    return None
-        self._add_tree(anchor, batch, prepend=True)
-        return None
+                    made = self._add_tree(parent, batch)
+                    break
+        if made is None:
+            made = self._add_tree(anchor, batch, prepend=True)
+        return _batch_proven(self.api, anchor, batch, [b["uuid"] for b in made])
 
     def insert_block(self, parent, content, options=None):
         self.insert_calls.append((parent, content, options))
@@ -256,10 +259,24 @@ class FakeGraph:
         }
 
 
+def _batch_proven(api, anchor, batch, new):
+    """What LogseqAPI.insert_batch_block does with the ``new`` uuids a fake
+    wrote: counts them in ``api.writes_landed`` and answers them, or raises
+    WriteNotVerified when fewer than ``batch`` holds landed."""
+    from logseq_cli.outlinetext import count_blocks
+    if api is not None:
+        api.writes_landed += len(new)
+    expected = count_blocks(batch)
+    if len(new) != expected:
+        raise _not_verified("insertBatchBlock", anchor, f"{expected} blocks", str(len(new)))
+    return new
+
+
 def fake_api(uuids, *, fail_after=None):
     """MagicMock whose block-write/read methods are backed by FakeGraph."""
     graph = FakeGraph(uuids, fail_after=fail_after)
     api = mock_api()
+    graph.api = api
     api.insert_batch_block.side_effect = graph.insert_batch_block
     api.insert_block.side_effect = graph.insert_block
     api.get_block.side_effect = graph.get_block
@@ -345,7 +362,9 @@ class PageGraph:
     * ``insertBatchBlock`` answers ``null``. ``sibling: false`` puts the batch
       at the head of the anchor's children, ``sibling: true`` right after the
       anchor, ``+ before: true`` right before it. A page uuid as anchor with
-      ``sibling: false`` puts it at the head of the page.
+      ``sibling: false`` puts it at the head of the page. As a method here it
+      answers as LogseqAPI's does after its proof: the new uuids in DFS
+      pre-order, or WriteNotVerified for a batch that wrote nothing.
     * With ``keepUUID`` a node keeps the uuid of its ``id::`` line, a
       placeholder's included, and also one a real block already has: the
       batch does not check (the CLI must). Only a line Logseq reads as a
@@ -389,6 +408,7 @@ class PageGraph:
 
     def __init__(self, pages=None, *, placeholders=(), blockless=(), aliases=None):
         self._ids = 0
+        self.api = None                 # the mock whose writes_landed is counted
         self.pages = []                 # {"id", "uuid", "name", "blocks"}
         self.placeholders = set(placeholders)
         self.alias_sources = {a.lower(): list(s) for a, s in (aliases or {}).items()}
@@ -543,7 +563,7 @@ class PageGraph:
         page = next((p for p in self.pages if p["uuid"] == anchor), None)
         if page is not None:
             if opts.get("sibling"):
-                return None
+                return _batch_proven(self.api, anchor, batch, [])
             # Measured: clean on a page holding a block (even an empty one),
             # prefixed on a page with none.
             target, at = page["blocks"], 0
@@ -551,7 +571,7 @@ class PageGraph:
         else:
             found = self.locate(anchor)
             if not found:
-                return None
+                return _batch_proven(self.api, anchor, batch, [])
             page, siblings, i, parent = found
             if not opts.get("sibling"):
                 target, at, headless = siblings[i]["children"], 0, False
@@ -561,9 +581,14 @@ class PageGraph:
             else:
                 target, at, headless = siblings, i + 1, False
         prefix = "* " if headless else ""
-        target[at:at] = [self._node(n, keep=keep, strip_ids=not keep, prefix=prefix)
-                         for n in batch]
-        return None
+        nodes = [self._node(n, keep=keep, strip_ids=not keep, prefix=prefix) for n in batch]
+        target[at:at] = nodes
+
+        def walk(blocks):
+            for b in blocks:
+                yield b["uuid"]
+                yield from walk(b["children"])
+        return _batch_proven(self.api, anchor, batch, list(walk(nodes)))
 
     def update_block(self, uuid, content, properties=None, *, replacing=None):
         found = self.locate(uuid)
@@ -689,4 +714,5 @@ def page_graph_api(graph):
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []
     api.graph = graph
+    graph.api = api
     return api

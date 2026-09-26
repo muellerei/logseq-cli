@@ -657,19 +657,17 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             if kind == "tree":
                 if heading_uuid:
                     uuids.extend(insert_block_tree_with_uuids(
-                        api, payload, heading_uuid, keep_ids=keep_ids,
-                        _written=len(uuids)))
+                        api, payload, heading_uuid, keep_ids=keep_ids))
                 else:
                     # payload is the parsed tree; insert top nodes + children at page level
                     uuids.extend(insert_block_tree_at_page_top(
-                        api, payload, page_name, keep_ids=keep_ids, _written=len(uuids)))
+                        api, payload, page_name, keep_ids=keep_ids))
             else:
                 if heading_uuid:
                     r = insert_block_at(api, heading_uuid, payload, sibling=False,
-                                        keep_ids=keep_ids, written_before=len(uuids))
+                                        keep_ids=keep_ids)
                 else:
-                    r = append_in_page(api, page_name, payload, keep_ids,
-                                       written_before=len(uuids))
+                    r = append_in_page(api, page_name, payload, keep_ids)
                 uuids.append(r["uuid"])
         total = len(uuids)
         if any_hierarchical:

@@ -13,6 +13,7 @@ import requests
 # is the net no write path can go around.
 from logseq_cli.blocktext import (
     block_ref_uuids,
+    block_text_matches,
     refuse_id_lines,
     refuse_id_lines_tree,
     refuse_split_block,
@@ -20,7 +21,7 @@ from logseq_cli.blocktext import (
     refuse_split_tree,
     tree_texts,
 )
-from logseq_cli.outlinetext import subtree_uuids
+from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
 # Raised by the writes below; imported here too so that callers can take them
 # from the API they call (spec 030). They live apart to keep imports acyclic.
 from logseq_cli.writerefused import (  # noqa: F401  re-exported
@@ -55,6 +56,11 @@ class Write:
     * ``uuid``: the answer carries the new block's uuid. insertBlock and
       appendBlockInPage answer the block they wrote, and ``null`` for one
       they did not (an unknown anchor, a page not loaded).
+    * ``batch``: the place the batch lands, read before and after the write,
+      holds as many new blocks as were sent, with the texts sent, in order.
+    * ``move``: the moved block is read back where it was sent.
+
+    Why each is proven the way it is: the note above ``_METHODS``.
 
     ``editor`` says when a block open in Logseq's editor refuses the write,
     given the open block and the write's target:
@@ -87,6 +93,35 @@ class UI:
 # here: a write nobody registered would otherwise run past the cache, and
 # later past the editor gate and the proof, without a trace.
 #
+# How a write is proven, and why (spec 030; measured on 0.10.15, the batch
+# and the move against a live graph on 2026-08-22)
+# ------------------------------------------------------------------------
+# Logseq answers most writes with null, whether it wrote or not, and a write
+# it threw on with HTTP 200 and {"error": ...} (M1-M6, M9). call() turns the
+# error object into LogseqWriteError for every write; the null has to be
+# proven away, each method by what it can show:
+#
+#   insertBlock, appendBlockInPage  answer the new block (null when nothing
+#       was written), so the answer is the proof and nothing is read (uuid).
+#   insertBatchBlock  null on success, on a partial write (a malformed node
+#       is skipped while its siblings land) and on failure, and it withholds
+#       the new uuids. The place it lands is read before and after (batch);
+#       the read also yields the uuids.
+#   moveBlock  null on success, on a missing target and on a refusal (a move
+#       into the block's own subtree does nothing). The block is read back
+#       where it was sent (move).
+#   updateBlock, upsertBlockProperty, removeBlockProperty (M1, M6),
+#   removeBlock (M2), deletePage (M3), renamePage (M4), createPage (M5,
+#       M14), setBlocksId (M12): their proof entries follow (030-C4, 030-C5).
+#
+# A read proves Logseq's database, not the file, which follows 1.8 s later
+# (M7); it reaches Logseq, not the cache, since every write clears the cache.
+# A write elsewhere between a write and its read shows as a failed proof,
+# with what was expected and what was read. Should a Logseq version answer
+# one of these writes with what it wrote, or with an error when it wrote
+# nothing, prove it by the answer as insertBlock is, and drop the read;
+# keep it where the answer cannot show a count or a place.
+#
 # Deliberately absent: logseq.Editor.getPageProperties. It is declared in
 # Logseq's plugin API (LSPlugin.ts), which is presumably where the old read
 # list was first copied from, but the HTTP server does not expose it — it
@@ -111,8 +146,8 @@ _METHODS = {
     "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
     "logseq.Editor.upsertBlockProperty": Write(editor="target", proof=None),
     "logseq.Editor.removeBlockProperty": Write(editor="target", proof=None),
-    "logseq.Editor.insertBatchBlock": Write(editor="any", proof=None),
-    "logseq.Editor.moveBlock": Write(editor="subtree", proof=None),
+    "logseq.Editor.insertBatchBlock": Write(editor="any", proof="batch"),
+    "logseq.Editor.moveBlock": Write(editor="subtree", proof="move"),
     "logseq.Editor.setBlocksId": Write(editor="requested", proof=None),
     "logseq.Editor.checkEditing": UI(),
     "logseq.Editor.exitEditingMode": UI(),
@@ -292,6 +327,17 @@ MOVES_CURSOR = "a batch insert would move the cursor out of the block being edit
 _BATCH_EDITOR_POLL_S = 0.01
 
 
+def _editor_unknown_after_batch(answer: str) -> EditorStateUnknown:
+    """checkEditing after a batch that was sent: the batch is written, and
+    a block it opened may be open still."""
+    return EditorStateUnknown(
+        f"The batch was written, but checkEditing after it gave no usable "
+        f"answer ({answer!r}); a block the batch opened may still be open in "
+        "Logseq's editor.",
+        answer=answer,
+    )
+
+
 class LogseqAPI:
     # After a batch, how long to watch for the block Logseq opens in its
     # editor: it opened 16–34 ms after the answer (M16), so 100 ms, counted
@@ -418,7 +464,7 @@ class LogseqAPI:
         return data
 
     def _write(self, method: str, args: list, *, target, texts=(), own=None,
-               editing=_UNSET, count: int = 1):
+               editing=_UNSET, count: int = 1, proof_args=None):
         """Send one write the way its ``_METHODS`` entry says, and count it.
 
         Every public write goes through here, so the steps below hold for all
@@ -435,10 +481,12 @@ class LogseqAPI:
            if one of them is the open block (setBlocksId writes into it);
         5. the write;
         6. prove it, through ``_prove_<proof>``, which answers the result the
-           method returns;
+           method returns; ``proof_args`` are what it compares with beyond
+           the target (a batch: what it sent, and its place as read before);
         7. ``count`` more writes landed (a batch counts its blocks): after
            the proof, so a write that fails it does not count. A write with
-           no proof yet counts on Logseq's answer.
+           no proof yet counts on Logseq's answer. A batch that landed in
+           part counts those blocks in its proof before it raises.
 
         Asked before the ids are stored, not after: setBlocksId would
         otherwise write an id:: into a block for a write the gate then
@@ -466,7 +514,8 @@ class LogseqAPI:
             self.set_blocks_id(wanted, editing=editing)
         result = self.call(method, args)
         if kind.proof is not None:
-            result = getattr(self, f"_prove_{kind.proof}")(method, target, result)
+            result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
+                                                            **(proof_args or {}))
         self.writes_landed += count
         return result
 
@@ -480,6 +529,114 @@ class LogseqAPI:
         if not uuid:
             raise _not_verified(method, target, "a new block", "no block uuid in the answer")
         return result if isinstance(result, dict) else {"uuid": uuid}
+
+    def _prove_batch(self, method, target, result, *, texts, place, before):
+        """The new blocks' uuids, DFS pre-order: the blocks at ``place`` that
+        were not in ``before``, as many as ``texts`` and with those texts.
+
+        A batch is not atomic: the blocks that landed are counted before
+        anything is raised, since they stay. The editor the batch opened is
+        closed whether the proof holds or not, so that a failed one leaves
+        no block open either (E2); an editor that cannot be asked is added
+        to the proof's error, or raised with the blocks counted."""
+        old = {b.get("uuid") for b in before}
+        new = [b for b in self._blocks_in(place) if b.get("uuid") not in old]
+        failed, landed = None, len(new)
+        if len(new) != len(texts):
+            failed = _not_verified(method, target, f"{len(texts)} blocks", str(len(new)))
+            landed = min(len(new), len(texts))
+        else:
+            for sent, block in zip(texts, new):
+                read = block.get("content") or ""
+                if not block_text_matches(sent, read):
+                    failed = _not_verified(method, target, repr(sent), repr(read))
+                    break
+        try:
+            self._close_editor_the_batch_opened({b.get("uuid") for b in new})
+        except EditorStateUnknown as unknown:
+            self.writes_landed += landed
+            if failed is None:
+                raise
+            failed.args = (f"{failed} {unknown}",)
+            raise failed from unknown
+        if failed is not None:
+            self.writes_landed += landed
+            raise failed
+        return [b["uuid"] for b in new]
+
+    def _prove_move(self, method, target, result, *, to, before):
+        """``target`` sits right in front of ``to`` (``before``), or among its
+        children. Among, not first: moveBlock's own placement is not held to
+        more than it was (spec 030 leaves that finding open)."""
+        landed = self.get_block(to, include_children=True) or {}
+        if before:
+            # Directly in front: "same parent" would pass a move that did
+            # nothing, since source and target often share one already.
+            siblings = self._sibling_uuids_in_order(landed)
+            try:
+                ok = siblings.index(target) + 1 == siblings.index(to)
+            except ValueError:
+                ok = False
+            where = f"it directly before block {to[:8]}..."
+        else:
+            ok = any(isinstance(c, dict) and c.get("uuid") == target
+                     for c in landed.get("children") or [])
+            where = f"it under block {to[:8]}..."
+        if not ok:
+            raise _not_verified(method, target, where, "it somewhere else")
+        return result
+
+    # Where a batch lands and what a move is checked against: a block's
+    # parent, given as ("block", its id or uuid) or ("page", its name).
+    def _place_of_parent(self, block):
+        """The parent of ``block`` as a place, or ``None``.
+
+        getBlock reports a parent as ``{"id": <int>}`` and accepts that id,
+        so a nested block's siblings are one read away. Not at the top level:
+        there the parent is the page, getBlock answers ``null`` for a page's
+        id, and getPageBlocksTree refuses a number ("Expected string, got:
+        number") and needs the page's name (measured, 0.10.15; #23).
+        """
+        parent_id = (block.get("parent") or {}).get("id")
+        if parent_id is None:
+            return None
+        if parent_id == (block.get("page") or {}).get("id"):
+            page = self.get_page(parent_id) or {}
+            return ("page", page["name"]) if page.get("name") else None
+        return ("block", parent_id)
+
+    def _children_in(self, place) -> list:
+        """The blocks directly at ``place``, each with its children."""
+        if place is None:
+            return []
+        kind, key = place
+        if kind == "page":
+            children = self.get_page_blocks_tree(key)
+        else:
+            children = (self.get_block(key, include_children=True) or {}).get("children")
+        return children if isinstance(children, list) else []
+
+    def _blocks_in(self, place) -> list:
+        """Every block at ``place`` and below it, DFS pre-order."""
+        return preorder_blocks(self._children_in(place))
+
+    def _sibling_uuids_in_order(self, block: dict) -> list:
+        """UUIDs of ``block`` and its siblings, in order."""
+        return [c.get("uuid") for c in self._children_in(self._place_of_parent(block))
+                if isinstance(c, dict) and c.get("uuid")]
+
+    def _batch_place(self, anchor: str, options: dict):
+        """Where a batch at ``anchor`` lands: under the anchor, or with
+        ``sibling`` beside it under its parent. A page's uuid as the anchor
+        puts it at the head of the page. ``None`` for an anchor Logseq does
+        not know, where nothing lands."""
+        if options.get("sibling"):
+            block = self.get_block(anchor, include_children=False)
+            return self._place_of_parent(block) if block else None
+        if self.get_block(anchor, include_children=True):
+            return ("block", anchor)
+        page = self.get_page(anchor)
+        return ("page", page["name"]) if isinstance(page, dict) and page.get("name") else None
 
     def check_editing(self) -> str | None:
         """The uuid of the block open in Logseq's editor, lower case, or
@@ -641,14 +798,14 @@ class LogseqAPI:
         )
 
     def insert_batch_block(self, block_uuid: str, batch: list, options: dict = None):
-        """Insert a whole tree in ONE call. Returns null even on success.
+        """Insert a whole tree in ONE call; answers the new blocks' uuids in
+        DFS pre-order.
 
         ``insertBatchBlock`` writes an arbitrarily deep ``[{content, children}]``
         tree against a single anchor, where :meth:`insert_block` needs one call
-        per node. It answers ``null`` both when it wrote and when it did not, so
-        the return value carries no success signal at all: callers must verify by
-        reading the anchor's children back (see
-        :func:`strictinsert.insert_block_tree_batched`).
+        per node. It answers ``null`` whether it wrote all, part or nothing, so
+        the place it lands is read before and after (``_prove_batch``), which
+        raises WriteNotVerified unless every block arrived with its text.
 
         Positioning also differs from :meth:`insert_block`: with
         ``sibling: false`` the batch lands at the HEAD of the child list and
@@ -662,28 +819,45 @@ class LogseqAPI:
         if not (options or {}).get("keepUUID"):
             refuse_id_lines_tree(batch)
         texts = list(tree_texts(batch))
-        result = self._write(
-            "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}],
+        options = options or {}
+        # Read before the editor question, so that only the reads _write
+        # names lie between the question and the write.
+        place = self._batch_place(block_uuid, options)
+        return self._write(
+            "logseq.Editor.insertBatchBlock", [block_uuid, batch, options],
             target=block_uuid, texts=texts, count=len(texts),
+            proof_args={"texts": texts, "place": place, "before": self._blocks_in(place)},
         )
-        self._close_editor_the_batch_opened()
-        return result
 
-    def _close_editor_the_batch_opened(self):
+    def _close_editor_the_batch_opened(self, new_uuids):
         """Leave the block the batch just opened in Logseq's editor, if it did.
 
-        The gate (``any``) let the batch through only with no block open, so a
-        block open now is the batch's (E2). Left open, it would refuse the
-        agent's next write to it with open_in_editor. Here rather than in
-        strictinsert, so it holds for every batch, --keep-ids included, and
-        needs none of the new uuids. Logseq opens it asynchronously (M16), so
-        it is asked again every 10 ms within ``batch_editor_wait_s``.
-        Someone entering a block in that window has it closed; Logseq saves on
-        leaving (M10), nothing is lost.
+        Left open, it would refuse the agent's next write to it with
+        open_in_editor. Here rather than in strictinsert, so it holds for
+        every batch, --keep-ids included. Logseq opens it asynchronously
+        (M16), so it is asked again every 10 ms within
+        ``batch_editor_wait_s``.
+
+        Only a block of the batch (``new_uuids``) is closed. One someone else
+        entered in that window stays open: Logseq does not save a block left
+        while its last editor op is the batch's :paste-blocks
+        (lifecycle.cljs:35-43, editor.cljs:2024; read in the code, not
+        measured), so closing it would lose what is typed there.
+
+        An answer that cannot be read, or no answer, raises
+        EditorStateUnknown saying the batch was written: the caller counts
+        the blocks first.
         """
+        new_uuids = {u.lower() for u in new_uuids if u}
         polls = round(self.batch_editor_wait_s / _BATCH_EDITOR_POLL_S)
         for poll in range(polls + 1):
-            if self.check_editing() is not None:
+            try:
+                editing = self.check_editing()
+            except EditorStateUnknown as unknown:
+                raise _editor_unknown_after_batch(unknown.fields["answer"]) from unknown
+            except requests.RequestException as failed:
+                raise _editor_unknown_after_batch(type(failed).__name__) from failed
+            if editing in new_uuids:
                 self.exit_editing_mode()
                 return
             if poll < polls:
@@ -693,11 +867,16 @@ class LogseqAPI:
         """Move a block (with its children) next to / under ``target_uuid``.
 
         Structural move, unlike copy+remove: the block keeps its UUID, so
-        ``((block-ref))`` backlinks survive.
+        ``((block-ref))`` backlinks survive. Logseq answers null whether it
+        moved or not; ``_prove_move`` reads the block back where it was sent
+        (``before``: right in front of ``target_uuid``; else among its
+        children) and raises WriteNotVerified otherwise.
         """
+        options = options or {}
         return self._write(
-            "logseq.Editor.moveBlock", [src_uuid, target_uuid, options or {}],
+            "logseq.Editor.moveBlock", [src_uuid, target_uuid, options],
             target=src_uuid,
+            proof_args={"to": target_uuid, "before": bool(options.get("before"))},
         )
 
     def update_block(self, block_uuid: str, content: str, properties: dict = None, *,

@@ -327,22 +327,28 @@ class TestPartialWriteIsNamed:
     Tree writes go through ``insertBatchBlock``, which answers ``null`` whether
     it wrote or not AND can still write only part of a batch (verified against a
     live graph: a malformed node is skipped silently while its siblings land).
-    So the failure is detected by re-reading the parent's children and comparing
-    the count, and the message has to name that partial state just as the
-    per-block path did.
+    So LogseqAPI.insert_batch_block re-reads the place and compares the count,
+    and the message has to name that partial state just as the per-block path
+    did (spec 030).
     """
 
-    def test_message_names_the_partial_state(self, api, tmp_path):
-        api.graph.set_fail_after(3)  # 3 of 5 land, then the batch stops silently
+    def test_message_names_the_partial_state(self, monkeypatch, tmp_path):
+        double = _journal_double(monkeypatch, [{"content": "## Log", "children": []}])
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        # A with its two children lands (3 of 5), then the batch stops silently.
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock",
+                            lambda args: real([args[0], args[1][:1], *args[2:]]))
         f = tmp_path / "u.md"
         f.write_text("- ### A\n\t- a1\n\t- a2\n- ### B\n\t- b1", encoding="utf-8")
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--under-heading", "## Log",
-            "--content-file", str(f)])
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE,
+            "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
-        assert "wrote 3 of 5 block(s)" in result.output
-        assert "Added" not in result.output
-        assert "duplicate" in result.output
+        assert "Added" not in result.stdout
+        error = _json.loads(result.stderr[result.stderr.index("{"):])
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        assert (error["expected"], error["got"], error["writes_landed"]) == ("5 blocks", "3", 3)
+        assert "3 earlier write(s) in this call landed and remain" in error["error"]
 
     def test_upsert_aborts_instead_of_reporting_phantom_blocks(self, api, tmp_path):
         """The upsert path used insert_block_tree (non-strict, int-returning)
@@ -357,7 +363,8 @@ class TestPartialWriteIsNamed:
             "--upsert-heading", "### [[Carol]]", "--content-file", str(f)])
         assert result.exit_code == 1
         assert "Added" not in result.output
-        assert "wrote 0 of 3 block(s)" in result.output
+        # Not "Nothing was written": the mocked update_block counts nothing.
+        assert "expected 3 blocks, read 0." in result.output
 
     def test_upsert_success_count_matches_real_writes(self, api, tmp_path):
         f = tmp_path / "u.md"
@@ -437,7 +444,7 @@ class TestPartialWriteIsNamed:
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output
 
 

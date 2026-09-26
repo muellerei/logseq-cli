@@ -71,24 +71,6 @@ class TestMoveBlock:
         assert "Moved 1 block(s) before" in r.output
         api.move_block.assert_called_once_with(SRC, TGT, {"before": True})
 
-    def test_before_requires_source_directly_in_front(self):
-        """Same parent is not enough: a move that did nothing must not pass."""
-        api = _api(sibling_order=[TGT, SRC])  # source lands AFTER the target
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "move-block", "--id", SRC, "--before", TGT])
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
-
-    def test_silent_no_op_is_reported(self):
-        """Logseq answers null whether or not it moved; the re-read decides."""
-        api = _api(children_after=[])  # source never shows up under the target
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "move-block", "--id", SRC, "--under", TGT])
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
-
     def test_missing_target_aborts_before_moving(self):
         api = _api()
         api.get_block.side_effect = lambda uuid, include_children=True: (
@@ -290,35 +272,92 @@ def _run(graph, *args):
         return CliRunner().invoke(cli, ["move-block", *args])
 
 
+def _double(pages, *, noop=False, monkeypatch):
+    """The real LogseqAPI against the HTTP double, which reads a page the way
+    Logseq does (getBlock answers null for a page's id, getPageBlocksTree
+    wants the name): the move's proof sits in LogseqAPI.move_block (spec 030),
+    which the stand-ins above replace."""
+    double = LogseqHttpDouble()
+    for name, blocks in pages.items():
+        double.add_page(name, blocks)
+    if noop:
+        double.set_mode("moveBlock", "noop")   # Logseq's null, nothing moved
+    return double.install(monkeypatch)
+
+
+def _move(double, src, flag, target):
+    return split_runner().invoke(cli, [
+        "--token", "t", "move-block", "--id", double.uuid_of(src), flag,
+        double.uuid_of(target), "--json"])
+
+
+def _not_moved(r):
+    assert r.exit_code == 1
+    error = json.loads(r.stderr)
+    assert (error["reason"], error["method"]) == ("write_not_verified", "moveBlock")
+    assert error["writes_landed"] == 0
+    return error
+
+
+class TestTheMoveProvesItself:
+    """moveBlock answers null whether it moved or not; the method reads the
+    target back."""
+
+    def test_silent_no_op_under_is_reported(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--under", "tgt"))
+        assert "under block" in error["error"]
+
+    def test_before_requires_source_directly_in_front(self, monkeypatch):
+        """Same parent is not enough: a move that did nothing must not pass."""
+        double = _double({"page a": ["tgt", "src"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--before", "tgt"))
+        assert "directly before block" in error["error"]
+
+    def test_before_that_did_nothing_across_parents_is_reported(self, monkeypatch):
+        """The source sits under another parent than the target: after a
+        move that did nothing it is not among the target's siblings at all,
+        which fails the proof as a wrong place does."""
+        double = _double({"page a": [{"content": "p1", "children": ["src"]},
+                                     {"content": "p2", "children": ["tgt"]}]},
+                         noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--before", "tgt"))
+        assert "directly before block" in error["error"]
+
+    def test_under_counts_the_move(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, monkeypatch=monkeypatch)
+        r = _move(double, "src", "--under", "tgt")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("tgt", [("src", [])])]
+
+
 class TestMoveBeforeTopLevel:
     """#23: a top-level target's parent is its page, which getBlock cannot read."""
 
-    def test_top_level_before_top_level(self):
-        g = _Graph({"page a": [(A, []), (B, []), (C, [])]})
-        r = _run(g, "--id", C, "--before", A)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [C, A, B]
+    def test_top_level_before_top_level(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c"]}, monkeypatch=monkeypatch)
+        r = _move(double, "c", "--before", "a")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("c", []), ("a", []), ("b", [])]
 
-    def test_nested_block_before_top_level(self):
-        g = _Graph({"page a": [(A, [(A1, [])]), (B, [])]})
-        r = _run(g, "--id", A1, "--before", B)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [A, A1, B]
+    def test_nested_block_before_top_level(self, monkeypatch):
+        double = _double({"page a": [{"content": "a", "children": ["a1"]}, "b"]},
+                         monkeypatch=monkeypatch)
+        r = _move(double, "a1", "--before", "b")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("a", []), ("a1", []), ("b", [])]
 
-    def test_across_pages_before_top_level(self):
-        g = _Graph({"page a": [(A, []), (B, [])], "page b": [(X, [])]})
-        r = _run(g, "--id", X, "--before", B)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [A, X, B]
-        assert g.order("page b") == []
+    def test_across_pages_before_top_level(self, monkeypatch):
+        double = _double({"page a": ["a", "b"], "page b": ["x"]}, monkeypatch=monkeypatch)
+        r = _move(double, "x", "--before", "b")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("a", []), ("x", []), ("b", [])]
+        assert double.tree("page b") == []
 
-    def test_top_level_move_that_did_nothing_still_fails(self):
+    def test_top_level_move_that_did_nothing_still_fails(self, monkeypatch):
         """The fix must read the real order, not wave every top-level move through."""
-        g = _Graph({"page a": [(A, []), (B, [])]})
-        g.move_block = lambda *a, **k: None  # Logseq did nothing
-        r = _run(g, "--id", B, "--before", A)
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
+        double = _double({"page a": ["a", "b"]}, noop=True, monkeypatch=monkeypatch)
+        _not_moved(_move(double, "b", "--before", "a"))
 
 
 class TestSubtreeTargetIsRefusedUpFront:
@@ -342,13 +381,10 @@ class TestSubtreeTargetIsRefusedUpFront:
         assert "own subtree" in r.output
         assert g.moves == []
 
-    def test_failure_after_the_move_does_not_name_the_subtree(self):
-        g = _Graph({"page a": [(A, []), (B, [])]})
-        g.move_block = lambda *a, **k: None
-        r = _run(g, "--id", A, "--under", B)
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
-        assert "subtree" not in r.output
+    def test_failure_after_the_move_does_not_name_the_subtree(self, monkeypatch):
+        double = _double({"page a": ["a", "b"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "a", "--under", "b"))
+        assert "subtree" not in error["error"]
 
 
 class TestDryRunPredictsTheRefusal:

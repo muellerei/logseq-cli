@@ -479,3 +479,77 @@ def test_batch_window_runs_full_when_nothing_opens(monkeypatch, double, api):
     assert len(naps) == 10 and sum(naps) == pytest.approx(0.1)
     # One question before the batch (the gate), eleven after it.
     assert len(double.sent("checkEditing")) == 12
+
+
+def _someone_enters_after_the_batch(double, content):
+    """Someone clicks into the block ``content`` right after the batch."""
+    batch = double._handlers["logseq.Editor.insertBatchBlock"]
+
+    def entered(args):
+        answer = batch(args)
+        double.editing = double.uuid_of(content)
+        return answer
+    double._handlers["logseq.Editor.insertBatchBlock"] = entered
+
+
+def test_batch_leaves_a_block_someone_else_opened(double, api):
+    # Only a block of the batch is closed. Logseq does not save a block left
+    # while its last editor op is :paste-blocks (lifecycle.cljs:35-43,
+    # editor.cljs:2024, read in the code): closing another one would lose
+    # what is typed there.
+    _someone_enters_after_the_batch(double, "unrelated block")
+    _batch(api, double)
+    assert double.sent("exitEditingMode") == []
+    assert double.editing == _uuid(double, "unrelated block")
+
+
+def test_batch_still_closes_its_own_block_after_someone_else_opened(monkeypatch, double, api):
+    # Someone is in a block when the window starts; Logseq then opens the
+    # batch's last block, which the window closes.
+    naps = []
+    monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0.1)
+    monkeypatch.setattr(api, "_sleep", naps.append)
+    double.show_page("Probe Page")
+    double.batch_opens_after_checks = 2
+    _someone_enters_after_the_batch(double, "unrelated block")
+    _batch(api, double)
+    assert len(double.sent("exitEditingMode")) == 1
+    assert double.editing is None
+
+
+@pytest.mark.parametrize("form", ["empty", "timeout"])
+def test_batch_that_landed_counts_when_the_editor_cannot_be_asked(double, form):
+    # The batch landed in full; checkEditing after it answers nothing
+    # readable. The error must count the blocks, or a retry writes them twice.
+    batch = double._handlers["logseq.Editor.insertBatchBlock"]
+
+    def then_unreadable(args):
+        answer = batch(args)
+        double.check_editing_form = form
+        return answer
+    double._handlers["logseq.Editor.insertBatchBlock"] = then_unreadable
+    parent = _uuid(double, "parent block")
+    r = split_runner().invoke(cli, ["--token", "t", "insert-block", "--child-of", parent,
+                                    "--content", "x1\n\t- x2", "--json"])
+    assert r.exit_code == 1
+    error = _error_object(r)
+    assert error["reason"] == "editor_state_unknown"
+    assert error["writes_landed"] == 2
+    assert "Nothing was written" not in error["error"]
+    assert "not sent" not in error["error"]
+    assert "2 earlier write(s)" in error["error"]
+    assert double.uuid_of("x1") and double.uuid_of("x2")
+
+
+def test_batch_proof_failure_names_an_editor_it_could_not_ask(double, api):
+    # Both fail: the proof's error is the one raised, the editor's added.
+    from logseq_cli.writerefused import WriteNotVerified
+
+    def nothing_then_unreadable(args):
+        double.check_editing_form = "empty"
+        return None
+    double._handlers["logseq.Editor.insertBatchBlock"] = nothing_then_unreadable
+    with pytest.raises(WriteNotVerified) as refused:
+        _batch(api, double)
+    assert "checkEditing" in str(refused.value)
+    assert api.writes_landed == 0

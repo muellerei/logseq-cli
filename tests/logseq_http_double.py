@@ -600,12 +600,12 @@ class LogseqHttpDouble:
             # The placeholder of a ((ref)) without a block: no page (#70).
             return {"id": self.placeholders[key.lower()], "uuid": key.lower(),
                     "content": f"id:: {key.lower()}", "properties": {}}
-        # Unknown, and a page's uuid or db id (strictinsert._sibling_uuids_in_order).
+        # Unknown, and a page's uuid or db id (LogseqAPI._sibling_uuids_in_order).
         return None
 
     def _get_page_blocks_tree(self, args):
         if not isinstance(args[0], str):
-            # strictinsert._sibling_uuids_in_order, measured.
+            # LogseqAPI._sibling_uuids_in_order, measured.
             return {"error": "Expected string, got: number"}
         page = self._find_page(args[0])
         if page is None:

@@ -25,8 +25,11 @@ from unittest.mock import patch
 
 import pytest
 
+import json
+
 from logseq_cli.cli import cli
 from tests.conftest import PageGraph, page_graph_api, split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 FIRST = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"   # the page's first block
@@ -182,11 +185,27 @@ class TestTheWriteIsProven:
         graph.insert_batch_block = batch
         return graph
 
-    def test_a_batch_that_wrote_nothing_fails(self):
-        graph = self._broken(_graph(), lambda real, a, n, o: None)
-        result, _ = _run(["insert-block", "--after", FIRST, "--tree", TOP, "--keep-ids"], graph)
-        assert result.exit_code != 0
-        assert "0 of 1" in result.output + result.stderr
+    @staticmethod
+    def _double(monkeypatch, *, noop_from):
+        """The real LogseqAPI, whose insert_batch_block proves the batch
+        (spec 030), against a Logseq whose batches from call ``noop_from`` on
+        answer null and write nothing."""
+        double = LogseqHttpDouble()
+        double.add_page("Page A", ["first"])
+        double.add_page("2026-01-05, Monday",
+                        [{"content": "## Log", "children": ["earlier entry"]}])
+        double.set_mode("insertBatchBlock", "noop", from_call=noop_from)
+        return double.install(monkeypatch)
+
+    def test_a_batch_that_wrote_nothing_fails(self, monkeypatch):
+        double = self._double(monkeypatch, noop_from=1)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "insert-block", "--after", double.uuid_of("first"),
+            "--tree", TOP, "--keep-ids", "--json"])
+        assert result.exit_code == 1
+        error = json.loads(result.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        assert (error["expected"], error["got"], error["writes_landed"]) == ("1 blocks", "0", 0)
 
     def test_a_batch_that_minted_new_ids_fails(self):
         def drop_keep(real, a, n, o):
@@ -219,20 +238,19 @@ class TestTheWriteIsProven:
         assert result.exit_code != 0
         assert "not where" in result.output + result.stderr
 
-    def test_earlier_writes_of_the_same_command_are_named(self):
+    def test_earlier_writes_of_the_same_command_are_named(self, monkeypatch):
         """add-journal-block with two --content writes twice; when the second
         write fails, the first one still stands, and the message says so."""
-        graph = _graph()
-        real, calls = graph.insert_batch_block, []
-
-        def second_fails(anchor, nodes, options=None):
-            calls.append(anchor)
-            return real(anchor, nodes, options) if len(calls) == 1 else None
-        graph.insert_batch_block = second_fails
-        result, _ = _run(["add-journal-block", *UNDER, *DATE, "--content", "first",
-                          "--content", TOP, "--keep-ids"], graph)
-        assert result.exit_code != 0
-        assert "1 block(s) written earlier" in result.output + result.stderr
+        double = self._double(monkeypatch, noop_from=2)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", *UNDER, *DATE, "--content", "first",
+            "--content", TOP, "--keep-ids", "--json"])
+        assert result.exit_code == 1
+        error = json.loads(result.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        assert error["writes_landed"] == 1
+        assert "1 earlier write(s) in this call landed" in error["error"]
+        assert double.tree("2026-01-05, Monday") == [("## Log", [("earlier entry", []), ("first", [])])]
 
 
 class TestTargets:
