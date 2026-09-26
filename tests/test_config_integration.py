@@ -467,13 +467,13 @@ class TestAnalysisPatternsComeFromConfig:
     genuinely no moods in it."""
 
     def test_word_pattern_matches_configured_words(self):
-        pat = _word_pattern(["gut", "produktiv"])
-        assert pat.search("war gut heute")
-        assert pat.search("sehr Produktiv")
+        pat = _word_pattern(["upbeat", "productive"])
+        assert pat.search("was upbeat today")
+        assert pat.search("very Productive")
 
     def test_word_pattern_respects_word_boundaries(self):
-        """Substring hits would count 'gut' inside unrelated words."""
-        assert not _word_pattern(["gut"]).search("Regengutachten")
+        """Substring hits would count 'good' inside unrelated words."""
+        assert not _word_pattern(["good"]).search("Goodwill")
 
     def test_word_pattern_escapes_user_input(self):
         """A word from config is data, not a regex."""
@@ -561,8 +561,8 @@ class TestTaskCountingSeesLogseqMarkers:
         block starting "Now", "Later", "Waiting" or "done" counted as a task.
         """
         for line in ("- done", "- Now that we finished it",
-                     "- Later kam die Rückmeldung", "- Waiting for the reply",
-                     "- todo: das muss noch"):
+                     "- Later kam der Regen", "- Waiting for the reply",
+                     "- todo: still has to happen"):
             assert not self.INCOMPLETE.search(line), line
             assert not self.COMPLETE.search(line), line
 

@@ -159,11 +159,11 @@ def test_create_page_journal_that_exists_is_refused_in_preview_and_run(monkeypat
 
 
 def test_create_page_proof_survives_unicode_normalisation(monkeypatch):
-    # A name with decomposed umlauts (NFD, as macOS copies them) is found
+    # A name with decomposed accents (NFD, as macOS copies them) is found
     # under its composed form (NFC): the proof leaves resolving the name
     # to Logseq instead of comparing names itself.
     double = _double(monkeypatch)
-    name = unicodedata.normalize("NFD", "Übersicht Größe")
+    name = unicodedata.normalize("NFD", "Café Crème")
     assert name != unicodedata.normalize("NFC", name)
     r = _invoke(double, ["create-page", "--page", name])
     assert r.exit_code == 0, r.stderr

@@ -123,7 +123,7 @@ your headings as they are actually stored.
 ### `[graph] projects_namespace`
 
 The namespace prefix that marks your project pages, e.g. `projects/Project
-Alpha` or `projekte/Projekt Alpha`.
+Alpha` or `vorhaben/Gartenhaus`.
 
 ```toml
 [graph]
@@ -197,7 +197,7 @@ you. An empty list matches nothing rather than everything.
 say one — `mood: good`, `stimmung: mies`, with the label coming from
 `mood_labels` — and the word lists then decide whether that value is positive
 or negative. Counting every occurrence instead measured how often such words
-appear in technical prose: "nicht zufrieden" and "läuft nicht gut" both
+appear in technical prose: "nicht erfolgreich" and "schmeckt nicht gut" both
 counted as positive, because a word list cannot see a negation. If you never
 write a mood line, the counts stay at zero, which is the honest answer.
 

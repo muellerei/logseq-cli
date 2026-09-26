@@ -149,7 +149,7 @@ class TestSuggestConnectionsRanksEvidenceNotCoincidence:
 class TestAnalyzeGraphCountsOpenTasks:
     """total_todos matched "todo" anywhere, case-insensitively.
 
-    That counted "Todo-Liste" in prose and the TODO inside a DONE block's
+    That counted "Todo-Zettel" in prose and the TODO inside a DONE block's
     logbook line, so the number was neither the open tasks nor all of them.
     """
 
@@ -167,7 +167,7 @@ class TestAnalyzeGraphCountsOpenTasks:
         assert d["total_todos"] == 3
 
     def test_prose_does_not_count(self, tmp_path):
-        d = run_json(self._api("- the Todo-Liste is long\n- => todo later maybe"),
+        d = run_json(self._api("- the Todo-Zettel is long\n- => todo later maybe"),
                      tmp_path, "analyze-graph")
         assert d["total_todos"] == 0
 
@@ -238,19 +238,19 @@ class TestFindKnowledgeGapsIgnoresArtefacts:
 
     def test_a_name_with_balanced_brackets_is_kept(self):
         from logseq_cli.commands.analysis import _is_incidental_page
-        assert not _is_incidental_page("Projekt (Phase 1)")
+        assert not _is_incidental_page("Project (Phase 1)")
 
     def test_a_ticket_number_that_took_the_next_word_is_ignored(self):
-        """"#272-Designentscheidung" in prose becomes a page of that name."""
+        """"#123-Entwurf" in prose becomes a page of that name."""
         from logseq_cli.commands.analysis import _is_incidental_page
-        assert _is_incidental_page("272-Designentscheidung")
-        assert _is_incidental_page("149-Rekursionsrisiko")
+        assert _is_incidental_page("123-Entwurf")
+        assert _is_incidental_page("456-Nachtrag")
 
     def test_a_real_term_starting_with_a_digit_is_kept(self):
         """Three digits or more, so "2-Faktor-Auth" is not caught by it."""
         from logseq_cli.commands.analysis import _is_incidental_page
         assert not _is_incidental_page("2-Faktor-Auth")
-        assert not _is_incidental_page("4-Level-Struktur")
+        assert not _is_incidental_page("3-Wege-Abgleich")
 
     def test_a_real_page_is_still_reported(self, tmp_path):
         """The filter must not swallow the finding it exists to surface."""
@@ -276,7 +276,7 @@ class TestFindKnowledgeGapsIgnoresArtefacts:
 class TestMoodCountsStatementsNotWords:
     """Counting every positive word measured technical prose, not mood.
 
-    "nicht zufrieden" and "läuft nicht gut" both scored positive; in the
+    "nicht erfolgreich" and "schmeckt nicht gut" both scored positive; in the
     journal this was checked against, 16% of positive hits were negations —
     concentrated in the sentences that actually carry a judgement.
     """
@@ -300,7 +300,7 @@ class TestMoodCountsStatementsNotWords:
         return json.loads(r.stdout)["mood_summary"]
 
     def test_a_negated_word_is_not_a_positive_signal(self, tmp_path):
-        s = self._run("- heute war nicht gut und ich bin nicht zufrieden", tmp_path)
+        s = self._run("- der Kuchen schmeckt nicht gut", tmp_path)
         assert s["positive_signals"] == 0
 
     def test_a_stated_mood_counts(self, tmp_path):
@@ -312,6 +312,6 @@ class TestMoodCountsStatementsNotWords:
         assert s["negative_signals"] == 1
 
     def test_the_word_in_prose_alone_says_nothing(self, tmp_path):
-        s = self._run("- der Build lief gut durch, Code ist gut lesbar", tmp_path)
+        s = self._run("- der Kuchen war gut, das Rezept ist gut lesbar", tmp_path)
         assert s["positive_signals"] == 0
         assert s["negative_signals"] == 0

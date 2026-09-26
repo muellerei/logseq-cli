@@ -389,7 +389,7 @@ class PageGraph:
     * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
       placeholder for a ``((ref))`` without a block as ``id:: <uuid>`` with no
       page.
-    * An alias (``aliases={"al": ["Ziel"]}``: pages whose own ``alias::``
+    * An alias (``aliases={"al": ["Target"]}``: pages whose own ``alias::``
       names it) is a page of its own to the API: ``getPage`` answers its stub,
       ``getPageBlocksTree`` its blocks, none unless given, and
       ``appendBlockInPage`` writes onto it. Only the query on ``:block/alias``

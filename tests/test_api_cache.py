@@ -137,7 +137,7 @@ class TestErrorsAreNotCached:
         with patch("logseq_cli.api.requests.post", return_value=error) as mock_post:
             for _ in range(2):
                 with pytest.raises(DatalogQueryError):
-                    api.datascript_query("[:find ?x :where KAPUTT]")
+                    api.datascript_query("[:find ?x :where BROKEN]")
         assert mock_post.call_count == 2
 
     def test_successful_query_is_still_cached(self):

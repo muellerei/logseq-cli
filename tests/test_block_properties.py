@@ -32,21 +32,21 @@ class TestAddNoteContentProperties:
                 "--page", "Foo",
                 "--under-heading", "## Collection",
                 "--content", "[Name](https://example.com): desc",
-                "--property", "added=2026-06-04",
+                "--property", "added=2020-01-02",
                 "--property", "tags=alpha, beta",
                 "--json",
             ])
         assert result.exit_code == 0, result.output
         # both properties upserted onto the inserted root block
         calls = {(c.args[1], c.args[2]) for c in api.upsert_block_property.call_args_list}
-        assert ("added", "2026-06-04") in calls
+        assert ("added", "2020-01-02") in calls
         assert ("tags", "alpha, beta") in calls  # comma survives split-on-first-'='
         for c in api.upsert_block_property.call_args_list:
             assert c.args[0] == "inserted-uuid"
         payload = json.loads(result.output)
         assert payload["uuid"] == "inserted-uuid"
         assert payload["uuids"] == ["inserted-uuid"]
-        assert payload["properties"] == {"added": "2026-06-04", "tags": "alpha, beta"}
+        assert payload["properties"] == {"added": "2020-01-02", "tags": "alpha, beta"}
 
     def test_property_append_path_uses_appended_uuid(self):
         api = _build_api()

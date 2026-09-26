@@ -546,8 +546,8 @@ class TestFromBlock:
 
     def test_names_that_only_casefold_alike_are_two_pages(self):
         """Logseq lower-cases a page name (JavaScript toLowerCase), which keeps
-        'ß' apart from 'ss'; casefold() would merge them."""
-        result, _ = _run(["get-page", "--name", "Straße", "--name", "Strasse",
+        the ligature 'ﬁ' apart from 'fi'; casefold() would merge them."""
+        result, _ = _run(["get-page", "--name", "ﬁnal", "--name", "final",
                           "--max-chars", "100000", "--no-backlinks"], _big_tree())
         assert result.exit_code == 0, result.output
 

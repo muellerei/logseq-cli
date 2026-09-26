@@ -113,14 +113,14 @@ class TestABulletedPropertyLineAtItsOwnLevelIsABlock:
     true`, commit aebcb21). A continuation line without a bullet always merges."""
 
     def test_sibling_level_bullet_is_its_own_block(self):
-        tree = parse_hierarchical_content("- Task A\n  - detail\n- Priorität:: hoch")
-        assert [n["content"] for n in tree] == ["Task A", "Priorität:: hoch"]
+        tree = parse_hierarchical_content("- Task A\n  - detail\n- Priority:: high")
+        assert [n["content"] for n in tree] == ["Task A", "Priority:: high"]
         assert tree[0]["children"][0]["content"] == "detail"
 
     def test_it_keeps_its_children(self):
-        tree = parse_hierarchical_content("- FAQ\n- Frage::\n  - Was kostet es?")
-        assert [n["content"] for n in tree] == ["FAQ", "Frage::"]
-        assert tree[1]["children"][0]["content"] == "Was kostet es?"
+        tree = parse_hierarchical_content("- FAQ\n- Question::\n  - What does it cost?")
+        assert [n["content"] for n in tree] == ["FAQ", "Question::"]
+        assert tree[1]["children"][0]["content"] == "What does it cost?"
 
     def test_a_deeper_bullet_still_belongs_to_the_block_above(self):
         tree = parse_hierarchical_content("- ## Plan\n\t- logseq.order-list-type:: number")
@@ -128,8 +128,8 @@ class TestABulletedPropertyLineAtItsOwnLevelIsABlock:
                          "children": []}]
 
     def test_a_continuation_line_at_the_same_level_merges(self):
-        tree = parse_hierarchical_content("- Child\n  Priorität:: hoch")
-        assert tree == [{"content": "Child\nPriorität:: hoch", "children": []}]
+        tree = parse_hierarchical_content("- Child\n  Priority:: high")
+        assert tree == [{"content": "Child\nPriority:: high", "children": []}]
 
 
 class TestTheIdLineFollowsTheSameSeparator:

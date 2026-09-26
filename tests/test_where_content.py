@@ -52,9 +52,9 @@ class TestResolveSingleBlock:
         assert "00000000-0000-4000-8000-0000000000a2" in msg and "u-2" in msg
 
     def test_long_ambiguity_is_truncated_but_counted(self):
-        many = [{"uuid": f"u-{i}", "content": f"Treffer {i}"} for i in range(14)]
+        many = [{"uuid": f"u-{i}", "content": f"Match {i}"} for i in range(14)]
         with pytest.raises(click.ClickException) as exc:
-            resolve_single_block(_api(many), "Treffer")
+            resolve_single_block(_api(many), "Match")
         assert "... and 4 more" in str(exc.value)
 
 
