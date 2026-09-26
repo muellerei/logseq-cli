@@ -418,6 +418,33 @@ def test_property_write_on_unknown_uuid_is_not_verified(monkeypatch, write):
     assert api.writes_landed == 0
 
 
+@pytest.mark.parametrize("held", ["Status", "STATUS"])
+def test_a_property_held_in_another_spelling_is_not_removed(monkeypatch, held):
+    # A CLI before #21, or another client, stored the key as given, and the
+    # database holds :Status; remove-property --key Status sends "status",
+    # Logseq removes the keyword it was sent and leaves :Status
+    # (editor/property.cljs remove-block-property!, 0.10.15, read in the
+    # code). The proof looked for "status" only, the key as sent, and said
+    # removed.
+    double = _one_page(monkeypatch, "beta block")
+    props = {held: "open"}
+    pull = double._pull_properties
+    monkeypatch.setattr(double, "_pull_properties", lambda query: (
+        [[{"properties": dict(props), "properties-text-values": dict(props)}]]
+        if double.uuid_of("beta block") in query else pull(query)))
+    remove = double._handlers["logseq.Editor.removeBlockProperty"]
+
+    def remove_as_sent(args):
+        props.pop(args[1], None)
+        return remove(args)
+    monkeypatch.setitem(double._handlers, "logseq.Editor.removeBlockProperty", remove_as_sent)
+    r = _invoke(double, ["remove-property", "--id", "@beta block", "--key", "Status"])
+    assert r.exit_code == 1, r.stdout
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["method"]) == ("write_not_verified", "removeBlockProperty")
+    assert props == {held: "open"}
+
+
 def test_read_back_is_not_served_from_cache(monkeypatch):
     # update-block reads the block before the write; with the cache on, the
     # proof must still ask Logseq, not take that old answer.

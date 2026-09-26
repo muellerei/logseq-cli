@@ -724,16 +724,22 @@ class LogseqAPI:
         return result
 
     def _prove_no_property(self, method, target, result, *, key):
-        """The block holds no ``key``, neither as a value nor as a text, as
-        Logseq's parser stores it or as sent: remove-property sends a key the
-        parser would drop as given, and the database holds such a key as given
-        when an earlier write stored it (upsertBlockProperty keeps any key)."""
+        """The block holds no ``key``, neither as a value nor as a text, in
+        any spelling Logseq's parser stores as the same key, the key as sent
+        among them: remove-property sends a key the parser would drop as
+        given, and the database holds a key as given when an earlier write
+        stored it (upsertBlockProperty keeps any key). Logseq removes only
+        the keyword it is sent (editor/property.cljs
+        ``remove-block-property!``, 0.10.15), so ``:Status`` stays after
+        ``status`` was removed, and checked under ``status`` alone that read
+        as removed."""
         self._block_to_prove(method, target, f"no {key}::")
         values, texts = stored_properties(self, target)
-        for spelt in dict.fromkeys((stored_property_key(key), key)):
-            if spelt in values or spelt in texts:
-                got = texts.get(spelt, values.get(spelt))
-                raise _not_verified(method, target, f"no {key}::", f"{key}:: {got}")
+        wanted = stored_property_key(key)
+        for held in (*texts, *values):
+            if stored_property_key(held) == wanted:
+                got = texts.get(held, values.get(held))
+                raise _not_verified(method, target, f"no {key}::", f"{held}:: {got}")
         return result
 
     def _prove_no_block(self, method, target, result):
