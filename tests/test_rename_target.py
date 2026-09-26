@@ -50,16 +50,19 @@ RUN_OR_PREVIEW = pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["ru
 
 
 @RUN_OR_PREVIEW
-@pytest.mark.parametrize("new_name", ["Taken Page", "taken page", "Taken Page "])
+@pytest.mark.parametrize("new_name", ["Taken Page", "taken page", "Taken Page ",
+                                      "\ufeffTaken Page", "Taken Page\u3000"])
 def test_existing_name_is_refused(double, extra, new_name):
-    # "Taken Page " is the same page once stripped, as it is sent.
+    # "Taken Page " is the same page once trimmed, as Logseq trims it. So is
+    # the name behind a byte order mark or after an ideographic space, which
+    # JavaScript's trim takes off and Python's str.strip() leaves or not.
     _assert_refused(double, new_name, "exists", *extra)
     assert double.tree("Old Page") == [("old text", [])]
     assert double.tree("Taken Page") == [("taken text", [])]
 
 
 @RUN_OR_PREVIEW
-@pytest.mark.parametrize("new_name", ["", "   "], ids=["empty", "blank"])
+@pytest.mark.parametrize("new_name", ["", "   ", "\ufeff"], ids=["empty", "blank", "bom"])
 def test_empty_name_is_refused(double, extra, new_name):
     _assert_refused(double, new_name, "empty", *extra)
 
@@ -78,6 +81,18 @@ def test_the_name_is_sent_stripped(double):
     assert r.exit_code == 0, r.stderr
     assert double.sent("renamePage") == [["Old Page", "New Name"]]
     assert LogseqAPI(token="t").get_page("new name")["originalName"] == "New Name"
+
+
+@pytest.mark.parametrize("new_name,sent", [("\ufeffNew Name\u2028", "New Name"),
+                                           ("New Name\x85", "New Name\x85")],
+                         ids=["js-trims", "js-keeps"])
+def test_the_name_is_trimmed_as_logseq_trims_it(double, new_name, sent):
+    # Sent as Logseq will name the page, so the proof reads that name: the
+    # characters JavaScript's trim takes, and only those.
+    r = _rename(new_name)
+    assert r.exit_code == 0, r.stderr
+    assert double.sent("renamePage") == [["Old Page", sent]]
+    assert json.loads(r.stdout)["new_name"] == sent
 
 
 @pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["run", "dry-run"])

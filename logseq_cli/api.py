@@ -26,7 +26,7 @@ from logseq_cli.blocktext import (
     tree_texts,
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
-from logseq_cli.pagenames import page_name_to_create, title_as_created
+from logseq_cli.pagenames import js_trim, page_name_to_create, title_as_created
 # Raised by the writes below; imported here too so that callers can take them
 # from the API they call. They live in a leaf module, so that
 # strictinsert and output need not import the HTTP client for them.
@@ -1272,7 +1272,8 @@ class LogseqAPI:
     def rename_refusal(self, old_name: str, new_name: str) -> str | None:
         """Why renaming ``old_name`` to ``new_name`` is refused, or ``None``.
 
-        ``"empty"``: nothing is left of the name once stripped; Logseq does
+        ``"empty"``: nothing is left of the name once trimmed as Logseq trims
+        it (``js_trim``); Logseq does
         nothing and answers null, as for a rename (measured). ``"exists"``: getPage
         finds another page under the name, and Logseq would merge the two into
         it, the old page gone and its blocks under the other (measured). The same
@@ -1281,7 +1282,7 @@ class LogseqAPI:
         Not named for an endpoint: it wraps none. Shared by rename_page and
         rename-page --dry-run, so the preview refuses what the run refuses.
         """
-        name = new_name.strip()
+        name = js_trim(new_name)
         if not name:
             return "empty"
         taken = self.get_page(name)
@@ -1293,7 +1294,8 @@ class LogseqAPI:
         return "exists"
 
     def rename_page(self, old_name: str, new_name: str):
-        """Rename a page; the new name is sent stripped.
+        """Rename a page; the new name is sent trimmed as Logseq trims it
+        (``js_trim``), so the check and the proof read the name it gets.
 
         Raises RenameRefused before anything is sent, see rename_refusal, and
         WriteNotVerified unless the new name then finds the page, spelt as
@@ -1302,7 +1304,7 @@ class LogseqAPI:
         if why:
             raise rename_refused(old_name, new_name, why)
         page = self.get_page(old_name)
-        name = new_name.strip()
+        name = js_trim(new_name)
         return self._write("logseq.Editor.renamePage", [old_name, name], target=old_name,
                            proof_args={"uuid": page.get("uuid") if isinstance(page, dict) else None,
                                        "name": name})

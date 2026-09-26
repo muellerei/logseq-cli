@@ -124,9 +124,13 @@ of about 0.1 s after a multi-block insert.
   `reason: "rename_refused"`, `why: "exists"` or `why: "empty"`, before
   anything is sent; a name of spaces only counts as empty. A change of case
   is the same page and still renames. `--dry-run` runs the same check and
-  refuses alike, at the cost of one more read. The new name is sent without
-  leading and trailing spaces, the form the check looked up, and the run and
-  its preview report it in that form, as the page is then called.
+  refuses alike, at the cost of one more read. The new name is sent
+  trimmed as Logseq trims it, the form the check looked up, and the run and
+  its preview report it in that form, as the page is then called. Logseq
+  trims with JavaScript's `trim` (`handler/page.cljs` `rename!`, 0.10.15,
+  read in the source), which also takes off a byte order mark (U+FEFF);
+  trimmed with Python's rules, a name behind one passed the check, the two
+  pages merged, and the run said nothing was written.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database
@@ -199,7 +203,8 @@ of about 0.1 s after a multi-block insert.
   `reason: "page_exists"` under `--json`; the error had no reason.
 - A page or journal the CLI created under a name Logseq changes no longer
   reads as not created, and no longer lands beside the page meant. Logseq
-  creates a page under a cleaned title: trimmed, `[[…]]` unwrapped, a
+  creates a page under a cleaned title: trimmed (by JavaScript's rules,
+  which take a byte order mark too), `[[…]]` unwrapped, a
   leading `#` and a slash at either end dropped (`handler/page.cljs`
   `create!`, 0.10.15; measured for each). The cleaning is one pass and not
   idempotent: `#[[X]]` becomes `[[X]]`, which cleaned again would be `X`

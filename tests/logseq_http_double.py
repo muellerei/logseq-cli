@@ -121,11 +121,25 @@ def _without_boundary_slashes(name: str) -> str:
     return name[:-1] if name.endswith("/") else name
 
 
+# What ``clojure.string/trim`` takes off both ends: JavaScript's
+# String.prototype.trim, whose set is WhiteSpace and LineTerminator in the
+# ECMAScript spec: U+FEFF and every space separator, not Python's \x1c-\x1f
+# or \x85. Read in the upstream source (``create!`` and ``rename!`` in
+# handler/page.cljs, 0.10.15, trim their names with it), not measured.
+_JS_TRIMMED = ("\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200b)))
+               + "\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
+def _js_trim(text: str) -> str:
+    return text.strip(_JS_TRIMMED)
+
+
 def _created_title(name: str) -> str:
     """The title ``create!`` makes of a name (handler/page.cljs, 0.10.15):
     trimmed, ``[[...]]`` unwrapped, leading ``#`` dropped, a slash at either
-    end dropped. Measured, 0.10.15, for each of the four."""
-    title = name.strip()
+    end dropped. Measured, 0.10.15, for each of the four; the trim with
+    spaces, its full set read in the source (``_js_trim``)."""
+    title = _js_trim(name)
     m = re.fullmatch(r"\[\[(.*)\]\]", title)
     title = re.sub(r"^#+", "", m.group(1) if m else title)
     return _without_boundary_slashes(title)
@@ -840,13 +854,18 @@ class LogseqHttpDouble:
         """Answers null; the uuid stays. Case only: originalName changes, name
         not. Empty name: nothing. An existing name: the pages merge, the
         source is gone and its blocks follow the target's. A missing source:
-        Logseq's own TypeError."""
-        old, new = args[0], args[1]
+        Logseq's own TypeError.
+
+        Both names are trimmed first, as ``rename!`` trims them (handler/page.cljs,
+        0.10.15, read in the source, ``_js_trim``): U+FEFF in front of X is
+        X, and merges into a page X."""
+        old, new = _js_trim(args[0]), _js_trim(args[1])
         source = self._find_page(old)
         if source is None:
             return {"error": "Cannot read properties of null (reading 'replace')"}
-        if not new.strip():
+        if not new or new == old:
             # Measured for "" only; blank names are assumed to behave alike.
+            # The same name once trimmed: rename! does nothing (name-changed?).
             return None
         target = self._find_page(new)
         if target is None or target is source:
