@@ -138,6 +138,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code, not measured, since time tracking is off in the measured graph),
   and the text read back no longer equalled the text sent. The drawer is
   now left out of the comparison on both sides.
+- `remove-block`, `delete-block`, `copy-block --remove`, `delete-page`,
+  `rename-page` and `create-page` reported success for a write Logseq had
+  not done, as did every command that creates a page or journal before
+  writing to it, and the removal of a page's emptied property block. `removeBlock`, `deletePage` and `renamePage` answer `null`
+  whether they wrote or not (measured, 0.10.15). The API methods now read
+  back: a removed block and a deleted page must be gone, a renamed page must
+  answer under its new name with its own uuid and the new spelling (a change
+  of case included), and a created page must be the one its name finds.
+  Otherwise they fail with `reason: "write_not_verified"`. A deleted page
+  that other pages name as their namespace (`Project` beside
+  `Project/Alpha`) stays without blocks, as Logseq keeps it (measured,
+  0.10.15), and counts as deleted. A page other blocks link to is removed
+  whole (read in the code, not measured).
+- Storing the id of a ref's target (#95, above) is read back too: each
+  target must then hold `id` among its properties, or the write fails with
+  `reason: "write_not_verified"`. Each stored id counts in `writes_landed`.
+  A ref to a page's property block no longer asks for an id: Logseq skips
+  that block (measured, 0.10.15).
+- `createPage` on a page that exists answers that page and drops the
+  properties sent (measured, 0.10.15). The API method now refuses such a
+  page with `reason: "page_exists"` before anything is sent. The commands
+  check first, as before, and no command sends page properties now; the
+  refusal holds for any caller that would.
+- `create-page` on a page that exists now fails with
+  `reason: "page_exists"` under `--json`; the error had no reason.
+- `create-page` with a journal name in another of the four date formats it
+  recognises (`Jan 1st, 2099`, `2099-01-01`, `01.01.2099`,
+  `2099-01-01, Thursday`) now sends the name in the graph's date format.
+  Sent as typed, Logseq created the journal under its own name and answered
+  `null` (measured, 0.10.15, for `Jan 1st, 2099` in a `yyyy-MM-dd, EEEE`
+  graph; the other formats not measured), which the check above cannot tell
+  from a page not created. The check for a page that exists, `--dry-run`,
+  `--content` and the output use the converted name, so a journal that
+  exists is refused as one. The weekday goes in lower case
+  (`2099-01-01, thursday`); Logseq keeps its own spelling of the title
+  (measured).
 
 ### Changed
 

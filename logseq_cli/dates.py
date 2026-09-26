@@ -39,6 +39,17 @@ def parse_date_keyword(date_str: str) -> datetime.date:
         )
 
 
+# The journal names the CLI recognises, one pattern per format, matched
+# against the name stripped and in lower case. One list for recognising and
+# parsing, so the two cannot disagree on a format.
+_JOURNAL_NAMES = [
+    re.compile(r"^(?P<mon>[a-z]{3})\s+(?P<d>\d{1,2})(?:st|nd|rd|th),\s+(?P<y>\d{4})$"),  # MMM do, yyyy
+    re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2}),\s+[a-z]+$"),                 # yyyy-MM-dd, EEEE
+    re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})$"),                            # yyyy-MM-dd
+    re.compile(r"^(?P<d>\d{2})\.(?P<m>\d{2})\.(?P<y>\d{4})$"),                          # dd.MM.yyyy
+]
+
+
 def is_journal_date(name: str) -> bool:
     """Check if a page name looks like a journal date.
 
@@ -49,13 +60,35 @@ def is_journal_date(name: str) -> bool:
     - '14.03.2025' (dd.MM.yyyy)
     """
     name = name.strip().lower()
-    patterns = [
-        r"^[a-z]{3}\s+\d{1,2}(?:st|nd|rd|th),\s+\d{4}$",       # MMM do, yyyy
-        r"^\d{4}-\d{2}-\d{2},\s+[a-z]+$",                        # yyyy-MM-dd, EEEE
-        r"^\d{4}-\d{2}-\d{2}$",                                   # yyyy-MM-dd
-        r"^\d{2}\.\d{2}\.\d{4}$",                                 # dd.MM.yyyy
-    ]
-    return any(re.match(p, name) for p in patterns)
+    return any(p.match(name) for p in _JOURNAL_NAMES)
+
+
+def parse_journal_name(name: str) -> datetime.date | None:
+    """The day a journal name in one of :func:`is_journal_date`'s formats
+    names, or ``None``: for any other name, and for a day no calendar has
+    (``2099-02-30``, a month ``foo``).
+
+    A weekday in the name is not read, a wrong one included; the date
+    decides. For create-page, which sends a journal under the graph's own
+    name (spec 030, M14).
+    """
+    name = name.strip().lower()
+    for pattern in _JOURNAL_NAMES:
+        m = pattern.match(name)
+        if not m:
+            continue
+        parts = m.groupdict()
+        if "mon" in parts:
+            if parts["mon"] not in _MONTHS_ABBR[1:]:
+                return None
+            month = _MONTHS_ABBR.index(parts["mon"])
+        else:
+            month = int(parts["m"])
+        try:
+            return datetime.date(int(parts["y"]), month, int(parts["d"]))
+        except ValueError:
+            return None
+    return None
 
 
 def journal_day_to_date(jd: int) -> datetime.date:

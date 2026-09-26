@@ -648,6 +648,8 @@ class LogseqHttpDouble:
             return self._pull_properties(query)
         if ":block/alias" in query:
             return self._alias_sources(query)
+        if ":block/namespace" in query:
+            return self._namespace_query(query)
         if ":block/refs ?t" in query:
             return self._incoming_refs(query)
         if "(or [?b :block/page _] [?b :block/name _])" in query:
@@ -689,6 +691,13 @@ class LogseqHttpDouble:
             if any(_key(n) == _key(alias["name"]) for n in names):
                 rows.append([page["name"], names])
         return rows
+
+    def _namespace_query(self, query):
+        """LogseqAPI._is_namespace: a row per page whose namespace is the
+        page of the uuid asked for."""
+        uuid = re.search(r'#uuid "([^"]+)"', query).group(1).lower()
+        page = next((p for p in self.pages if p["uuid"] == uuid), None)
+        return [[p["id"]] for p in self._namespace_children(page)] if page else []
 
     def _uuids_in_use(self, query):
         """ids.uuids_in_use: blocks (:block/page) and pages (:block/name), not
@@ -767,12 +776,24 @@ class LogseqHttpDouble:
         return {**self._page_out(page), "properties": properties}
 
     def _delete_page(self, args):
-        # M3: null, a missing page too.
+        """M3: null, a missing page too. A page other pages name as their
+        namespace keeps its entity without blocks (page.cljs:352-371;
+        measured, 0.10.15: getPage answers it, getPageBlocksTree [])."""
         page = self._find_page(args[0])
-        if page is not None:
+        if page is None:
+            return None
+        if self._namespace_children(page):
+            page["blocks"], page["props"] = [], {}
+        else:
             self.pages.remove(page)
             self._visible.discard(page["id"])
         return None
+
+    def _namespace_children(self, page) -> list:
+        """The pages whose namespace is ``page``: named "<page>/<one level>"."""
+        prefix = _key(page["name"]) + "/"
+        return [p for p in self.pages if _key(p["name"]).startswith(prefix)
+                and "/" not in _key(p["name"])[len(prefix):]]
 
     def _rename_page(self, args):
         """M4: null, the uuid stays. Case only: originalName changes, name

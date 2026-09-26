@@ -35,6 +35,9 @@ def api():
     mock = MagicMock()
     mock.get_page.return_value = None
     mock.create_page.return_value = {"id": 1, "name": "p"}
+    # create-page sends a journal name as the graph spells it (M14); on a
+    # bare MagicMock the format would be a mock, and the name sent empty.
+    mock.get_user_configs.return_value = {"preferredDateFormat": "MMM do, yyyy"}
     with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
@@ -98,7 +101,7 @@ class TestCreatePageSendsNoProperty:
     def test_journal_name_sends_no_property(self, api):
         result = split_runner().invoke(cli, ["create-page", "--name", "mar 3rd, 2025"])
         assert result.exit_code == 0, result.output
-        assert is_journal_date(api.create_page.call_args[0][0])
+        assert api.create_page.call_args[0][0] == "mar 3rd, 2025"
         assert _sent_properties(api.create_page.call_args) is None
 
     def test_ordinary_name_gets_no_property(self, api):
@@ -109,7 +112,8 @@ class TestCreatePageSendsNoProperty:
     def test_iso_date_name_sends_no_property(self, api):
         result = split_runner().invoke(cli, ["create-page", "--name", "2025-03-14"])
         assert result.exit_code == 0, result.output
-        assert is_journal_date(api.create_page.call_args[0][0])
+        # Sent in the graph's format, not as typed (M14).
+        assert api.create_page.call_args[0][0] == "mar 14th, 2025"
         assert _sent_properties(api.create_page.call_args) is None
 
 

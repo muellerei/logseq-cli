@@ -13,10 +13,8 @@ The writing commands are derived from the registry (every command with
 to Logseq), and each needs a row in ``ROWS``: a command without one fails
 ``test_argument_table_is_complete`` rather than going unchecked.
 
-A row names the write method it lets fail. Which task of spec 030 makes a row
-pass follows from that method, not from the command, so each task removes
-exactly the marks of the methods it proves, and no mark turns XPASS in
-another task's commit.
+A row names the write method it lets fail; every write method proves its
+write in ``LogseqAPI`` (spec 030), so no row is expected to fail.
 """
 import json
 
@@ -26,13 +24,6 @@ from logseq_cli.api import _MUTATING_METHODS, LogseqAPI, LogseqWriteError
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
-
-# The task that proves each write method in LogseqAPI, for the methods not
-# proven yet; a method missing here proves its write.
-PROOF_TASK = {
-    "removeBlock": "030-C5", "deletePage": "030-C5", "renamePage": "030-C5",
-    "createPage": "030-C5", "setBlocksId": "030-C5",
-}
 
 # replace-text catches the refusal of each block, writes the others and
 # reports through its own fail(): the blocks that failed and why, and
@@ -239,17 +230,10 @@ def _writing_commands():
             if any("--dry-run" in getattr(p, "opts", ()) for p in command.params)} - {"init"}
 
 
-def _spec(task):
-    return pytest.mark.xfail(strict=True, reason=f"spec 030: {task}")
-
-
 def _failure_params():
     for row_id, args, method in ROWS:
         for mode in ("noop", "error"):
-            # An error object fails in call() for every method alike.
-            task = None if mode == "error" else PROOF_TASK.get(method)
-            yield pytest.param(args, method, mode, id=f"{row_id}-{mode}",
-                               marks=[_spec(task)] if task else [])
+            yield pytest.param(args, method, mode, id=f"{row_id}-{mode}")
 
 
 def test_argument_table_is_complete():
@@ -451,3 +435,128 @@ def test_set_property_the_page_does_not_show_is_not_verified(monkeypatch):
     assert r.exit_code != 0, r.stdout
     error = _error_object(r.stderr)
     assert (error["reason"], error["property"]) == ("write_not_verified", "status"), error
+
+
+# --- removeBlock, deletePage, renamePage, createPage, setBlocksId (030-C5) --
+
+@pytest.mark.parametrize("write,landed", [
+    (lambda api, d: api.remove_block(d.uuid_of("alpha block")), 1),
+    (lambda api, d: api.delete_page("Other Page"), 1),
+    (lambda api, d: api.rename_page("Other Page", "Renamed Page"), 1),
+    (lambda api, d: api.create_page("Fresh Page"), 1),
+    # One per block asked for (spec 030, Baustein 4).
+    (lambda api, d: api.set_blocks_id([d.uuid_of("alpha block"), d.uuid_of("other block")]), 2),
+], ids=["removeBlock", "deletePage", "renamePage", "createPage", "setBlocksId"])
+def test_a_proven_write_counts(monkeypatch, write, landed):
+    double = _graph().install(monkeypatch)
+    api = LogseqAPI(token="t")
+    write(api, double)
+    assert api.writes_landed == landed
+
+
+def _namespace_graph(monkeypatch):
+    double = LogseqHttpDouble()
+    double.add_page("Project", ["project notes"])
+    double.add_page("Project/Alpha", ["alpha notes"])
+    double.add_page("Loose Page", [])
+    return double.install(monkeypatch)
+
+
+def test_delete_of_a_namespace_page_is_proven(monkeypatch):
+    # Logseq keeps a page others name as their namespace: delete! removes
+    # its blocks and file and leaves the entity (page.cljs:352-371; measured,
+    # 0.10.15: getPage still answers it, getPageBlocksTree []).
+    double = _namespace_graph(monkeypatch)
+    r = _invoke(double, ["delete-page", "--page", "Project", "--force"])
+    assert r.exit_code == 0, r.stderr
+    assert double.tree("Project") == []
+    assert double.tree("Project/Alpha") == [("alpha notes", [])]
+
+
+def test_delete_of_a_namespace_page_that_kept_its_blocks_is_not_verified(monkeypatch):
+    double = _namespace_graph(monkeypatch)
+    double.set_mode("deletePage", "noop")
+    r = _invoke(double, ["delete-page", "--page", "Project", "--force"])
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["got"]) == ("write_not_verified", "the page still there"), \
+        r.stderr
+
+
+def test_delete_of_a_page_without_blocks_that_stayed_is_not_verified(monkeypatch):
+    # No blocks and still there, but no page names it as its namespace: the
+    # delete did nothing.
+    double = _namespace_graph(monkeypatch)
+    double.set_mode("deletePage", "noop")
+    r = _invoke(double, ["delete-page", "--page", "Loose Page", "--force"])
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["got"]) == ("write_not_verified", "the page still there"), \
+        r.stderr
+
+
+def test_rename_by_case_only_is_proven_by_the_new_original_name(monkeypatch):
+    # getPage finds the page under the new name before the rename as well
+    # (names compare in lower case), so the uuid alone proves nothing here:
+    # the new originalName does (M4).
+    double = _graph().install(monkeypatch)
+    r = _invoke(double, ["rename-page", "--page", "Other Page", "--new-name", "OTHER page"])
+    assert r.exit_code == 0, r.stderr
+    double.set_mode("renamePage", "noop")
+    r = _invoke(double, ["rename-page", "--page", "OTHER page", "--new-name", "Other Page"])
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["method"]) == ("write_not_verified", "renamePage"), r.stderr
+
+
+def test_rename_that_leaves_another_page_under_the_name_is_not_verified(monkeypatch):
+    # The name alone would pass a page someone else made under it meanwhile,
+    # with the page asked for unrenamed: the uuid tells them apart.
+    double = _graph().install(monkeypatch)
+    monkeypatch.setitem(double._handlers, "logseq.Editor.renamePage",
+                        lambda args: double.add_page(args[1], []) and None)
+    r = _invoke(double, ["rename-page", "--page", "Other Page", "--new-name", "Renamed Page"])
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["got"]) == ("write_not_verified", "another page"), r.stderr
+
+
+def test_set_blocks_id_skips_pre_block(monkeypatch):
+    # A page's property block is skipped by setBlocksId (M12); asked for it,
+    # the proof would fail a write whose ref Logseq keeps without the id.
+    double = LogseqHttpDouble()
+    double.add_page("Props Page", ["typ:: probe", "body"])
+    double.install(monkeypatch)
+    pre = double.uuid_of("typ:: probe")
+    api = LogseqAPI(token="t")
+    api.insert_block(double.uuid_of("body"), f"see (({pre}))")
+    assert double.sent("setBlocksId") == []
+    assert api.writes_landed == 1
+
+
+def test_ref_targets_are_counted_with_the_write(monkeypatch):
+    double = _graph().install(monkeypatch)
+    api = LogseqAPI(token="t")
+    refs = f"(({double.uuid_of('alpha block')})) (({double.uuid_of('other block')}))"
+    api.insert_block(double.uuid_of("kid block"), refs)
+    assert len(double.sent("setBlocksId")[0][0]) == 2
+    assert api.writes_landed == 3
+
+
+def test_create_page_answer_the_name_does_not_find_is_not_verified(monkeypatch):
+    # An answer with a uuid is half the proof: the name sent must find it.
+    from logseq_cli.api import WriteNotVerified
+    double = _graph().install(monkeypatch)
+    monkeypatch.setitem(double._handlers, "logseq.Editor.createPage",
+                        lambda args: {"uuid": "6500c0de-0000-4000-8000-00000000abcd"})
+    api = LogseqAPI(token="t")
+    with pytest.raises(WriteNotVerified):
+        api.create_page("Fresh Page")
+    assert api.writes_landed == 0
+
+
+def test_set_blocks_id_counts_the_blocks_that_took_it(monkeypatch):
+    # Not atomic: a block that took its id keeps it when another did not.
+    from logseq_cli.api import WriteNotVerified
+    double = _graph().install(monkeypatch)
+    api = LogseqAPI(token="t")
+    with pytest.raises(WriteNotVerified) as caught:
+        api.set_blocks_id([double.uuid_of("alpha block"), "6500c0de-0000-4000-8000-00000000abcd"])
+    assert caught.value.fields["target"] == "6500c0de-0000-4000-8000-00000000abcd"
+    assert api.writes_landed == 1
