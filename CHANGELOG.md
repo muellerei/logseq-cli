@@ -130,7 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:LOGBOOK:` drawers, and
   the properties it carries along by their stored values; a property by
   its stored value, without surrounding spaces, which Logseq's parser
-  trims; a removed property by its absence. A block that does not exist
+  trims; a removed property by its absence, under the key as Logseq's
+  parser stores it and as sent (a key the parser would drop is removed as
+  given, and the database may hold it so). A block that does not exist
   fails the check: it holds no key, which would otherwise read as removed.
   `set-property`, which checks that the page shows the value, now fails
   with `reason: "write_not_verified"` too.

@@ -689,13 +689,16 @@ class LogseqAPI:
         return result
 
     def _prove_no_property(self, method, target, result, *, key):
-        """The block holds no ``key``, neither as a value nor as a text."""
+        """The block holds no ``key``, neither as a value nor as a text, as
+        Logseq's parser stores it or as sent: remove-property sends a key the
+        parser would drop as given, and the database holds such a key as given
+        when an earlier write stored it (upsertBlockProperty keeps any key)."""
         self._block_to_prove(method, target, f"no {key}::")
         values, texts = stored_properties(self, target)
-        stored = stored_property_key(key)
-        if stored in values or stored in texts:
-            got = texts.get(stored, values.get(stored))
-            raise _not_verified(method, target, f"no {key}::", f"{key}:: {got}")
+        for spelt in dict.fromkeys((stored_property_key(key), key)):
+            if spelt in values or spelt in texts:
+                got = texts.get(spelt, values.get(spelt))
+                raise _not_verified(method, target, f"no {key}::", f"{key}:: {got}")
         return result
 
     def _prove_no_block(self, method, target, result):
