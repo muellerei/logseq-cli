@@ -214,6 +214,23 @@ def _without_focus(options: dict | None) -> dict:
     return {**(options or {}), "focus": False}
 
 
+def rename_refused(old_name: str, new_name: str, why: str) -> RenameRefused:
+    """The refusal for ``why`` from LogseqAPI.rename_refusal.
+
+    One wording for the run and the preview. ``new`` is the name as given,
+    so the caller finds their own input in it; it is compared stripped.
+    """
+    if why == "empty":
+        message = (f"Refused to rename '{old_name}': the new name is empty. "
+                   "Logseq would do nothing and answer as for a rename.")
+    else:
+        message = (f"Refused to rename '{old_name}' to '{new_name.strip()}': a page of "
+                   "that name exists, and Logseq would merge the two, "
+                   f"'{old_name}' gone and its blocks moved there. Choose a name "
+                   "no page has.")
+    return RenameRefused(message, old=old_name, new=new_name, why=why)
+
+
 # Default of _write's ``editing``: "not asked yet", since None is an answer
 # (no block open).
 _UNSET = object()
@@ -716,9 +733,37 @@ class LogseqAPI:
         return self._write("logseq.Editor.removeBlockProperty", [block_uuid, key],
                            target=block_uuid)
 
+    def rename_refusal(self, old_name: str, new_name: str) -> str | None:
+        """Why renaming ``old_name`` to ``new_name`` is refused, or ``None``.
+
+        ``"empty"``: nothing is left of the name once stripped; Logseq does
+        nothing and answers null, as for a rename (M4). ``"exists"``: getPage
+        finds another page under the name, and Logseq would merge the two into
+        it, the old page gone and its blocks under the other (M4). The same
+        page, by uuid, is a change of case only, a rename that works.
+
+        Not named for an endpoint: it wraps none. Shared by rename_page and
+        rename-page --dry-run, so the preview refuses what the run refuses.
+        """
+        name = new_name.strip()
+        if not name:
+            return "empty"
+        taken = self.get_page(name)
+        if not taken:
+            return None
+        own = self.get_page(old_name)
+        if own and own.get("uuid") == taken.get("uuid"):
+            return None
+        return "exists"
+
     def rename_page(self, old_name: str, new_name: str):
-        """Rename a page."""
-        return self._write("logseq.Editor.renamePage", [old_name, new_name],
+        """Rename a page; the new name is sent stripped.
+
+        Raises RenameRefused before anything is sent, see rename_refusal."""
+        why = self.rename_refusal(old_name, new_name)
+        if why:
+            raise rename_refused(old_name, new_name, why)
+        return self._write("logseq.Editor.renamePage", [old_name, new_name.strip()],
                            target=old_name)
 
     def delete_page(self, page_name: str):

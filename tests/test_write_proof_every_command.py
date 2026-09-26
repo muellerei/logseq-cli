@@ -190,8 +190,9 @@ DRY_RUN_READS = {
     "remove-block": 2,
     "remove-property-id": 2,
     "remove-property-page": 3,
-    # 030-B6 adds one: rename_refusal reads the new name, shared with the run.
-    "rename-page": 2,
+    # One more than before 030-B6: rename_refusal reads the new name, a
+    # check the preview shares with the run, not a proof (spec 030, Baustein 3).
+    "rename-page": 3,
     "replace-text": 2,
     "set-block-property": 2,
     "set-property": 3,
