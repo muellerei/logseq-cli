@@ -36,6 +36,7 @@ from logseq_cli.outlinetext import (
     note_quote_breaks,
     outline_text,
     parse_hierarchical_content,
+    subtree_uuids,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
 from logseq_cli.strictinsert import (
@@ -49,7 +50,6 @@ from logseq_cli.strictinsert import (
     insert_tree_at_page_end,
     move_block_verified,
     require_insert,
-    subtree_uuids,
 )
 
 

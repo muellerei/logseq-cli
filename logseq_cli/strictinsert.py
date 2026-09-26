@@ -14,7 +14,7 @@ import click
 
 from logseq_cli.blocktext import id_lines
 from logseq_cli.ids import collect_block_ids
-from logseq_cli.outlinetext import count_blocks
+from logseq_cli.outlinetext import collect_child_uuids, count_blocks
 
 
 def _write_one_keeping_id(api, content, where, target, written_before):
@@ -202,18 +202,6 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     return uuids
 
 
-def _collect_child_uuids(node) -> list:
-    """UUIDs of a getBlock(includeChildren=True) subtree, DFS pre-order."""
-    out = []
-    for child in (node.get("children") or []):
-        if not isinstance(child, dict):
-            continue  # a children list of bare UUID refs carries no content
-        if child.get("uuid"):
-            out.append(child["uuid"])
-        out.extend(_collect_child_uuids(child))
-    return out
-
-
 def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
     """Insert a tree under ``parent_uuid`` in ONE API call, then verify.
 
@@ -248,7 +236,7 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
             "Nothing was written."
         )
     existing = [c for c in (before.get("children") or []) if isinstance(c, dict)]
-    before_uuids = set(_collect_child_uuids(before))
+    before_uuids = set(collect_child_uuids(before))
 
     if existing and existing[-1].get("uuid"):
         anchor, opts = existing[-1]["uuid"], {"sibling": True}
@@ -258,7 +246,7 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
     api.insert_batch_block(anchor, tree, opts)
 
     after = api.get_block(parent_uuid, include_children=True)
-    after_uuids = _collect_child_uuids(after) if after else []
+    after_uuids = collect_child_uuids(after) if after else []
     new = [u for u in after_uuids if u not in before_uuids]
 
     expected = count_blocks(tree)
@@ -498,7 +486,7 @@ def check_move(api, src_uuid: str, target_uuid: str) -> None:
     if not api.get_block(target_uuid, include_children=False):
         raise click.ClickException(
             f"Target block {target_uuid[:8]}... not found. Nothing was moved.")
-    if target_uuid in _collect_child_uuids(source):
+    if target_uuid in collect_child_uuids(source):
         raise click.ClickException(
             f"Target {target_uuid[:8]}... lies inside the subtree of "
             f"{src_uuid[:8]}...; a block cannot be moved into its own subtree. "
@@ -691,8 +679,3 @@ def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = T
 
     insert_tree(tree)
     return uuids
-
-
-def subtree_uuids(block: dict) -> list:
-    """The block's own UUID and those of all its descendants."""
-    return [block["uuid"], *_collect_child_uuids(block)] if block.get("uuid") else []

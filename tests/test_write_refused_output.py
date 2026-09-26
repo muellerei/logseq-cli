@@ -36,10 +36,6 @@ TYPES = [
 NOTHING = "Nothing was written."
 
 
-def _spec(task):
-    return pytest.mark.xfail(strict=True, reason=f"spec 030: {task}")
-
-
 def _refusal(name, fields):
     from logseq_cli import writerefused
     return getattr(writerefused, name)(MESSAGE, **fields)
@@ -56,7 +52,6 @@ def _run(error, *, as_json=True, landed=0):
             *(["--json"] if as_json else [])])
 
 
-@_spec("030-B2")
 def test_each_type_has_its_reason():
     from logseq_cli import writerefused
     for name, reason, _ in TYPES:
@@ -68,7 +63,6 @@ def test_each_type_has_its_reason():
     assert logseq_cli.api.WriteNotVerified is writerefused.WriteNotVerified
 
 
-@_spec("030-B2")
 @pytest.mark.parametrize("name,reason,fields", TYPES, ids=[t[0] for t in TYPES])
 def test_refusal_under_json_is_an_error_object(name, reason, fields):
     r = _run(_refusal(name, fields))
@@ -79,7 +73,6 @@ def test_refusal_under_json_is_an_error_object(name, reason, fields):
                      "writes_landed": 0, **fields}
 
 
-@_spec("030-B2")
 @pytest.mark.parametrize("name,reason,fields", TYPES, ids=[t[0] for t in TYPES])
 def test_refusal_without_json_goes_to_stderr(name, reason, fields):
     r = _run(_refusal(name, fields), as_json=False)
@@ -88,7 +81,6 @@ def test_refusal_without_json_goes_to_stderr(name, reason, fields):
     assert r.stderr == f"Error: {MESSAGE} {NOTHING}\n"
 
 
-@_spec("030-B2")
 def test_refusal_with_mock_api_is_valid_json():
     # mock_api answers writes_landed with 0, as a fresh LogseqAPI does: the
     # handler must not choke on the mock, and says "Nothing" exactly once.
@@ -98,7 +90,6 @@ def test_refusal_with_mock_api_is_valid_json():
     assert r.stderr.count(NOTHING) == 1
 
 
-@_spec("030-B2")
 def test_refusal_names_the_writes_that_landed():
     # No rollback: a retry would write the landed ones again.
     r = _run(_refusal("EditorOpen", TYPES[0][2]), landed=2)
@@ -107,3 +98,47 @@ def test_refusal_names_the_writes_that_landed():
     assert error["error"] == (f"{MESSAGE} 2 earlier write(s) in this call landed and "
                               "remain (no rollback); check before retrying.")
     assert NOTHING not in r.stderr
+
+
+def test_base_type_has_no_reason():
+    # Only the subclasses are raised; the base has nothing to report.
+    from logseq_cli import writerefused
+    assert not hasattr(writerefused.WriteRefused, "reason")
+
+
+# --- the count the handler reads ---------------------------------------------
+
+def test_writes_landed_counts_blocks_written(monkeypatch):
+    # One per write, a batch with the number of its blocks: the count says
+    # how much a retry would write again.
+    from logseq_cli.api import LogseqAPI
+    from tests.logseq_http_double import LogseqHttpDouble
+    double = LogseqHttpDouble().install(monkeypatch)
+    double.add_page("Probe Page", ["alpha block"])
+    api = LogseqAPI(token="t")
+    assert api.writes_landed == 0
+    api.append_block_in_page("Probe Page", "one")
+    api.insert_block(double.uuid_of("alpha block"), "two")
+    assert api.writes_landed == 2
+    api.insert_batch_block(double.uuid_of("alpha block"),
+                           [{"content": "three", "children": [{"content": "four"}]}],
+                           {"sibling": True})
+    assert api.writes_landed == 4
+
+
+def test_every_write_method_goes_through_write():
+    # _write is where the gate, the proof and the count sit; a wrapper that
+    # sent its write with call() would pass all three by. Checked on the
+    # source, so a new wrapper is held to it without a test of its own.
+    import ast
+    import inspect
+    from logseq_cli import api
+    tree = ast.parse(inspect.getsource(api))
+    sent_by = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value in api._METHODS):
+            sent_by.setdefault(node.args[0].value, set()).add(node.func.attr)
+    for method in api._MUTATING_METHODS:
+        assert sent_by.get(method) == {"_write"}, (method, sent_by.get(method))

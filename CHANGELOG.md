@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A write to the block you are typing in no longer throws away what you
+  typed. Logseq replaces the editor's text at once, and everything typed and
+  not yet saved was gone; it answered `null`, and the CLI reported success
+  (measured by hand, 0.10.15: typing without pause, an `update-block` five
+  seconds in, and after Esc only the written text and what was typed after
+  it remained). A read right after the write still showed the old text for
+  about three seconds, so no check afterwards could have caught it. The CLI
+  now asks Logseq which block is open (`checkEditing`) before a write that
+  changes a block and refuses with `reason: "open_in_editor"`, naming the
+  block and its page: `update-block`, `set-todo-status`, `set-property`,
+  `set-block-property`, `remove-property`, `move-block` (the moved block or
+  one below it; the anchor is free), `remove-block` (the block or one below
+  it),
+  `delete-page` (a block of the page) and `rename-page` (a block of the page
+  or one that links to it, since Logseq rewrites the link and the open
+  editor would save the old text back). An insert does not ask: Logseq
+  saves the open block before it inserts. One insert is refused all the
+  same: a text with `((X))` while `X` is open and has no `id::` yet, because
+  storing the id writes into `X`. The ids are stored only after the
+  question, so a refused write leaves no `id::` behind. A block id in
+  capitals is compared in lower case, as Logseq answers; compared as typed,
+  `update-block --id` in capitals would have gone past the check. An answer
+  to `checkEditing` that is neither a uuid nor `false` refuses the write
+  with `reason: "editor_state_unknown"`. A block entered in the milliseconds
+  between the question and the write is not covered.
 - A block the CLI inserts no longer opens in Logseq's editor. Logseq takes an
   unset `focus` as true and edits the new block (`api.cljs:603`,
   `editor.cljs:647`); on the page you were looking at, your cursor jumped
@@ -48,6 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --follow-refs` read a ref in capitals, `((8F2A…))`, as the ref it is to
   Logseq (measured, 0.10.15); they took lower case only and left it as a
   hole. One pattern now defines a Block Ref for every reader and writer.
+
+### Changed
+
+- A write the CLI refuses, or cannot show Logseq did, now fails like every
+  other error: under `--json` as one error object on stderr with a `reason`
+  (`open_in_editor`, `editor_state_unknown`, `logseq_error`, `page_exists`,
+  `rename_refused`, `write_not_verified`), the fields that go with it and
+  `writes_landed`, the writes of the same call that landed before it. The
+  message ends with the same count in words, or "Nothing was written.":
+  there is no rollback, and a retry would write those again. These failures
+  were `click.ClickException`s, which under `--json` print neither JSON nor
+  a reason (measured: stdout empty, stderr `Error: …`), so an agent could
+  not tell a block open in the editor from a write Logseq ignored. The CLI
+  counts the landed writes itself, one per write and a batch by its blocks,
+  so no command has to keep its own count for the message. Exit status
+  stays 1.
 
 ## [0.15.0] - 2026-09-25
 
