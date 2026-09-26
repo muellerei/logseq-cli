@@ -18,8 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from logseq_cli.api import LogseqAPI
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 @pytest.fixture(autouse=True)
@@ -44,33 +46,38 @@ def _run(args):
     return result, post
 
 
+def _run_get_page(monkeypatch, *flags):
+    """Run get-page for real against the HTTP double; the client the group
+    built, and the result. The client is the real one, so a command that
+    crashes fails the test instead of passing beside it: a stand-in without
+    get_page let both tests below pass while get-page died of an
+    AttributeError."""
+    LogseqHttpDouble.installed(monkeypatch, {"Foo": ["some text"]})
+    seen = {}
+
+    class _Spy(LogseqAPI):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            seen["api"] = self
+
+    with patch("logseq_cli.group.LogseqAPI", _Spy):
+        result = split_runner().invoke(cli, ["--token", "t", *flags, "get-page",
+                                             "--name", "Foo", "--no-backlinks"])
+    assert result.exit_code == 0, (result.output, result.exception)
+    return seen["api"], result
+
+
 class TestFlagReachesTheClient:
-    def test_flag_sets_cache_enabled_false(self):
-        """The wiring itself, read off the context the group builds."""
-        seen = {}
+    def test_flag_sets_cache_enabled_false(self, monkeypatch):
+        """The wiring itself, read off the client the group builds."""
+        api, result = _run_get_page(monkeypatch, "--no-cache")
+        assert api.cache_enabled is False
+        assert "some text" in result.stdout
 
-        class _Spy:
-            def __init__(self, **kwargs):
-                self.cache_enabled = True
-                seen["api"] = self
-
-        with patch("logseq_cli.group.LogseqAPI", _Spy):
-            split_runner().invoke(cli, ["--token", "t", "--no-cache", "get-page",
-                                        "--name", "Foo", "--no-backlinks"])
-        assert seen["api"].cache_enabled is False
-
-    def test_without_the_flag_the_cache_stays_on(self):
-        seen = {}
-
-        class _Spy:
-            def __init__(self, **kwargs):
-                self.cache_enabled = True
-                seen["api"] = self
-
-        with patch("logseq_cli.group.LogseqAPI", _Spy):
-            split_runner().invoke(cli, ["--token", "t", "get-page",
-                                        "--name", "Foo", "--no-backlinks"])
-        assert seen["api"].cache_enabled is True
+    def test_without_the_flag_the_cache_stays_on(self, monkeypatch):
+        api, result = _run_get_page(monkeypatch)
+        assert api.cache_enabled is True
+        assert "some text" in result.stdout
 
 
 class TestRepeatedReadsGoOutAgain:
