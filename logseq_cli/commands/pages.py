@@ -4,6 +4,7 @@ import sys
 import click
 import requests
 
+from logseq_cli.api import rename_refused
 from logseq_cli.blockprops import (
     apply_block_properties,
     check_property_pairs,
@@ -768,8 +769,16 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
     refuse_alias(resolve_page(api, page), "rename-page")
+    # What the page is called afterwards: the name goes to Logseq stripped
+    # (LogseqAPI.rename_page). A refusal quotes the name as given instead.
+    sent = new_name.strip()
 
     if dry_run:
+        # The run refuses in LogseqAPI.rename_page; the same check, so the
+        # preview does not promise a rename that would merge or do nothing.
+        why = api.rename_refusal(page, new_name)
+        if why:
+            raise rename_refused(page, new_name, why)
         # A rename reaches past the page itself: Logseq rewrites every [[Old]]
         # in the graph. The blast radius is the point of the preview, so it is
         # worth the extra read here — the write path never needs it. Backlinks
@@ -783,7 +792,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
             click.echo(f"Warning: could not read backlinks ({e}); "
                        f"reference count unknown", err=True)
 
-        payload = {"old_name": page, "new_name": new_name, "dry_run": True}
+        payload = {"old_name": page, "new_name": sent, "dry_run": True}
         if referencing is None:
             payload["referencing_pages"] = None
             payload["referencing_page_count"] = None
@@ -796,7 +805,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
         else:
             click.echo("[DRY RUN] Would rename page")
             click.echo(f"  from: {page}")
-            click.echo(f"  to:   {new_name}")
+            click.echo(f"  to:   {sent}")
             if referencing is None:
                 click.echo("  pages with references that would be rewritten: unknown")
             else:
@@ -809,11 +818,11 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
 
     api.rename_page(page, new_name)
 
-    result = {"old_name": page, "new_name": new_name, "status": "renamed"}
+    result = {"old_name": page, "new_name": sent, "status": "renamed"}
     if as_json:
         output(result, True)
     else:
-        click.echo(f"Renamed '{page}' -> '{new_name}'")
+        click.echo(f"Renamed '{page}' -> '{sent}'")
 
 @cli.command("delete-page", epilog="""\b
 Examples:

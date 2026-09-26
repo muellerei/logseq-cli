@@ -82,6 +82,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `replace-text` stops at the block Logseq refused; the replacements before
   it stay, counted in `writes_landed`. Before, it went on and listed the
   block as `failed` with `reason: "write_not_verified"`.
+- `rename-page` onto the name of another page no longer merges the two.
+  Logseq answers `null` and moves the renamed page's blocks to the other
+  page, the renamed page gone; to an empty name it answers `null` too and
+  does nothing (measured, 0.10.15). Both times `rename-page` reported
+  "Renamed". It now asks for the new name first and refuses with
+  `reason: "rename_refused"`, `why: "exists"` or `why: "empty"`, before
+  anything is sent; a name of spaces only counts as empty. A change of case
+  is the same page and still renames. `--dry-run` runs the same check and
+  refuses alike, at the cost of one more read. The new name is sent without
+  leading and trailing spaces, the form the check looked up, and the run and
+  its preview report it in that form, as the page is then called.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database

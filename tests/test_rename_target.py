@@ -53,7 +53,6 @@ def _assert_refused(double, new_name, why, *extra):
 RUN_OR_PREVIEW = pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["run", "dry-run"])
 
 
-@_spec("030-B6")
 @RUN_OR_PREVIEW
 @pytest.mark.parametrize("new_name", ["Taken Page", "taken page", "Taken Page "])
 def test_existing_name_is_refused(double, extra, new_name):
@@ -63,14 +62,12 @@ def test_existing_name_is_refused(double, extra, new_name):
     assert double.tree("Taken Page") == [("taken text", [])]
 
 
-@_spec("030-B6")
 @RUN_OR_PREVIEW
 @pytest.mark.parametrize("new_name", ["", "   "], ids=["empty", "blank"])
 def test_empty_name_is_refused(double, extra, new_name):
     _assert_refused(double, new_name, "empty", *extra)
 
 
-@_spec("030-B6")
 @pytest.mark.parametrize("new_name,why", [("Taken Page", "exists"), ("   ", "empty")])
 def test_dry_run_and_run_refuse_alike(double, new_name, why):
     run = json.loads(_rename(new_name).stderr)
@@ -80,12 +77,25 @@ def test_dry_run_and_run_refuse_alike(double, new_name, why):
     assert run["why"] == why
 
 
-@_spec("030-B6")
 def test_the_name_is_sent_stripped(double):
     r = _rename("New Name ")
     assert r.exit_code == 0, r.stderr
     assert double.sent("renamePage") == [["Old Page", "New Name"]]
     assert LogseqAPI(token="t").get_page("new name")["originalName"] == "New Name"
+
+
+@pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["run", "dry-run"])
+@pytest.mark.parametrize("as_json", [True, False], ids=["json", "text"])
+def test_the_name_is_reported_as_sent(double, extra, as_json):
+    # The page is called what was sent, not what was typed around it.
+    args = ["--token", "t", "rename-page", "--page", "Old Page",
+            "--new-name", "  New Name ", *extra, *(["--json"] if as_json else [])]
+    r = split_runner().invoke(cli, args)
+    assert r.exit_code == 0, r.stderr
+    if as_json:
+        assert json.loads(r.stdout)["new_name"] == "New Name"
+    else:
+        assert ("to:   New Name\n" if extra else "-> 'New Name'\n") in r.stdout
 
 
 @pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["run", "dry-run"])
@@ -102,7 +112,6 @@ def test_a_change_of_case_is_allowed(double, extra):
     assert (page["uuid"], page["originalName"]) == (uuid, "OLD page")
 
 
-@_spec("030-B6")
 def test_rename_refusal_answers_none_for_a_rename_that_works(double):
     api = LogseqAPI(token="t")
     assert api.rename_refusal("Old Page", "New Name") is None
