@@ -9,12 +9,12 @@ with exit 0, dropping any ``--property`` with a warning. The check now runs on
 the text as it is written, in the one function that removes the heading.
 """
 import datetime
+import json
 
-import click
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.headings import strip_title_heading
+from logseq_cli.headings import TitleHeadingOnly, strip_title_heading
 from logseq_cli.pagenames import journal_page_name
 from tests.conftest import fake_api, split_runner
 
@@ -42,7 +42,7 @@ def _nothing_written(api):
 
 class TestStripTitleHeading:
     def test_only_the_heading_is_refused(self):
-        with pytest.raises(click.BadParameter) as exc:
+        with pytest.raises(TitleHeadingOnly) as exc:
             strip_title_heading("# Reading List\n", PAGE)
         assert "only the page's title heading" in str(exc.value)
 
@@ -92,3 +92,19 @@ class TestCommandsRefuse:
         assert result.exit_code != 0, result.stdout
         assert "only the page's title heading" in result.stderr
         _nothing_written(api)
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["run", "dry-run"])
+def test_refusal_is_an_error_object_under_json(monkeypatch, dry_run):
+    # Reported through fail(), not as Click's usage dump, which no caller
+    # can parse (CONTRIBUTING.md).
+    api = _api(monkeypatch)
+    result = split_runner().invoke(cli, [
+        "--token", "t", "add-note-content", "--page", PAGE, "--content", f"# {PAGE}",
+        "--json", *(["--dry-run"] if dry_run else [])])
+    assert result.exit_code == 1, result.stderr
+    error = json.loads(result.stderr)
+    assert error["reason"] == "empty_content"
+    assert error["page"] == PAGE
+    assert "only the page's title heading" in error["error"]
+    _nothing_written(api)

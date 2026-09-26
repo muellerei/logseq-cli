@@ -9,24 +9,34 @@ and the API proves the append.
 
 import re
 
-import click
+
+class TitleHeadingOnly(Exception):
+    """Content that was nothing but the page's title heading. Not a
+    ValueError, like blocktext.SplitBlockError: it has to reach
+    handle_connection_error, which reports it through fail() with
+    ``reason: "empty_content"`` and the ``page``."""
+
+    def __init__(self, page_name: str):
+        super().__init__(
+            f"The content is only the page's title heading '# {page_name}', "
+            "which is dropped since the page shows its name: nothing would be "
+            "written.")
+        self.page = page_name
 
 
 def strip_title_heading(content: str, page_name: str) -> str:
     """Remove '# PageName' heading from content to prevent duplication.
 
-    Refuses content that was nothing but that heading. The commands check for
-    empty content before they get here, so text the removal empties had
-    passed that check, and was written as an empty block, or as "Added 0
-    block(s)" with exit 0. Checked here, where the text is emptied, so every
-    writer that removes the heading refuses it the same way.
+    Refuses content that was nothing but that heading (TitleHeadingOnly). The
+    commands check for empty content before they get here, so text the
+    removal empties had passed that check, and was written as an empty block,
+    or as "Added 0 block(s)" with exit 0. Checked here, where the text is
+    emptied, so every writer that removes the heading refuses it the same way.
     """
     pattern = re.compile(rf"^#\s+{re.escape(page_name)}\s*$", re.IGNORECASE | re.MULTILINE)
     stripped = pattern.sub("", content).strip()
     if content.strip() and not stripped:
-        raise click.BadParameter(
-            f"the content is only the page's title heading '# {page_name}', "
-            "which is dropped since the page shows its name: nothing would be written")
+        raise TitleHeadingOnly(page_name)
     return stripped
 
 
