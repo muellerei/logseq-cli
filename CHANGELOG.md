@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Every write is now proven, and none overwrites a block you are editing.
+Logseq's HTTP API answers `null` to a write whether it happened or not, and
+reports a thrown error as HTTP 200; measured on 0.10.15, a write to the
+block someone is typing in replaced the editor content at once and dropped
+what had not been saved, and `renamePage` onto an existing name merged two
+pages without asking. Until now the CLI checked some write paths and took
+Logseq's word on the rest. From this release the checks sit in one place,
+the API client, where no command can go around them:
+
+- before a write that changes a block, the CLI asks Logseq which block is
+  open in the editor and refuses to touch it; inserts no longer take your
+  cursor, and created pages no longer turn Logseq's view;
+- after each write, it shows that Logseq holds the result, from the answer
+  where it carries one and by reading back otherwise;
+- a write that is refused or not shown to land fails with exit 1 and a
+  `reason` (under `--json` as an error object), and says how many writes of
+  the same call landed before it;
+- the client refuses an API method it does not know, so a new write cannot
+  slip past these checks.
+
+For a caller, exit 0 after a write now means the write is in Logseq's
+database. Scripts that matched the old `Error:` text of a failed insert, or
+relied on `--under-heading` falling back to the top of the page, need
+adjusting (see Changed). The price is one read per write and one editor
+check per write that can be refused, about a millisecond each, and a window
+of about 0.1 s after a multi-block insert.
+
 ### Fixed
 
 - A write to the block you are typing in no longer throws away what you
