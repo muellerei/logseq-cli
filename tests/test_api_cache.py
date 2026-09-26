@@ -16,23 +16,30 @@ def _mock_response(payload):
 
 
 def _answering_writes(payload):
-    """``requests.post`` for a test that writes: every request answers
-    ``payload``, except checkEditing, which the editor gate sends before a
-    write and which Logseq answers with raw text (M8, spec 030): ``false``,
-    nobody is editing."""
+    """``requests.post`` for a test that updates a block: each method answers
+    as Logseq does. checkEditing, which the editor gate sends before a write,
+    with raw text (M8, spec 030): ``false``, nobody is editing. updateBlock
+    with ``null`` (M1), and getBlock with the block as last written, for the
+    read that proves the update. Everything else answers ``payload``."""
     idle = MagicMock(status_code=200, text="false")
+    block = {"uuid": "uuid-x", "content": ""}
 
     def post(url, json=None, **kwargs):
-        if json["method"] == "logseq.Editor.checkEditing":
+        method, args = json["method"], json["args"]
+        if method == "logseq.Editor.checkEditing":
             return idle
+        if method == "logseq.Editor.updateBlock":
+            block["content"] = args[1]
+            return _mock_response(None)
+        if method == "logseq.Editor.getBlock":
+            return _mock_response(dict(block))
         return _mock_response(payload)
     return post
 
 
-def _data_requests(mock_post):
-    """The requests that read or write data, the gate's question left out."""
+def _requests_to(mock_post, method):
     return [c for c in mock_post.call_args_list
-            if c.kwargs["json"]["method"] != "logseq.Editor.checkEditing"]
+            if c.kwargs["json"]["method"] == f"logseq.Editor.{method}"]
 
 
 @pytest.fixture(autouse=True)
@@ -86,16 +93,17 @@ class TestCacheBasic:
             api.get_page("Foo")
             api.update_block("uuid-x", "new content")
             api.get_page("Foo")
-        # 1 read + 1 update + 1 fresh read after invalidation
-        assert len(_data_requests(mock_post)) == 3
+        # the read after the update is sent again, not served from the cache
+        assert len(_requests_to(mock_post, "getPage")) == 2
 
     def test_non_cacheable_method_passthrough(self):
         api = LogseqAPI(token="x")
         with patch("logseq_cli.api.requests.post", side_effect=_answering_writes({"ok": 1})) as mock_post:
             api.update_block("uuid-x", "first")
             api.update_block("uuid-x", "second")
-        # mutations are never cached
-        assert len(_data_requests(mock_post)) == 2
+        # mutations are never cached, and neither is the read proving each
+        assert len(_requests_to(mock_post, "updateBlock")) == 2
+        assert len(_requests_to(mock_post, "getBlock")) == 2
 
     def test_datalog_query_cacheable(self):
         api = LogseqAPI(token="x")

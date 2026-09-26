@@ -6,12 +6,15 @@ from dataclasses import dataclass
 
 import requests
 
+# The reader of stored property keys and texts, for the property proofs.
+from logseq_cli.blockprops import stored_properties
 # Every write of block text is checked here, whichever command sent it: text
 # written as one block must come back from the page file as that block (#47),
 # and an id:: line reaches Logseq only where a command decided to keep it
 # (#56). The commands check first, for their own way out in the message; this
 # is the net no write path can go around.
 from logseq_cli.blocktext import (
+    PROPERTY_LINE_RE,
     block_ref_uuids,
     block_text_matches,
     refuse_id_lines,
@@ -19,6 +22,7 @@ from logseq_cli.blocktext import (
     refuse_split_block,
     refuse_split_property,
     refuse_split_tree,
+    stored_property_key,
     tree_texts,
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
@@ -59,6 +63,10 @@ class Write:
     * ``batch``: the place the batch lands, read before and after the write,
       holds as many new blocks as were sent, with the texts sent, in order.
     * ``move``: the moved block is read back where it was sent.
+    * ``text``: the block's text is read back, less the lines of the
+      properties sent along, which are read back as values.
+    * ``property``: the block holds the key with the value sent.
+    * ``no_property``: the block no longer holds the key.
 
     Why each is proven the way it is: the note above ``_METHODS``.
 
@@ -110,9 +118,20 @@ class UI:
 #   moveBlock  null on success, on a missing target and on a refusal (a move
 #       into the block's own subtree does nothing). The block is read back
 #       where it was sent (move).
-#   updateBlock, upsertBlockProperty, removeBlockProperty (M1, M6),
+#   updateBlock  null on success, for the same text and for a uuid no block
+#       has (M1). The block is read back (text): the text through
+#       block_text_matches, since Logseq trims it and, with time tracking
+#       on, appends or rewrites a :LOGBOOK: drawer (M11); the properties
+#       sent along through stored_properties. Their key:: lines are taken
+#       out of the text by key, not by place: Logseq writes them below the
+#       text, where in a text of several lines was not measured.
+#   upsertBlockProperty, removeBlockProperty  null either way, an unknown
+#       uuid too (M6). The block's stored properties are read (property,
+#       no_property): stored_properties, never getBlock's map, which
+#       camel-cases the keys. The block is read first: for a uuid no block
+#       has the reader finds no key, which would pass as "removed".
 #   removeBlock (M2), deletePage (M3), renamePage (M4), createPage (M5,
-#       M14), setBlocksId (M12): their proof entries follow (030-C4, 030-C5).
+#       M14), setBlocksId (M12): their proof entries follow (030-C5).
 #
 # A read proves Logseq's database, not the file, which follows 1.8 s later
 # (M7); it reaches Logseq, not the cache, since every write clears the cache.
@@ -142,10 +161,10 @@ _METHODS = {
     "logseq.Editor.renamePage": Write(editor="page_or_link", proof=None),
     "logseq.Editor.appendBlockInPage": Write(editor="never", proof="uuid"),
     "logseq.Editor.insertBlock": Write(editor="never", proof="uuid"),
-    "logseq.Editor.updateBlock": Write(editor="target", proof=None),
+    "logseq.Editor.updateBlock": Write(editor="target", proof="text"),
     "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
-    "logseq.Editor.upsertBlockProperty": Write(editor="target", proof=None),
-    "logseq.Editor.removeBlockProperty": Write(editor="target", proof=None),
+    "logseq.Editor.upsertBlockProperty": Write(editor="target", proof="property"),
+    "logseq.Editor.removeBlockProperty": Write(editor="target", proof="no_property"),
     "logseq.Editor.insertBatchBlock": Write(editor="any", proof="batch"),
     "logseq.Editor.moveBlock": Write(editor="subtree", proof="move"),
     "logseq.Editor.setBlocksId": Write(editor="requested", proof=None),
@@ -293,6 +312,15 @@ def _block_uuid_from_result(result):
     if isinstance(result, str):
         return result
     return None
+
+
+def _property_text(value) -> str:
+    """A property value as Logseq writes it into the text (M6): a list as
+    ``a,b``, a number as its digits, a string as it is (``01234`` and
+    ``[[Link]]`` stay text)."""
+    if isinstance(value, (list, tuple)):
+        return ",".join(map(str, value))
+    return str(value)
 
 
 def _target_text(target) -> str:
@@ -585,6 +613,72 @@ class LogseqAPI:
         if not ok:
             raise _not_verified(method, target, where, "it somewhere else")
         return result
+
+    def _prove_text(self, method, target, result, *, content, properties):
+        """The block reads back as ``content``, with ``properties`` stored.
+
+        The lines of the keys sent along go by key, on both sides: Logseq
+        writes them below the text and drops a line of the text with the
+        same key (#66). Only those keys: a rule "no property lines" would
+        pass a write that lost the caller's own. Their values are compared
+        as ``_prove_property`` does."""
+        block = self._block_to_prove(method, target, repr(content))
+        keys = {stored_property_key(k) for k in properties}
+        # Logseq drops a ref to the block from its own text, in the lower-case
+        # form it writes (editor.cljs:323-324; measured, 0.10.15: "see ((own))
+        # here" reads back "see  here"). A ref that could only point at itself.
+        sent = content.replace(f"(({str(target).lower()}))", "")
+
+        def without_sent_keys(text):
+            return "\n".join(line for line in text.split("\n")
+                             if not ((m := PROPERTY_LINE_RE.match(line))
+                                     and stored_property_key(m.group(1)) in keys))
+
+        read = block.get("content") or ""
+        if not block_text_matches(without_sent_keys(sent), without_sent_keys(read)):
+            raise _not_verified(method, target, repr(content), repr(read))
+        if properties:
+            texts = stored_properties(self, target)[1]
+            for key, value in properties.items():
+                self._prove_value(method, target, texts, key, value)
+        return result
+
+    def _prove_property(self, method, target, result, *, key, value):
+        """The block holds ``key`` with ``value`` in its text form."""
+        self._block_to_prove(method, target, f"{key}:: {_property_text(value).strip()}")
+        self._prove_value(method, target, stored_properties(self, target)[1], key, value)
+        return result
+
+    def _prove_no_property(self, method, target, result, *, key):
+        """The block holds no ``key``, neither as a value nor as a text."""
+        self._block_to_prove(method, target, f"no {key}::")
+        values, texts = stored_properties(self, target)
+        stored = stored_property_key(key)
+        if stored in values or stored in texts:
+            got = texts.get(stored, values.get(stored))
+            raise _not_verified(method, target, f"no {key}::", f"{key}:: {got}")
+        return result
+
+    def _block_to_prove(self, method, target, expected) -> dict:
+        """The block ``target``, read from Logseq; WriteNotVerified if there is
+        none. Read right away, without waiting: with no block open, getBlock
+        shows a write at once (M1). The editor gate lets no write through to
+        an open block, where getBlock would show the old text (M8)."""
+        block = self.get_block(target, include_children=False)
+        if not block:
+            raise _not_verified(method, target, expected, "no block")
+        return block
+
+    @staticmethod
+    def _prove_value(method, target, texts, key, value):
+        """``texts`` (stored_properties) hold ``key`` as ``value`` does in
+        text form. Both stripped: Logseq's parser trims a value
+        (blockprops.py), as _page_shows compares too."""
+        want = _property_text(value).strip()
+        got = texts.get(stored_property_key(key))
+        if got is None or str(got).strip() != want:
+            raise _not_verified(method, target, f"{key}:: {want}",
+                                "no such property" if got is None else f"{key}:: {got}")
 
     # Where a batch lands and what a move is checked against: a block's
     # parent, given as ("block", its id or uuid) or ("page", its name).
@@ -902,6 +996,9 @@ class LogseqAPI:
         ``replacing`` is the text this replaces, for a caller that changes a
         block rather than writing one: a line it already had passes the check
         every write here goes through (#47).
+
+        Raises WriteNotVerified unless the block then reads back with
+        ``content`` and ``properties`` (``_prove_text``).
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
@@ -911,7 +1008,8 @@ class LogseqAPI:
         if properties:
             args.append({"properties": properties})
         return self._write("logseq.Editor.updateBlock", args,
-                           target=block_uuid, texts=texts, own=block_uuid)
+                           target=block_uuid, texts=texts, own=block_uuid,
+                           proof_args={"content": content, "properties": properties or {}})
 
     def _ref_targets_needing_id(self, refs: list, own: str = None) -> list:
         """The Block Ref targets among ``refs`` (lower case, from
@@ -961,15 +1059,18 @@ class LogseqAPI:
         return self.call("logseq.Editor.getPageLinkedReferences", [page_name])
 
     def upsert_block_property(self, block_uuid: str, key: str, value):
-        """Set or update a property on a block."""
+        """Set or update a property on a block; raises WriteNotVerified
+        unless the block then holds it (``_prove_property``)."""
         refuse_split_property(key, value)
         return self._write("logseq.Editor.upsertBlockProperty", [block_uuid, key, value],
-                           target=block_uuid, texts=[str(value)], own=block_uuid)
+                           target=block_uuid, texts=[str(value)], own=block_uuid,
+                           proof_args={"key": key, "value": value})
 
     def remove_block_property(self, block_uuid: str, key: str):
-        """Remove a property from a block."""
+        """Remove a property from a block; raises WriteNotVerified unless the
+        block then lacks it (``_prove_no_property``)."""
         return self._write("logseq.Editor.removeBlockProperty", [block_uuid, key],
-                           target=block_uuid)
+                           target=block_uuid, proof_args={"key": key})
 
     def rename_refusal(self, old_name: str, new_name: str) -> str | None:
         """Why renaming ``old_name`` to ``new_name`` is refused, or ``None``.

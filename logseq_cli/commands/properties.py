@@ -240,7 +240,8 @@ def _check_page_took(api, page, page_uuid, key, value, as_json):
         return
     what = f"'{key}' removed" if value is None else f"'{key}:: {value}'"
     fail(f"Logseq did not show {what} on page '{page}' after the write; "
-         f"check the page before retrying.", as_json=as_json, page=page, property=key)
+         f"check the page before retrying.", as_json=as_json,
+         reason="write_not_verified", page=page, property=key)
 
 
 @cli.command("set-property", epilog="""\b

@@ -925,9 +925,13 @@ class LogseqHttpDouble:
 
     def _update_block(self, args):
         """M1: null on success, for the same text and for an unknown uuid.
-        Spaces at the end are trimmed ("neu  " → "neu"). ``{"properties":
+        The text is trimmed on both sides ("neu  " → "neu"; at the start
+        measured for spaces, a tab and blank lines, 0.10.15), and a ref to
+        the block itself is dropped ("see ((own)) here" → "see  here",
+        measured; editor.cljs:323-324 replaces the lower-case form). ``{"properties":
         {k: v}}`` writes ``k:: v`` lines below the text, a passed key winning
-        over the text's own line (#30, #66). An id:: line becomes the
+        over the text's own line (#30, #66). A stored id:: line stays when
+        the text sent has none (#95). An id:: line becomes the
         block's uuid once the file is read again (#56); modelled at once."""
         uuid, content = args[0], args[1]
         options = (args[2] if len(args) > 2 else None) or {}
@@ -937,10 +941,15 @@ class LogseqHttpDouble:
         page, siblings, i, parent = found
         node = siblings[i]
         properties = options.get("properties") or {}
-        lines = content.rstrip().split("\n")
+        lines = content.replace(f"(({node['uuid']}))", "").strip().split("\n")
         for key, value in properties.items():
             lines = [ln for ln in lines if not re.match(rf"[ \t]*{re.escape(key)}:: ", ln)]
             lines.append(f"{key}:: {_value_text(value)}")
+        # #95, measured: a stored id stays through an update whose text
+        # does not carry it, read back after the text sent.
+        kept_id = _property_texts(node["content"]).get("id")
+        if kept_id and "id" not in _property_texts("\n".join(lines)):
+            lines.append(f"id:: {kept_id}")
         new = "\n".join(lines)
         if new == node["content"]:
             return None

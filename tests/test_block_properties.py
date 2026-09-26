@@ -199,15 +199,20 @@ class TestUpdateBlockKeepsProperties:
         assert "ticket::" in r.output
         api.update_block.assert_not_called()
 
-    def test_api_omits_the_option_when_there_is_nothing_to_keep(self):
-        """No properties -> plain two-arg call, same as before."""
+    def test_api_omits_the_option_when_there_is_nothing_to_keep(self, monkeypatch):
+        """No properties -> plain two-arg call, same as before. Against the
+        HTTP double: update_block reads its write back (spec 030)."""
         from logseq_cli.api import LogseqAPI
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble()
+        double.add_page("P", ["old"])
+        double.install(monkeypatch)
+        uuid = double.uuid_of("old")
         api = LogseqAPI(token="t")
-        with patch.object(api, "call") as call:
-            api.update_block("00000000-0000-4000-8000-0000000000a2", "text")
-            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text"]
-            api.update_block("00000000-0000-4000-8000-0000000000a2", "text", properties={"a": 1})
-            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text", {"properties": {"a": 1}}]
+        api.update_block(uuid, "text")
+        api.update_block(uuid, "text", properties={"a": 1})
+        assert double.sent("updateBlock") == [[uuid, "text"],
+                                              [uuid, "text", {"properties": {"a": 1}}]]
 
 
 class TestRemovePropertyById:

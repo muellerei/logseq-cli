@@ -190,9 +190,12 @@ def normalize_block_text(text: str) -> str:
 
     - ``id::`` lines go (without_block_ids): Logseq stores a ref target's id
       as a line of its text (#95), which is no change the writer made.
-    - Whitespace goes from the end of each line. Measured only at the end of
-      the text (M1: "neu  " is read back as "neu"); per line is an assumption
-      made on purpose, harmless because both sides are normalised alike.
+    - Whitespace goes from the end of each line and from the start of the
+      text: Logseq trims the text on both sides (editor.cljs:1291-1296). At
+      the end measured (M1: "neu  " is read back as "neu"), at the start
+      measured too (0.10.15: spaces, a tab, blank lines); per line is an
+      assumption made on purpose, harmless because both sides are
+      normalised alike. The lines after the first keep their indent.
     - Every ``:LOGBOOK:`` drawer goes. With time tracking on, Logseq's
       default, a marker change appends a drawer or rewrites its last CLOCK
       line (M11; upstream editor.cljs:256-285, util/clock.cljs:75-93), and
@@ -206,7 +209,7 @@ def normalize_block_text(text: str) -> str:
     lines = without_block_ids(text).split("\n")
     drawer = _drawer_lines(lines)
     kept = [line.rstrip() for i, line in enumerate(lines) if i not in drawer]
-    return "\n".join(kept).rstrip()
+    return "\n".join(kept).strip()
 
 
 def block_text_matches(sent: str, read: str) -> bool:

@@ -50,6 +50,7 @@ from logseq_cli.strictinsert import (
     insert_tree_at_page_end,
     move_block_verified,
 )
+from logseq_cli.writerefused import WriteRefused, partial_state
 
 
 @cli.command("update-block", epilog="""\b
@@ -317,31 +318,25 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
         # A text line turned into an id:: line would give the block another
         # uuid (#56); the property lines it had are masked above and stay.
         refuse_id_lines(r["new"], own=r["id"], replacing=r["old"], where=where)
+    # update_block proves each write itself and raises if it cannot. The one
+    # caller that catches: its contract is a report of every block, so a
+    # block open in the editor, one Logseq threw on or one it did not write
+    # fails alone, and the others are still written (spec 030).
+    reasons = {}
     if not dry_run:
         for r in replacements:
-            api.update_block(r["id"], r["new"], replacing=r["old"])
-
-    # updateBlock answers null whether it wrote or not (verified against a live
-    # graph), so the write cannot be checked from its return value. Counting the
-    # matches instead would report "Replaced N block(s)" for writes that never
-    # landed, complete with a before/after diff computed locally. Read the
-    # blocks back and compare. The note above api._METHODS says when a read
-    # like this can be dropped.
-    # Compared without id:: lines: a ref another replacement wrote may have
-    # stored this block's id meanwhile, and Logseq keeps it through the update
-    # (#95, measured). A replacement never changes an id:: line (masked above).
-    failed = []
-    if replacements and not dry_run:
-        for r in replacements:
-            after = api.get_block(r["id"], include_children=False) or {}
-            if without_block_ids(after.get("content") or "") != without_block_ids(r["new"]):
-                failed.append(r["id"])
+            try:
+                api.update_block(r["id"], r["new"], replacing=r["old"])
+            except WriteRefused as refused:
+                reasons[r["id"]] = refused.reason
+    failed = list(reasons)
 
     if as_json:
         payload = {**ref.fields(), "replacements": len(replacements) - len(failed),
                    "dry_run": dry_run, "matches": replacements}
         if failed:
             payload["failed"] = failed
+            payload["failed_reasons"] = reasons
         output(payload, True)
     else:
         if not replacements:
@@ -352,16 +347,20 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
             for r in replacements:
                 old_preview = r["old"][:60] + ("..." if len(r["old"]) > 60 else "")
                 new_preview = r["new"][:60] + ("..." if len(r["new"]) > 60 else "")
-                mark = "  !! not written" if r["id"] in failed else ""
+                mark = f"  !! not written ({reasons[r['id']]})" if r["id"] in reasons else ""
                 click.echo(f"  {r['id'][:8]}..  {old_preview}{mark}")
                 click.echo(f"         →  {new_preview}")
     # After the report, in both modes: the payload says which blocks changed,
     # and a caller who stops at the exit status must not read 0 as done.
     if failed:
-        fail(f"{len(failed)} of {len(replacements)} replacement(s) did not "
-             "reach the graph. Logseq reports no error for this, so the "
-             "blocks were read back to check.", as_json=as_json,
-             reason="write_not_verified", failed=failed)
+        # One reason when every block failed for the same one, else the
+        # general one; each block's own is in failed_reasons.
+        common = set(reasons.values())
+        fail(f"{len(failed)} of {len(replacements)} replacement(s) were not "
+             f"written or did not show in Logseq. {partial_state(api.writes_landed)}",
+             as_json=as_json,
+             reason=common.pop() if len(common) == 1 else "write_not_verified",
+             failed=failed, failed_reasons=reasons, writes_landed=api.writes_landed)
 
 @cli.command("insert-block", epilog="""\b
 Examples:

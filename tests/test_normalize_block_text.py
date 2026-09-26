@@ -10,8 +10,6 @@ that took them for one raised a false alarm (#95, replace-text).
 The drawer format is assumed from Logseq's file format, not measured: time
 tracking is off in the measured graph. The CLOCK lines are the double's.
 """
-import pytest
-
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import CLOCK_IN, CLOCK_OUT, LogseqHttpDouble
@@ -19,10 +17,6 @@ from tests.logseq_http_double import CLOCK_IN, CLOCK_OUT, LogseqHttpDouble
 UUID = "6a1d2e3f-4b5c-4d6e-8f70-8192a3b4c5d6"
 DRAWER_IN = f":LOGBOOK:\n{CLOCK_IN}\n:END:"
 DRAWER_OUT = f":LOGBOOK:\n{CLOCK_OUT}\n:END:"
-
-
-def _spec(task):
-    return pytest.mark.xfail(strict=True, reason=f"spec 030: {task}")
 
 
 def _normalize(text):
@@ -92,7 +86,6 @@ def test_other_text_does_not_match():
     assert not _matches("new text", f"old text\n{DRAWER_IN}")
 
 
-@_spec("030-C4")
 def test_replace_text_appended_logbook_is_success(monkeypatch):
     # With time tracking on (Logseq's default), TODO -> DOING appends a
     # drawer: the write landed, and replace-text must not report it failed.
@@ -104,3 +97,37 @@ def test_replace_text_appended_logbook_is_success(monkeypatch):
     assert double.tree("Probe Page")[0] == ("DOING task one", [])
     assert r.exit_code == 0, r.stderr
     assert '"failed"' not in r.stdout
+
+
+def test_whitespace_at_the_start_goes():
+    # Measured, 0.10.15: "  eingerückt", "\tmit tab"
+    # and "\n\nnach leerzeilen" are read back without it; Logseq trims the
+    # text on both sides (editor.cljs:1291-1296).
+    assert _normalize("  indented") == "indented"
+    assert _normalize("\ttabbed") == "tabbed"
+    assert _normalize("\n\nafter blank lines") == "after blank lines"
+    # Only at the start of the text: the lines after it keep their indent.
+    assert _normalize("first\n  second") == "first\n  second"
+
+
+def test_update_block_with_leading_whitespace_is_proven(monkeypatch):
+    double = LogseqHttpDouble().install(monkeypatch)
+    double.add_page("Probe Page", ["old text"])
+    uuid = double.uuid_of("old text")
+    r = split_runner().invoke(cli, ["--token", "t", "update-block", "--id", uuid,
+                                    "--content", "  new text", "--json"])
+    assert r.exit_code == 0, r.stderr
+    assert double.tree("Probe Page") == [("new text", [])]
+
+
+def test_update_block_with_a_ref_to_itself_is_proven(monkeypatch):
+    # Measured, 0.10.15: Logseq drops a ref to the
+    # block from its own text ("see ((own)) here" is read back as
+    # "see  here"; editor.cljs:323-324). A ref that can only point at
+    # itself; the write landed as Logseq stores it.
+    double = LogseqHttpDouble().install(monkeypatch)
+    double.add_page("Probe Page", [{"content": "old text", "uuid": UUID}])
+    r = split_runner().invoke(cli, ["--token", "t", "update-block", "--id", UUID.upper(),
+                                    "--content", f"see (({UUID})) here", "--json"])
+    assert r.exit_code == 0, r.stderr
+    assert double.tree("Probe Page") == [("see  here", [])]

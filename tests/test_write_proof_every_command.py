@@ -30,18 +30,14 @@ from tests.logseq_http_double import LogseqHttpDouble
 # The task that proves each write method in LogseqAPI, for the methods not
 # proven yet; a method missing here proves its write.
 PROOF_TASK = {
-    "updateBlock": "030-C4", "upsertBlockProperty": "030-C4",
-    "removeBlockProperty": "030-C4",
     "removeBlock": "030-C5", "deletePage": "030-C5", "renamePage": "030-C5",
     "createPage": "030-C5", "setBlocksId": "030-C5",
 }
 
-# replace-text reads its blocks back itself since 0.8.0 and reports a write
-# that did not land with write_not_verified already (commands/edit.py), so
-# its noop row is a guard, not an expected failure. It reports that through
-# its own fail() with a list of failed blocks, not through the error handler,
-# so the handler's fields (method, writes_landed) are not asked of it.
-PROVEN_BY_THE_COMMAND = {"replace-text"}
+# replace-text catches the refusal of each block, writes the others and
+# reports through its own fail(): the blocks that failed and why, and
+# writes_landed, instead of the handler's one method (commands/edit.py).
+REPORTED_BY_THE_COMMAND = {"replace-text"}
 
 # Block texts in the graph below; an argument "@<text>" is that block's uuid.
 ROWS = [
@@ -251,10 +247,7 @@ def _failure_params():
     for row_id, args, method in ROWS:
         for mode in ("noop", "error"):
             # An error object fails in call() for every method alike.
-            if mode == "error" or args[0] in PROVEN_BY_THE_COMMAND:
-                task = None
-            else:
-                task = PROOF_TASK.get(method)
+            task = None if mode == "error" else PROOF_TASK.get(method)
             yield pytest.param(args, method, mode, id=f"{row_id}-{mode}",
                                marks=[_spec(task)] if task else [])
 
@@ -288,11 +281,15 @@ def test_a_write_logseq_did_not_do_fails_with_its_reason(monkeypatch, args, meth
     assert r.exit_code != 0, f"exit 0 for a write Logseq did not do: {r.stdout}"
     error = _error_object(r.stderr)
     assert error is not None, f"no --json error object on stderr: {r.stderr!r}"
-    assert error.get("reason") == ("write_not_verified" if mode == "noop" else "logseq_error"), error
-    if args[0] in PROVEN_BY_THE_COMMAND:
+    reason = "write_not_verified" if mode == "noop" else "logseq_error"
+    assert error.get("reason") == reason, error
+    assert isinstance(error.get("writes_landed"), int), error
+    if args[0] in REPORTED_BY_THE_COMMAND:
+        # The one block the row changes, with its own reason.
+        block = double.uuid_of("alpha block")
+        assert (error.get("failed"), error.get("failed_reasons")) == ([block], {block: reason}), error
         return
     assert error.get("method") == method, error
-    assert isinstance(error.get("writes_landed"), int), error
     if mode == "error":
         assert error.get("logseq_message") == f"{method} failed", error
 
@@ -330,3 +327,127 @@ def test_dry_run_sends_no_write_and_no_proof_read(monkeypatch, row_id, args):
     sent = [_short(m) for m, _ in double.requests]
     assert not [m for m in sent if m in UI_METHODS], sent
     assert len(sent) == DRY_RUN_READS[row_id], sent
+
+
+# --- updateBlock, upsertBlockProperty, removeBlockProperty (030-C4) ---------
+# The first four are guards against a false alarm, green without a proof too:
+# a proof that compared more than the text written would turn them red.
+
+def _one_page(monkeypatch, *blocks, time_tracking=False):
+    double = LogseqHttpDouble()
+    double.time_tracking = time_tracking
+    double.add_page("Probe Page", list(blocks))
+    return double.install(monkeypatch)
+
+
+def test_update_block_with_properties_is_not_a_false_alarm(monkeypatch):
+    # Logseq writes the properties carried along back as key:: lines below
+    # the text; they are not part of the text sent.
+    double = _one_page(monkeypatch, "alpha\ncollapsed:: true\nprio:: 1")
+    r = _invoke(double, ["update-block", "--id", "@alpha\ncollapsed:: true\nprio:: 1",
+                         "--content", "alpha changed"])
+    assert r.exit_code == 0, r.stderr
+    assert double.uuid_of("alpha changed\ncollapsed:: true\nprio:: 1")
+
+
+def test_set_todo_status_with_logbook_is_not_a_false_alarm(monkeypatch):
+    # With time tracking on, TODO -> DOING appends a drawer (M11).
+    double = _one_page(monkeypatch, "TODO task one", time_tracking=True)
+    r = _invoke(double, ["set-todo-status", "--id", "@TODO task one", "--status", "DOING"])
+    assert r.exit_code == 0, r.stderr
+    assert double.tree("Probe Page")[0][0] == "DOING task one"
+    assert ":LOGBOOK:" in double.snapshot()[0][0]["blocks"][0]["content"]
+
+
+def test_doing_to_done_with_existing_drawer_is_success(monkeypatch):
+    # set-todo-status sends the old drawer back; Logseq closes its CLOCK line.
+    from tests.logseq_http_double import CLOCK_IN, CLOCK_OUT
+    text = f"DOING task one\n:LOGBOOK:\n{CLOCK_IN}\n:END:"
+    double = _one_page(monkeypatch, text, time_tracking=True)
+    r = _invoke(double, ["set-todo-status", "--id", f"@{text}", "--status", "DONE"])
+    assert r.exit_code == 0, r.stderr
+    assert double.uuid_of(f"DONE task one\n:LOGBOOK:\n{CLOCK_OUT}\n:END:")
+
+
+def test_marker_change_without_drawer_is_success(monkeypatch):
+    # Time tracking off: read back is what was written (M11).
+    double = _one_page(monkeypatch, "TODO task one")
+    for old, new in (("TODO", "DOING"), ("DOING", "DONE")):
+        r = _invoke(double, ["set-todo-status", "--id", f"@{old} task one", "--status", new])
+        assert r.exit_code == 0, r.stderr
+    assert double.uuid_of("DONE task one")
+
+
+def test_update_block_that_loses_a_property_is_not_verified(monkeypatch):
+    # The text lands, the property carried along does not: the values are
+    # proven as well, not only the text.
+    double = _one_page(monkeypatch, "alpha\nprio:: 1")
+    execute = double._handlers["logseq.Editor.updateBlock"]
+    monkeypatch.setitem(double._handlers, "logseq.Editor.updateBlock",
+                        lambda args: execute(args[:2]))
+    r = _invoke(double, ["update-block", "--id", "@alpha\nprio:: 1", "--content", "alpha changed"])
+    assert r.exit_code != 0, r.stdout
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["method"]) == ("write_not_verified", "updateBlock"), error
+
+
+@pytest.mark.parametrize("key,value", [
+    ("created_at", "x"),    # stored as created-at
+    ("n", 5),               # M6: a number as its digits
+    ("l", ["a", "b"]),      # M6: a list as a,b
+    ("z", "01234"),         # M6: stays text
+    ("link", "[[Link]]"),   # M6: stays text
+])
+def test_property_value_forms(monkeypatch, key, value):
+    double = _one_page(monkeypatch, "alpha block")
+    api = LogseqAPI(token="t")
+    api.upsert_block_property(double.uuid_of("alpha block"), key, value)
+    assert api.writes_landed == 1
+
+
+def test_property_value_is_compared_stripped(monkeypatch):
+    # Logseq's parser trims a value (blockprops.py), so "x " reads back "x".
+    double = _one_page(monkeypatch, "alpha block")
+    api = LogseqAPI(token="t")
+    api.upsert_block_property(double.uuid_of("alpha block"), "k", "x ")
+    assert api.writes_landed == 1
+
+
+@pytest.mark.parametrize("write", [
+    lambda api, uuid: api.upsert_block_property(uuid, "k", "v"),
+    lambda api, uuid: api.remove_block_property(uuid, "k"),
+    lambda api, uuid: api.update_block(uuid, "text"),
+], ids=["upsertBlockProperty", "removeBlockProperty", "updateBlock"])
+def test_property_write_on_unknown_uuid_is_not_verified(monkeypatch, write):
+    # Logseq answers null for a uuid no block has (M1, M6), and the property
+    # reader finds no key there: "key gone" would be a false proof.
+    from logseq_cli.api import WriteNotVerified
+    _one_page(monkeypatch, "alpha block")
+    api = LogseqAPI(token="t")
+    with pytest.raises(WriteNotVerified):
+        write(api, "6500c0de-0000-4000-8000-00000000abcd")
+    assert api.writes_landed == 0
+
+
+def test_read_back_is_not_served_from_cache(monkeypatch):
+    # update-block reads the block before the write; with the cache on, the
+    # proof must still ask Logseq, not take that old answer.
+    monkeypatch.setenv("LOGSEQ_CLI_CACHE_TTL", "60")
+    double = _one_page(monkeypatch, "alpha block")
+    double.set_mode("updateBlock", "noop")
+    r = _invoke(double, ["update-block", "--id", "@alpha block", "--content", "alpha changed"])
+    assert _error_object(r.stderr)["reason"] == "write_not_verified", r.stderr
+    sent = [_short(m) for m, _ in double.requests]
+    assert "getBlock" in sent[sent.index("updateBlock"):], sent
+
+
+def test_set_property_the_page_does_not_show_is_not_verified(monkeypatch):
+    # The property block's text lands, but the page does not take it up
+    # (the double's _saved, #80): set-property's own check, with a reason.
+    double = _graph().install(monkeypatch)
+    monkeypatch.setattr(double, "_saved", lambda *args: None)
+    r = _invoke(double, ["set-property", "--page", "Props Page", "--key", "status",
+                         "--value", "done"])
+    assert r.exit_code != 0, r.stdout
+    error = _error_object(r.stderr)
+    assert (error["reason"], error["property"]) == ("write_not_verified", "status"), error
