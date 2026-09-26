@@ -80,7 +80,6 @@ def _sent_options(double, method):
 
 # --- 030-B1: the cursor stays where it is ------------------------------------
 
-@_spec("030-B1")
 def test_inserts_send_focus_false(monkeypatch, double, api):
     # M10: without focus: false the new block opens in the editor, on a
     # visible page the cursor jumps into it. A caller's own focus is overridden.
@@ -108,7 +107,6 @@ def test_inserts_send_focus_false(monkeypatch, double, api):
     assert seen > 20
 
 
-@_spec("030-B1")
 def test_create_page_sends_redirect_false(monkeypatch, double, api):
     # M13: createPage without options turns Logseq's view to the new page.
     api.create_page("New Page")

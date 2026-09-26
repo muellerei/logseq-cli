@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A block the CLI inserts no longer opens in Logseq's editor. Logseq takes an
+  unset `focus` as true and edits the new block (`api.cljs:603`,
+  `editor.cljs:647`); on the page you were looking at, your cursor jumped
+  into the agent's block and whatever you typed next landed there (measured,
+  0.10.15). Every `insertBlock` and `appendBlockInPage` now goes with
+  `focus: false`, and the cursor stays where it was.
+- A page or journal the CLI creates no longer turns Logseq's view to it.
+  `createPage` without options redirects the view to the new page (measured,
+  0.10.15); the CLI now sends `redirect: false`.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database
