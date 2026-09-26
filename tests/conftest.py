@@ -18,6 +18,86 @@ def isolate_environment(monkeypatch):
     yield
 
 
+class _TextResponse:
+    """What ``requests.post`` hands back, reduced to what the client reads."""
+
+    def __init__(self, text, status_code=200):
+        self.text = text
+        self.status_code = status_code
+
+    def json(self):
+        import json
+        return json.loads(self.text)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
+@pytest.fixture
+def real_host_calls():
+    """Requests ``block_real_hosts`` refused in this test.
+
+    The fixture fails the test in teardown while this holds anything. A test
+    that reaches for a real host on purpose checks the list and clears it.
+    """
+    return []
+
+
+@pytest.fixture(autouse=True)
+def block_real_hosts(monkeypatch, real_host_calls):
+    """Keep every test away from the Logseq running on the developer's machine.
+
+    ``requests.post`` is replaced for the whole run. ``checkEditing`` answers
+    with the raw text ``false``, as Logseq does when nobody edits, so a test
+    that mocks ``call`` still passes the editor gate. Any other request is
+    recorded and refused. The refusal alone is not enough: broad ``except``
+    blocks in the commands can swallow it, so teardown fails on the record.
+    A test that patches ``requests.post`` itself, or installs the HTTP
+    double, overrides this for its own duration.
+
+    doctor opens a socket to the API port before it asks anything, and with
+    Logseq running it would then go on to query it; that probe answers "no
+    listener" here. tests/test_doctor_probes.py imports the function under
+    its own name at load time and keeps testing it against a local socket.
+    """
+    import logseq_cli.api
+    import logseq_cli.commands.meta
+
+    def post(url, json=None, **kwargs):
+        method = (json or {}).get("method")
+        if method == "logseq.Editor.checkEditing":
+            return _TextResponse("false")
+        real_host_calls.append({"url": url, "method": method, "json": json})
+        raise RuntimeError("test reached a real host")
+
+    monkeypatch.setattr(logseq_cli.api.requests, "post", post)
+    monkeypatch.setattr(logseq_cli.commands.meta, "_port_has_listener",
+                        lambda *args, **kwargs: False)
+    yield
+    if real_host_calls:
+        pytest.fail(f"test reached a real host: {real_host_calls}", pytrace=False)
+
+
+def mock_api(**overrides):
+    """MagicMock standing in for LogseqAPI, with safe answers for the gate.
+
+    On a bare MagicMock every call answers truthy: ``check_editing()`` would
+    read as "a block is open", ``rename_refusal()`` as a refusal, and
+    ``writes_landed`` would be a Mock that neither counts nor serialises.
+    ``overrides`` set further attributes on the mock.
+    """
+    from unittest.mock import MagicMock
+    api = MagicMock()
+    api.check_editing.return_value = None
+    api.rename_refusal.return_value = None
+    api.writes_landed = 0
+    for name, value in overrides.items():
+        setattr(api, name, value)
+    return api
+
+
 def split_runner():
     """CliRunner that captures stderr separately from stdout.
 
@@ -157,9 +237,8 @@ class FakeGraph:
 
 def fake_api(uuids, *, fail_after=None):
     """MagicMock whose block-write/read methods are backed by FakeGraph."""
-    from unittest.mock import MagicMock
     graph = FakeGraph(uuids, fail_after=fail_after)
-    api = MagicMock()
+    api = mock_api()
     api.insert_batch_block.side_effect = graph.insert_batch_block
     api.insert_block.side_effect = graph.insert_block
     api.get_block.side_effect = graph.get_block
@@ -575,8 +654,7 @@ class PageGraph:
 
 def page_graph_api(graph):
     """MagicMock whose page and block calls are answered by ``graph``."""
-    from unittest.mock import MagicMock
-    api = MagicMock()
+    api = mock_api()
     for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
                  "remove_block", "move_block", "datascript_query", "update_block",

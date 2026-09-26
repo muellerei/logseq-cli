@@ -20,7 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import answer_property_pulls, split_runner
+from tests.conftest import answer_property_pulls, mock_api, split_runner
 
 
 MUTATING = ("update_block", "remove_block", "delete_page", "rename_page",
@@ -37,7 +37,7 @@ def _assert_no_mutation(api):
 @pytest.fixture
 def api():
     """A MagicMock LogseqAPI injected into the CLI context."""
-    mock = answer_property_pulls(MagicMock())
+    mock = answer_property_pulls(mock_api())
     with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
@@ -489,7 +489,7 @@ class TestDryRunNeverCreatesTheJournalPage:
     """
 
     def _api(self):
-        api = MagicMock()
+        api = mock_api()
         api.get_page.return_value = None          # journal page does not exist
         api.get_user_configs.return_value = {}
         api.get_page_blocks_tree.return_value = []

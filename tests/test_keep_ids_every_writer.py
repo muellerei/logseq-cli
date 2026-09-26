@@ -32,12 +32,12 @@ reading the page back, so they run against ``PageGraph`` rather than a mock
 that answers every read.
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import mock_api, split_runner
 
 ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 ANCHOR = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
@@ -47,7 +47,7 @@ NESTED = f"- parent\n\t- child\n\t  id:: {ID}"
 
 
 def _api(*, existing_ids=()):
-    api = MagicMock()
+    api = mock_api()
     api.get_page.return_value = {"name": "page a", "originalName": "Page A"}
     api.get_page_blocks_tree.return_value = [{"uuid": ANCHOR, "content": "## Log", "children": []}]
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
