@@ -450,8 +450,9 @@ KEEP_IDS = ["insert-block", "--after", "@alpha block", "--content", "new one", "
 
 
 def test_batch_goes_block_by_block_while_editing(monkeypatch):
-    # insertBatchBlock opens its last block in the editor (editor.cljs:1998;
-    # measured); with someone typing, the tree goes block by block, focus: false.
+    # insertBatchBlock opens its last block in the editor (editor.cljs
+    # edit-last-block-after-inserted!, 0.10.15; measured); with someone
+    # typing, the tree goes block by block, focus: false.
     graph = _graph().install(monkeypatch)
     graph.editing = graph.uuid_of("other block")
     r = _invoke(graph, MULTI_BLOCK)
@@ -595,8 +596,9 @@ def _someone_enters_after_the_batch(double, content):
 
 def test_batch_leaves_a_block_someone_else_opened(double, api):
     # Only a block of the batch is closed. Logseq does not save a block left
-    # while its last editor op is :paste-blocks (lifecycle.cljs:35-43,
-    # editor.cljs:2024, read in the code): closing another one would lose
+    # while its last editor op is :paste-blocks (lifecycle.cljs will-unmount,
+    # editor.cljs paste-blocks, 0.10.15, read in the code): closing another
+    # one would lose
     # what is typed there.
     _someone_enters_after_the_batch(double, "unrelated block")
     _batch(api, double)

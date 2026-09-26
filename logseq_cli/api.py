@@ -90,7 +90,8 @@ class Write:
       rename, and the open editor would save the old text back);
     * ``any``: any block is open. insertBatchBlock opens its last block in
       the editor once the page is on screen, with no option against it
-      (editor.cljs:1998; measured): the cursor would leave the block being
+      (editor.cljs ``edit-last-block-after-inserted!``, 0.10.15; measured):
+      the cursor would leave the block being
       typed in;
     * ``never``: an insert. Logseq saves the open block before it inserts
       (measured), so it neither asks nor refuses.
@@ -128,8 +129,9 @@ class UI:
 #   updateBlock  null on success, for the same text and for a uuid no block
 #       has. The block is read back (text): the text through
 #       block_text_matches, since Logseq trims it and, with time tracking
-#       on, appends or rewrites a :LOGBOOK: drawer (editor.cljs:256-285, read
-#       in the code, not measured: time tracking was off); the properties
+#       on, appends or rewrites a :LOGBOOK: drawer (editor.cljs
+#       with-marker-time, read in the code, not measured: time tracking was
+#       off); the properties
 #       sent along through stored_properties. Their key:: lines are taken
 #       out of the text by key, not by place: Logseq writes them below the
 #       text, where in a text of several lines was not measured.
@@ -145,7 +147,7 @@ class UI:
 #   deletePage  null, for a missing page too. getPage then finds none
 #       (no_page), or a page without blocks that others name as their
 #       namespace, which Logseq keeps (measured). A page a block of another
-#       page links to is retracted whole (page.cljs:352-371; measured), and
+#       page links to is retracted whole (page.cljs delete!; measured), and
 #       so is a page named in another's alias:: (measured).
 #   renamePage  null. The new name then finds the page's uuid, spelt
 #       as sent (renamed): the uuid alone would pass a change of case that
@@ -297,7 +299,8 @@ def _without_focus(options: dict | None) -> dict:
     """Insert options with ``focus: false``, whatever the caller passed.
 
     Unset, Logseq takes focus as true and opens the new block in its editor
-    (api.cljs:603, editor.cljs:647); on the visible page the cursor of
+    (api.cljs insert_block, editor.cljs api-insert-new-block!, 0.10.15); on
+    the visible page the cursor of
     whoever is typing jumps into it and the rest of their typing lands there
     (measured, 0.10.15). No caller wants that, so a caller's own focus is
     overridden.
@@ -565,8 +568,9 @@ class LogseqAPI:
            the target (a batch: what it sent, and its place as read before).
            From the write until the proof holds or refuses, the write is
            ``write_unproven``;
-        7. ``count`` more writes landed (a batch counts its blocks): after
-           the proof, so a write that fails it does not count. A batch that
+        7. ``count`` more writes landed (a batch counts its blocks; the
+           removal of a block written earlier in the call takes one back):
+           after the proof, so a write that fails it does not count. A batch that
            landed in part counts those blocks in its proof before it raises,
            and so does setBlocksId.
 
@@ -688,8 +692,9 @@ class LogseqAPI:
         block = self._block_to_prove(method, target, repr(content))
         keys = {stored_property_key(k) for k in properties}
         # Logseq drops a ref to the block from its own text, in the lower-case
-        # form it writes (editor.cljs:323-324; measured, 0.10.15: "see ((own))
-        # here" reads back "see  here"). A ref that could only point at itself.
+        # form it writes (editor.cljs wrap-parse-block; measured, 0.10.15:
+        # "see ((own)) here" reads back "see  here"). A ref that could only
+        # point at itself.
         sent = content.replace(f"(({str(target).lower()}))", "")
 
         def without_sent_keys(text):
@@ -735,8 +740,9 @@ class LogseqAPI:
     def _prove_no_page(self, method, target, result):
         """No page under the name ``target`` any more (measured), or one Logseq
         keeps because other pages name it as their namespace: delete! then
-        removes its blocks and file and leaves the page (page.cljs:352-371;
-        measured, 0.10.15: getPage answers it, getPageBlocksTree ``[]``).
+        removes its blocks and file and leaves the page (page.cljs
+        ``delete!``; measured, 0.10.15: getPage answers it,
+        getPageBlocksTree ``[]``).
         Without blocks alone is not enough: a page that had none and was not
         deleted would pass."""
         page = self.get_page(target)
@@ -1106,8 +1112,9 @@ class LogseqAPI:
         Only a block of the batch (``new_uuids``) is closed. One someone else
         entered in that window stays open: Logseq does not save a block left
         while its last editor op is the batch's :paste-blocks
-        (lifecycle.cljs:35-43, editor.cljs:2024; read in the code, not
-        measured), so closing it would lose what is typed there.
+        (lifecycle.cljs ``will-unmount``, editor.cljs ``paste-blocks``,
+        0.10.15; read in the code, not measured), so closing it would lose
+        what is typed there.
 
         An answer that cannot be read, or no answer, raises
         EditorStateUnknown saying the batch was written: the caller counts
@@ -1231,10 +1238,18 @@ class LogseqAPI:
         return self._write("logseq.Editor.setBlocksId", [block_uuids], target=block_uuids,
                            editing=editing, count=len(block_uuids))
 
-    def remove_block(self, block_uuid: str):
+    def remove_block(self, block_uuid: str, *, written_here: bool = False):
         """Remove a block with its children; raises WriteNotVerified unless
-        getBlock then finds none (``_prove_no_block``)."""
-        return self._write("logseq.Editor.removeBlock", [block_uuid], target=block_uuid)
+        getBlock then finds none (``_prove_no_block``).
+
+        ``written_here``: the block is one this call wrote a moment before
+        and counted (strictinsert's stand-in). Once it is gone, neither write
+        remains, and a refusal that counted them would tell a retry of writes
+        that are gone: the removal takes the insert's count back instead of
+        adding its own. A removal that fails raises before, and the block,
+        which stays, counts."""
+        return self._write("logseq.Editor.removeBlock", [block_uuid], target=block_uuid,
+                           count=-1 if written_here else 1)
 
     def get_page_linked_references(self, page_name: str):
         """Get backlinks using native Logseq API (faster than brute-force search)."""

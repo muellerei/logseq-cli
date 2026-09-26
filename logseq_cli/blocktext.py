@@ -190,15 +190,17 @@ def normalize_block_text(text: str) -> str:
     - ``id::`` lines go (without_block_ids): Logseq stores a ref target's id
       as a line of its text (#95), which is no change the writer made.
     - Whitespace goes from the end of each line and from the start of the
-      text: Logseq trims the text on both sides (editor.cljs:1291-1296). At
+      text: Logseq trims the text on both sides (editor.cljs
+      ``save-block-aux!``, 0.10.15). At
       the end measured ("neu  " is read back as "neu"), at the start
       measured too (0.10.15: spaces, a tab, blank lines); per line is an
       assumption made on purpose, harmless because both sides are
       normalised alike. The lines after the first keep their indent.
     - Every ``:LOGBOOK:`` drawer goes. With time tracking on, Logseq's
       default, a marker change appends a drawer or rewrites its last CLOCK
-      line (upstream editor.cljs:256-285, util/clock.cljs:75-93; read in the
-      code, not measured: time tracking was off), and
+      line (upstream editor.cljs ``with-marker-time``, util/clock.cljs
+      ``clock-in`` and ``clock-out``; read in the code, not measured: time
+      tracking was off), and
       set-todo-status sends the old drawer back; comparing its content would
       fail a write that landed. Whether a drawer arrived at all is
       block_text_matches' check.
@@ -237,6 +239,13 @@ def block_text_matches(sent: str, read: str) -> bool:
 BLOCK_REF_RE = re.compile(
     r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)', re.IGNORECASE)
 _INLINE_CODE_RE = re.compile(r'(`+)(?:(?!\1).)+?\1')
+
+
+def unwrap_block_id(value: str) -> str:
+    """A block id as given on the command line, without surrounding
+    whitespace and without the ``((`` and ``))`` of a ref copied along;
+    the case is left as typed."""
+    return value.strip().replace("((", "").replace("))", "")
 
 
 def block_ref_uuids(content: str) -> list:

@@ -2,7 +2,7 @@ import re
 
 import click
 
-from logseq_cli.blocktext import refuse_split_property, with_property_line
+from logseq_cli.blocktext import refuse_split_property, unwrap_block_id, with_property_line
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.blockprops import (
@@ -379,7 +379,7 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
     key = stored
 
     if block_id:
-        block_uuid = block_id.strip().replace("((", "").replace("))", "")
+        block_uuid = unwrap_block_id(block_id)
         block = api.get_block(block_uuid, include_children=False)
         if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)

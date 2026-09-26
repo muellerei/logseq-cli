@@ -467,7 +467,7 @@ def _namespace_graph(monkeypatch):
 
 def test_delete_of_a_namespace_page_is_proven(monkeypatch):
     # Logseq keeps a page others name as their namespace: delete! removes
-    # its blocks and file and leaves the entity (page.cljs:352-371; measured,
+    # its blocks and file and leaves the entity (page.cljs delete!; measured,
     # 0.10.15: getPage still answers it, getPageBlocksTree []).
     double = _namespace_graph(monkeypatch)
     r = _invoke(double, ["delete-page", "--page", "Project", "--force"])

@@ -10,6 +10,7 @@ from logseq_cli.blocktext import (
     refuse_split_block,
     refuse_split_heading,
     refuse_split_tree,
+    unwrap_block_id,
     without_block_ids,
 )
 from logseq_cli.cliinput import (
@@ -112,7 +113,7 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
             page = ref.page
         clean_id = resolve_single_block(api, where_content, page=page, use_regex=use_regex)
     else:
-        clean_id = block_id.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(block_id)
 
     # Verify block exists
     block = api.get_block(clean_id, include_children=False)
@@ -184,7 +185,7 @@ Note:
 def remove_block_cmd(ctx, block_id, ignore_refs, dry_run, as_json):
     """Remove a block by UUID."""
     api = ctx.obj["api"]
-    clean_id = block_id.strip().replace("((", "").replace("))", "")
+    clean_id = unwrap_block_id(block_id)
 
     # Fetch WITH children: removal cascades, so the descendant count is the
     # decisive fact for --dry-run (and for the confirmation the caller may want).
@@ -473,7 +474,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         # Resolve target + position first (no writes), so --dry-run can report
         # the plan and bail before touching the graph.
         if child_of:
-            clean_id = child_of.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(child_of)
             position = f"{'first child' if as_first else 'child'} of {clean_id[:8]}..."
             if as_first:
                 def do_insert():
@@ -482,12 +483,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 def do_insert():
                     return insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
         elif after:
-            clean_id = after.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(after)
             position = f"after {clean_id[:8]}..."
             def do_insert():
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
         elif before:
-            clean_id = before.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(before)
             position = f"before {clean_id[:8]}..."
             def do_insert():
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
@@ -602,7 +603,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             new_uuid = result["uuid"]
             position = f"end of '{page}'"
     elif after:
-        clean_id = after.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(after)
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
             new_uuid = uuids[0]
@@ -613,7 +614,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             new_uuid = result["uuid"]
             position = f"after {clean_id[:8]}..."
     elif before:
-        clean_id = before.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(before)
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
             new_uuid = uuids[0]
@@ -624,7 +625,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             new_uuid = result["uuid"]
             position = f"before {clean_id[:8]}..."
     elif child_of:
-        clean_id = child_of.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(child_of)
         where = "first child" if as_first else "child"
         if hierarchical:
             if as_first:
@@ -663,7 +664,7 @@ def refuse_missing_anchor(api, anchor, as_json):
     does not promise an insert the run refuses (move-block's preview shares
     check_move for the same reason). getBlock finds a uuid in capitals too.
     """
-    uuid = anchor.strip().replace("((", "").replace("))", "").lower()
+    uuid = unwrap_block_id(anchor).lower()
     if not api.get_block(uuid, include_children=False):
         fail(f"Cannot insert: block {uuid[:8]}... not found (the uuid does not "
              "exist, or its page is not loaded). Nothing was written.",

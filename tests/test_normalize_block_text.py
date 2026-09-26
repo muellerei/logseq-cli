@@ -3,9 +3,9 @@
 A proof compares what was sent with what Logseq reads back, and Logseq
 rewrites a few things on the way: it trims spaces at the end (measured),
 stores a ref target's id:: line (#95), and with time tracking on appends or
-rewrites a :LOGBOOK: drawer on a marker change (upstream
-editor.cljs:256-285, util/clock.cljs:75-93; read in the code, not
-measured). None of these is a failed write, and a comparison that took
+rewrites a :LOGBOOK: drawer on a marker change (upstream editor.cljs
+with-marker-time, util/clock.cljs clock-in and clock-out, 0.10.15; read in
+the code, not measured). None of these is a failed write, and a comparison that took
 them for one raised a false alarm (#95, replace-text).
 
 The drawer format is assumed from Logseq's file format, not measured: time
@@ -104,7 +104,7 @@ def test_replace_text_appended_logbook_is_success(monkeypatch):
 def test_whitespace_at_the_start_goes():
     # Measured, 0.10.15: leading spaces, a leading tab and leading blank
     # lines are read back without them; Logseq trims the
-    # text on both sides (editor.cljs:1291-1296).
+    # text on both sides (editor.cljs save-block-aux!).
     assert _normalize("  indented") == "indented"
     assert _normalize("\ttabbed") == "tabbed"
     assert _normalize("\n\nafter blank lines") == "after blank lines"
@@ -125,7 +125,7 @@ def test_update_block_with_leading_whitespace_is_proven(monkeypatch):
 def test_update_block_with_a_ref_to_itself_is_proven(monkeypatch):
     # Measured, 0.10.15: Logseq drops a ref to the
     # block from its own text ("see ((own)) here" is read back as
-    # "see  here"; editor.cljs:323-324). A ref that can only point at
+    # "see  here"; editor.cljs wrap-parse-block). A ref that can only point at
     # itself; the write landed as Logseq stores it.
     double = LogseqHttpDouble().install(monkeypatch)
     double.add_page("Probe Page", [{"content": "old text", "uuid": UUID}])

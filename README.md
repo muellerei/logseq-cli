@@ -475,7 +475,8 @@ No write is taken on Logseq's word: each is proven by what Logseq returns or rea
 
 Logseq's HTTP API answers almost every write with `null`, whether it wrote or
 not, and a write it threw on with HTTP 200 and an error object
-(`server.cljs:97`, `listener.cljs:171`, tag 0.10.15). A command that trusts
+(`server.cljs` `invoke-logseq-api!`, `listener.cljs` `invokeLogseqAPI`,
+tag 0.10.15). A command that trusts
 the status code reports "Added N block(s)" over a journal entry that was never
 written — and for a journal entry, nothing else will ever tell you;
 `copy-block --remove` once deleted its source against a copy that had not
@@ -499,7 +500,7 @@ The second half of the sentence answers a loss no read-back can catch.
 Measured on Logseq 0.10.15: a write to the block being edited replaced the
 editor content at once and dropped what had not been saved; Logseq answered
 `null`, and a read right after still showed the old text. `updateBlock` on an
-open block writes into the editor's state (`api.cljs:676-684`). So before a
+open block writes into the editor's state (`api.cljs` `update_block`). So before a
 write that changes a block, the CLI asks Logseq which block is open and
 refuses with `open_in_editor` if the write would change it: the block itself,
 for a removal or a move also a block below it, for a page deletion or a
@@ -535,7 +536,7 @@ UUID and the references with it.
 See [0.6.0](CHANGELOG.md#060---2026-08-07) and [0.8.0](CHANGELOG.md#080---2026-08-28).
 
 A rename had a silent loss of its own. `renamePage` onto a name that exists
-merges the two pages (`merge-pages!`, `page.cljs:637`), without the
+merges the two pages (`merge-pages!` in `page.cljs` `rename!`, 0.10.15), without the
 confirmation Logseq's own UI asks for; measured on 0.10.15, it answered
 `null` while the renamed page's blocks moved to the other page and the
 renamed page was gone. `rename-page` refuses such a name, and an empty one,
