@@ -188,6 +188,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   graph of that format, such as `01.01.2099`, stays a page of that name, as
   Logseq creates it.
 
+- `move-block` with a block id in capitals reported that the move did not
+  take effect after Logseq had made it, and let a target inside the block's
+  own subtree past the refusal that names it. Logseq's uuids are lower
+  case, and both checks compared the ids as typed. They are now taken in
+  lower case, the move sent that way too.
+
 ### Changed
 
 - A write the CLI refuses, or cannot show Logseq did, now fails like every

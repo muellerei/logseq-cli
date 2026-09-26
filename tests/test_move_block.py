@@ -17,6 +17,7 @@ every move is verified by re-reading.
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
@@ -410,3 +411,56 @@ class TestDryRunPredictsTheRefusal:
         assert r.exit_code == 0, r.output
         assert "Would move 1 block(s)" in r.output
         assert g.moves == []
+
+
+class TestUuidsInCapitals:
+    """Logseq's uuids are lower case; one typed in capitals is the same block.
+
+    Logseq moved the block, and the proof, comparing as typed, did not find
+    it where it was sent; a target in the block's own subtree, typed in
+    capitals, went past the refusal. Uuids with letters: the double's own are
+    digits, the same in either case."""
+
+    SRC = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"
+    DST = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee2"
+    KID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee3"
+
+    def _graph(self, monkeypatch):
+        return _double({"Hex Page": [
+            {"content": "src block", "uuid": self.SRC,
+             "children": [{"content": "kid block", "uuid": self.KID}]},
+            {"content": "dst block", "uuid": self.DST},
+        ]}, monkeypatch=monkeypatch)
+
+    def _move(self, flag, src, target):
+        return split_runner().invoke(cli, ["--token", "t", "move-block", "--id", src,
+                                           flag, target, "--json"])
+
+    def test_before(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--before", self.DST.upper(), self.SRC.upper())
+        assert r.exit_code == 0, r.stderr
+        assert [b[0] for b in double.tree("Hex Page")] == ["dst block", "src block"]
+
+    def test_under(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--under", self.DST.upper(), self.SRC.upper())
+        assert r.exit_code == 0, r.stderr
+        assert ("dst block", []) in double.tree("Hex Page")[0][1]
+
+    def test_target_in_own_subtree(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--under", self.SRC, self.KID.upper())
+        assert r.exit_code == 1
+        assert "own subtree" in r.stderr
+        assert double.sent("moveBlock") == []
+
+    @pytest.mark.parametrize("flag", ["--under", "--before"])
+    def test_same_block_in_two_cases(self, monkeypatch, flag):
+        # The source in capitals, the target in lower case: one block, refused
+        # by name before anything is sent.
+        double = self._graph(monkeypatch)
+        r = self._move(flag, self.SRC.upper(), self.SRC)
+        assert r.exit_code == 1
+        assert "same block" in r.stderr
+        assert double.sent("moveBlock") == []

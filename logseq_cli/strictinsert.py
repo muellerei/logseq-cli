@@ -364,8 +364,10 @@ def check_move(api, src_uuid: str, target_uuid: str) -> None:
     real run refuses. The subtree case is the one refusal Logseq is known for,
     and it gives it by doing nothing, so this is the only place it can be named.
     """
-    src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
-    target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
+    # In lower case, as Logseq's uuids are: the subtree it is compared with
+    # is read back from Logseq.
+    src_uuid = src_uuid.strip().replace("((", "").replace("))", "").lower()
+    target_uuid = target_uuid.strip().replace("((", "").replace("))", "").lower()
     if src_uuid == target_uuid:
         raise click.ClickException("Source and target are the same block.")
 
