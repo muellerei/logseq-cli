@@ -12,10 +12,13 @@ This module makes the same decision, so one name never means two pages. Where
 it differs, it says so: two pages claiming one alias is refused here, where
 Logseq silently takes the first.
 """
+import datetime
+import re
 import unicodedata
 from typing import NamedTuple
 
 from logseq_cli.datalog import page_name_literal
+from logseq_cli.dates import format_journal_date, parse_journal_name
 
 
 class PageRef(NamedTuple):
@@ -136,3 +139,58 @@ def refuse_alias(ref: PageRef, command: str) -> None:
     """For delete-page and rename-page: an alias is refused, naming the page."""
     if ref.redirected:
         raise AliasError(ref, command)
+
+
+def title_as_created(name: str) -> str:
+    """The title Logseq's ``create!`` makes of ``name`` (handler/page.cljs:
+    137-142): trimmed, a whole ``[[...]]`` unwrapped, leading ``#`` dropped,
+    then one ``/`` at either end dropped.
+
+    createPage and appendBlockInPage create a missing page under this title,
+    while getPage looks the name up as given, so ``[[X]]`` finds nothing and
+    creates X (measured, 0.10.15: createPage on ``[[X]]``, ``#X`` and
+    `` X `` answered the page X, getPage under the name sent null; ``/X/``
+    getPage finds, as it drops the slashes itself). Not mirrored: a Markdown
+    or Org link to a file as the name.
+    """
+    title = name.strip()
+    linked = re.fullmatch(r"\[\[(.*)\]\]", title)
+    title = re.sub(r"^#+", "", linked.group(1) if linked else title)
+    title = title[1:] if title.startswith("/") else title
+    return title[:-1] if title.endswith("/") else title
+
+
+def journal_page_name(api, day: datetime.date) -> str:
+    """The title of ``day``'s journal in the graph's date format."""
+    configs = api.get_user_configs()
+    return format_journal_date(day, configs.get("preferredDateFormat") if configs else None)
+
+
+def page_name_to_create(api, name: str) -> str:
+    """The name Logseq creates a page under when asked for ``name``: its
+    ``title_as_created``, and for a journal title in a format Logseq takes
+    whatever the graph's (dates.parse_journal_name), the journal's title in
+    the graph's format.
+
+    Sent as given, such a name is created all the same, and createPage
+    answers null for the journal (M14) while getPage finds nothing under the
+    name sent: a page that was made read as one that was not. Shared by
+    LogseqAPI.create_page and the commands that name the page they write to
+    or report, so the check for a page that exists, the write and the output
+    use one name.
+    """
+    title = title_as_created(name)
+    day = parse_journal_name(title)
+    return journal_page_name(api, day) if day else title
+
+
+def page_to_write(api, name: str):
+    """``(name, page)`` for a write to ``name`` that creates a missing page:
+    the page getPage finds under ``name``, or else the name Logseq would
+    create (``page_name_to_create``) and the page found under that, ``None``
+    when there is none yet."""
+    page = api.get_page(name)
+    if page:
+        return name, page
+    created = page_name_to_create(api, name)
+    return created, (api.get_page(created) if created != name else page)

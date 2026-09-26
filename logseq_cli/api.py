@@ -26,6 +26,7 @@ from logseq_cli.blocktext import (
     tree_texts,
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
+from logseq_cli.pagenames import page_name_to_create
 # Raised by the writes below; imported here too so that callers can take them
 # from the API they call (spec 030). They live apart to keep imports acyclic.
 from logseq_cli.writerefused import (  # noqa: F401  re-exported
@@ -149,7 +150,8 @@ class UI:
 #       did nothing, since getPage finds a page by its name in lower case.
 #   createPage  answers the page (M5), and null for a journal title in
 #       another format, which it creates under the graph's name (M14):
-#       create-page sends the graph's name. A page that exists comes back as
+#       create_page sends the name Logseq creates (page_name_to_create), the
+#       journal's under the graph's format. A page that exists comes back as
 #       it is, the properties sent dropped (M5), so it is refused before the
 #       write (PageExists). The answer's uuid must be the page getPage finds
 #       under the name sent (page): no names are compared here, since Logseq
@@ -951,9 +953,16 @@ class LogseqAPI:
         an empty block. A page created without a first block and without
         text gets no file (measured), so a caller that writes nothing keeps it.
 
+        The name is sent as Logseq will create it (``page_name_to_create``):
+        ``[[X]]`` creates X, and a journal title in another format the
+        journal under the graph's name; the check below and the proof read
+        that name. A caller that writes to the page afterwards takes the name
+        from the same function.
+
         Raises PageExists for a page that exists, before anything is sent,
         and WriteNotVerified unless the new page shows (``_prove_page``).
         """
+        page_name = page_name_to_create(self, page_name)
         # Logseq answers createPage on a page that exists with that page, the
         # properties sent dropped (M5). The commands ask first and refuse with
         # their own advice; this holds for a caller that did not.

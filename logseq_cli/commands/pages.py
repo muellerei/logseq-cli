@@ -12,7 +12,6 @@ from logseq_cli.blockprops import (
 )
 from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.cliinput import content_or_file
-from logseq_cli.dates import format_journal_date, parse_journal_name
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
 from logseq_cli.ids import (
@@ -34,7 +33,13 @@ from logseq_cli.output import (
     output,
     uuid_fields,
 )
-from logseq_cli.pagenames import AmbiguousAliasError, refuse_alias, resolve_page
+from logseq_cli.pagenames import (
+    AmbiguousAliasError,
+    page_name_to_create,
+    page_to_write,
+    refuse_alias,
+    resolve_page,
+)
 from logseq_cli.render import (
     blocks_to_markdown,
     blocks_with_ids,
@@ -530,15 +535,11 @@ def create_page(ctx, page, content, as_json, dry_run):
     """Create a new page, optionally with initial content."""
     api = ctx.obj["api"]
 
-    # A journal title in another format than the graph's is created under the
-    # graph's name, and createPage then answers null (M14, spec 030), which
-    # the proof cannot tell from nothing written. So such a name is sent as
-    # the graph spells it, and the same name serves the check below, the
-    # preview, the write, --content and the output.
-    day = parse_journal_name(page)
-    if day is not None:
-        configs = api.get_user_configs()
-        page = format_journal_date(day, configs.get("preferredDateFormat") if configs else None)
+    # The name Logseq creates the page under: [[X]] makes X, a journal title
+    # in another format the journal under the graph's name (M14, spec 030).
+    # The same name serves the check below, the preview, the write,
+    # --content and the output.
+    page = page_name_to_create(api, page)
 
     # Logseq answers createPage for an existing page with that page, so the
     # call alone cannot tell "created" from "was already there" — the command
@@ -662,12 +663,13 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     refuse_split_heading(under_heading, command="add-note-content")
 
     ref = follow_page(api, page, as_json)
-    page = ref.page
 
     # Check if page exists. Not caught: Logseq answers null for a page that
     # does not exist, so an exception is a failed read, and taking it for
-    # absence would create a page that may be there (#93).
-    existing = api.get_page(page)
+    # absence would create a page that may be there (#93). A missing page is
+    # written under the name Logseq creates it with: a journal title in
+    # another format is the journal, which may exist.
+    page, existing = page_to_write(api, ref.page)
 
     if not existing and not create:
         fail(f"Page '{page}' not found. Use --create to create it.",
@@ -688,6 +690,11 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         click.echo(note, err=True)
         tree = tree_without_block_ids(tree)
 
+    # "page" in the JSON is the name asked for (ref.fields), and this names
+    # the page written, which differs for a name Logseq creates otherwise:
+    # the same in the run and its preview.
+    where = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
+
     if dry_run:
         # Everything below this point writes — the page, possibly the heading,
         # then the blocks. The block count comes from the same parse the live
@@ -696,17 +703,16 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         planned = count_blocks(tree)
         heading_exists = (find_heading(api, page, under_heading) is not None
                           if under_heading and existing else False)
-        position = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
         parsed_properties = dict(parse_property_pairs(properties))
 
         if as_json:
             output({**ref.fields(), "would_create_page": existing is None,
                     "blocks_added": planned, "under_heading": under_heading,
                     "would_create_heading": bool(under_heading) and not heading_exists,
-                    "properties": parsed_properties, "position": position,
+                    "properties": parsed_properties, "position": where,
                     "dry_run": True}, True)
         else:
-            click.echo(f"[DRY RUN] Would add {planned} block(s) to {position}")
+            click.echo(f"[DRY RUN] Would add {planned} block(s) to {where}")
             if existing is None:
                 click.echo(f"  page: {page} (would be created)")
             if under_heading and not heading_exists:
@@ -745,6 +751,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
             "under_heading": under_heading,
             **uuid_fields(uuids),
             "properties": applied,
+            "position": where,
         }, True)
     else:
         if existing is None:

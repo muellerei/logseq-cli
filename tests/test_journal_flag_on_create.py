@@ -13,11 +13,12 @@ what was written. ``create-page`` without ``--content`` keeps the block:
 without a first block and without text Logseq writes no file, and the page
 would be lost the next time the graph is indexed.
 
-``is_journal_date`` must still agree with ``format_journal_date``. Nothing
-tested it: making the function return ``True`` for every name left all 842
-tests green. The recogniser and the formatter are two halves of one claim, so
-the central test here does not restate the four formats by hand — it feeds
-``format_journal_date`` output back in.
+``parse_journal_name`` must agree with ``format_journal_date`` for the
+formats Logseq takes as journal titles in any graph: a name the CLI forms in
+one of them reads back as the same day, so sending it under the graph's
+name changes nothing (``pagenames.page_name_to_create``). The recogniser and
+the formatter are two halves of one claim, so the central test here does not
+restate the formats by hand — it feeds ``format_journal_date`` output back in.
 """
 import datetime
 from unittest.mock import MagicMock, patch
@@ -25,7 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.dates import format_journal_date, is_journal_date
+from logseq_cli.dates import format_journal_date, parse_journal_name
 from tests.conftest import split_runner
 from tests.test_write_proof_every_command import ROWS, _graph, _invoke
 
@@ -43,19 +44,18 @@ def api():
 
 
 class TestRecogniserMatchesFormatter:
-    """Every name the tool writes must be read back as a journal name."""
+    """Every name the tool forms in these formats reads back as its day."""
 
     @pytest.mark.parametrize("fmt", [
         None,                 # Logseq's default, 'MMM do, yyyy'
         "MMM do, yyyy",
         "yyyy-MM-dd",
-        "yyyy-MM-dd, EEEE",
-        "dd.MM.yyyy",
+        "yyyy_MM_dd",
     ])
     def test_formatter_output_is_recognised(self, fmt):
         d = datetime.date(2025, 3, 3)
         name = format_journal_date(d, fmt) if fmt else format_journal_date(d)
-        assert is_journal_date(name), f"{name!r} written but not recognised"
+        assert parse_journal_name(name) == d, f"{name!r} written but not recognised"
 
     def test_holds_for_every_day_of_a_year(self):
         """Ordinal suffixes and zero padding vary across a year; all must match."""
@@ -63,7 +63,7 @@ class TestRecogniserMatchesFormatter:
         misses = []
         while d.year == 2025:
             name = format_journal_date(d)
-            if not is_journal_date(name):
+            if parse_journal_name(name) != d:
                 misses.append(name)
             d += datetime.timedelta(days=1)
         assert not misses, f"written but not recognised: {misses[:5]}"
@@ -86,7 +86,7 @@ class TestOrdinaryNamesAreNotJournals:
         "",
     ])
     def test_not_a_journal_name(self, name):
-        assert not is_journal_date(name)
+        assert parse_journal_name(name) is None
 
 
 def _sent_properties(call):
