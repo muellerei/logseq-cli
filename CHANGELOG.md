@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A page or journal the CLI creates no longer turns Logseq's view to it.
   `createPage` without options redirects the view to the new page (measured,
   0.10.15); the CLI now sends `redirect: false`.
+- A journal the CLI created began with a line `journal?:: true`. The CLI sent
+  `journal?` as a page property, and Logseq writes a page property into the
+  file; the property was never needed, since Logseq tells a journal by its
+  name in the graph's date format (measured, 0.10.15: `journal?` true,
+  `journalDay` set, the file under `journals/`, with no property). No write
+  sends it now. Journals created that way before keep their line.
+- A page the CLI creates before writing to it no longer starts with an empty
+  block, the place the property line had taken. Those writes now create the
+  page with `createFirstBlock: false`, and the file holds only what was
+  written.
+  `create-page` without `--content` keeps the empty block: without it Logseq
+  writes no file for the page (measured), and a re-index would lose it.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database

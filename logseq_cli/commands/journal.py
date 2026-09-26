@@ -375,7 +375,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     date_fmt = configs.get("preferredDateFormat") if configs else None
     page_name = format_journal_date(d, date_fmt)
 
-    # Ensure journal page exists with journal property
+    # Ensure the journal page exists
     existing = api.get_page(page_name)
     content = strip_title_heading(content, page_name)
     # The blocks as they are written: checked to come back as one each (#47),
@@ -408,7 +408,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
         return
 
     if not existing:
-        api.create_page(page_name, {"journal?": True})
+        api.create_page(page_name, first_block=False)
 
     # Count what the graph actually took, not how many lines were handed in:
     # reporting len(lines) turned a partial write into "Added 3 block(s)" with
@@ -629,7 +629,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # exist yet" is part of what the run would do.
         would_create_page = not existing
         if not existing and not dry_run:
-            api.create_page(page_name, {"journal?": True})
+            api.create_page(page_name, first_block=False)
 
         # Plan each --content value the same way for dry-run and live, so the
         # reported block count matches what is actually written (a value with
@@ -704,12 +704,12 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     tree = trees[0]
 
-    # Ensure journal page exists with journal property. Deferred when only
+    # Ensure the journal page exists. Deferred when only
     # previewing: a dry run must not bring the page into existence.
     existing = api.get_page(page_name)
     would_create_page = not existing
     if not existing and not dry_run:
-        api.create_page(page_name, {"journal?": True})
+        api.create_page(page_name, first_block=False)
 
     # --- upsert-heading: find-or-replace child block under a heading ---
     if upsert_heading:
@@ -945,10 +945,10 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
         tree = tree_without_block_ids(tree)
         content = outline_text(tree)  # what the preview shows
 
-    # Ensure journal page exists with journal property
+    # Ensure the journal page exists
     existing = api.get_page(page_name)
     if not existing and not dry_run:
-        api.create_page(page_name, {"journal?": True})
+        api.create_page(page_name, first_block=False)
 
     position = f"under '{under_heading}'" if under_heading else "top-level"
 

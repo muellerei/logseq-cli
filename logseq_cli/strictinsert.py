@@ -358,9 +358,10 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str, *,
     if where == "page_end":
         page_name = target
         if api.get_page(page_name) is None:
-            # appendBlockInPage creates a missing page (with its empty block)
-            # and writes after it (measured); this position does the same.
-            api.create_page(page_name)
+            # appendBlockInPage creates a missing page and writes to it; this
+            # position does the same, without the empty block Logseq would
+            # otherwise put first (M18). The empty page takes the stand-in below.
+            api.create_page(page_name, first_block=False)
     else:
         # Logseq's uuids are lower-case; a target typed in capitals is the
         # same block.

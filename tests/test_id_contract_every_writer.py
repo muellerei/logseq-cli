@@ -240,9 +240,9 @@ class TestCreatePageAndAddJournalEntry:
         assert r.exit_code == 0, r.stderr
         assert "will be dropped" in r.stderr
         assert FOREIGN not in " ".join(_contents(api.graph))
-        # createPage leaves one empty block; a line that was only the id is
-        # not written as a second one.
-        assert api.graph.tree("2026-01-05") == [("", []), ("text", [])]
+        # A new journal starts with what was written, not with an empty block
+        # (M18); a line that was only the id is not written as one either.
+        assert api.graph.tree("2026-01-05") == [("text", [])]
 
 
 class TestCopyBlock:

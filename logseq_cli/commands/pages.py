@@ -11,7 +11,6 @@ from logseq_cli.blockprops import (
 )
 from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.cliinput import content_or_file
-from logseq_cli.dates import is_journal_date
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
 from logseq_cli.ids import (
@@ -589,8 +588,9 @@ def create_page(ctx, page, content, as_json, dry_run):
         fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
              "or delete-page first.", as_json=as_json, page=page, exists=True)
 
-    properties = {"journal?": True} if is_journal_date(page) else None
-    result = api.create_page(page, properties)
+    # Logseq tells a journal by its name (M18). Without text, the first block
+    # stays: a page with neither gets no file and is lost on a re-index.
+    result = api.create_page(page, first_block=content is None)
 
     if content:
         # Unchecked, this appended to a page that create_page may have failed to
@@ -704,7 +704,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         return
 
     if not existing and create:
-        api.create_page(page)
+        api.create_page(page, first_block=False)
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
