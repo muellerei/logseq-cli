@@ -30,6 +30,7 @@ from logseq_cli.ids import (
     without_foreign_block_ids,
 )
 from logseq_cli.lookup import incoming_block_refs, refs_refusal, resolve_single_block
+from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
     contains_hierarchical_content,
     count_blocks,
@@ -130,10 +131,10 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     # honest; kept_properties says which go back, and as what (#30, #66).
     kept_values, kept_texts = kept_properties(api, block.get("uuid") or clean_id, content)
 
-    # After every check that can refuse: a note ahead of an error would sit in
-    # front of the JSON on stderr, and speak of text that is never written.
+    # After every check that can refuse: a note ahead of an error would speak
+    # of text that is never written.
     if id_note:
-        click.echo(id_note, err=True)
+        print_note(id_note)
     note_quote_breaks([{"content": content}])
     if dry_run:
         if as_json:
@@ -463,7 +464,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         except BlockIdError as e:
             fail(str(e), as_json=as_json, **{e.field: e.ids})
         if note:
-            click.echo(note, err=True)
+            print_note(note)
             tree = tree_without_block_ids(tree)
 
         # Resolve target + position first (no writes), so --dry-run can report
@@ -562,7 +563,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
+        print_note(note)
         tree = tree_without_block_ids(tree)
         # What the flat writes below send, and what the preview shows.
         content = outline_text(tree) if hierarchical else tree[0]["content"]

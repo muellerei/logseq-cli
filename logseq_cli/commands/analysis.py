@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from logseq_cli.config import get, load_config
 from logseq_cli.dates import format_journal_date, journal_day_to_date, parse_date_range
 from logseq_cli.lookup import get_page_content
+from logseq_cli.notes import print_note
 from logseq_cli.render import extract_topics
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -776,9 +777,8 @@ def suggest_connections(ctx, min_confidence, min_shared, max_suggestions, focus,
                 click.echo()
             # Never truncate silently: the same promise the journal reads make.
             if withheld:
-                click.echo(
+                print_note(
                     f"Note: showing {len(suggestions)} of {total_found} "
                     f"suggestion(s); {withheld} omitted. Raise --max-suggestions "
                     "to see more.",
-                    err=True,
                 )

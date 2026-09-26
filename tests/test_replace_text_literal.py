@@ -131,8 +131,7 @@ class TestEveryFailedBlockIsReported:
         ids = [double.uuid_of(f"alpha {n}") for n in ("one", "two", "three")]
         r = split_runner().invoke(cli, ["--token", "t", "replace-text", "--page", "P",
                                         "--find", "alpha", "--replace", "gamma", "--json"])
-        start = r.stderr.find("{")
-        return double, ids, r, json.loads(r.stderr[start:]) if start >= 0 else None
+        return double, ids, r, json.loads(r.stderr) if r.stderr else None
 
     def test_replace_text_reports_every_failed_block(self, monkeypatch):
         # One open, one written, one Logseq did not do: two reasons, so the

@@ -42,8 +42,7 @@ def _dead_graph(monkeypatch, *, from_call=1):
 def _run_json(args):
     """The command under --json: its result and the error object on stderr."""
     r = split_runner().invoke(cli, ["--token", "t", *args, "--json"])
-    start = r.stderr.find("{")
-    return r, (json.loads(r.stderr[start:]) if start >= 0 else None)
+    return r, (json.loads(r.stderr) if r.stderr else None)
 
 
 def _dead_api():

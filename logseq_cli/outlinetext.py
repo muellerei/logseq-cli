@@ -13,9 +13,8 @@ is tested without a mock; the layering tests keep it that way (ADR 0003).
 
 import re
 
-import click
-
 from logseq_cli.blocktext import PROPERTY_LINE_RE, code_block_lines, is_fence
+from logseq_cli.notes import print_note
 
 
 def count_blocks(tree: list) -> int:
@@ -353,4 +352,4 @@ def note_quote_breaks(tree: list) -> None:
     """Print :func:`quote_break_note` for ``tree`` on stderr, if there is one."""
     note = quote_break_note(tree)
     if note:
-        click.echo(note, err=True)
+        print_note(note)

@@ -345,7 +345,7 @@ class TestPartialWriteIsNamed:
             "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
         assert "Added" not in result.stdout
-        error = _json.loads(result.stderr[result.stderr.index("{"):])
+        error = _json.loads(result.stderr)
         assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
         assert (error["expected"], error["got"], error["writes_landed"]) == ("5 blocks", "3", 3)
         assert "3 earlier write(s) in this call landed and remain" in error["error"]
@@ -429,8 +429,8 @@ class TestPartialWriteIsNamed:
             "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
         assert "Added" not in result.stdout
-        # After the note on stderr that the content is hierarchical.
-        error = _json.loads(result.stderr[result.stderr.index("{"):])
+        # The note that the content is hierarchical is in the object.
+        error = _json.loads(result.stderr)
         assert (error["reason"], error["method"]) == ("write_not_verified", "appendBlockInPage")
         assert error["writes_landed"] == 0
         assert double.tree(JOURNAL_PAGE) == []

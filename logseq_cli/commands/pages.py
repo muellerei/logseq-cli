@@ -22,6 +22,7 @@ from logseq_cli.ids import (
     without_block_ids_noted,
 )
 from logseq_cli.lookup import find_backlinks, incoming_block_refs, refs_refusal
+from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import count_blocks, note_quote_breaks, parse_hierarchical_content
 from logseq_cli.output import (
     ambiguous_message,
@@ -303,16 +304,15 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     except LookupError as exc:
         fail(str(exc), as_json)
     if note:
-        click.echo(note, err=True)
+        print_note(note)
 
     # The notices below speak about what is printed, so they come after the cap.
     if not resolve_refs:
         total_refs = sum(count_unresolved_refs(r.get("blocks") or []) for r in results)
         if total_refs > 0:
-            click.echo(
+            print_note(
                 f"⚠️  {total_refs} unresolved block-ref(s) in output — "
                 f"re-run with --resolve-refs to inline them.",
-                err=True,
             )
     elif dead_refs:
         # Only sayable with --resolve-refs: without it nothing is looked up, so
@@ -324,8 +324,8 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             results_with = [r["page"] for r in results if uuid in _dead_in(r)]
             if not results_with:
                 continue
-            click.echo(f"⚠️  block-ref (({uuid})) points at a block that no "
-                       f"longer exists (on {', '.join(results_with)})", err=True)
+            print_note(f"⚠️  block-ref (({uuid})) points at a block that no "
+                       f"longer exists (on {', '.join(results_with)})")
 
     click.echo(_render(results), nl=False)
 
@@ -443,19 +443,13 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
 
     unreadable = {}
 
-    def _note(message):
-        # Not under --json: a line in front of a later error object would
-        # break the one JSON document stderr is meant to hold.
-        if not as_json:
-            click.echo(message, err=True)
-
     def _extract(refs):
         if with_context:
             return _extract_backlink_context(refs, limit)
         return extract_backlink_names(refs)
 
     def _fetch_one(ref):
-        backlinks, error = _backlinks(api, ref.page, _extract, note=_note)
+        backlinks, error = _backlinks(api, ref.page, _extract, note=print_note)
         if error:
             # Keyed by the name asked for, which is what results carry.
             unreadable[ref.requested] = error
@@ -569,10 +563,10 @@ def create_page(ctx, page, content, as_json, dry_run):
             require_text_besides_ids(content)
 
     # Only for a write that would happen: a live run on a page that exists is
-    # refused below, and a note in front of that error would break its JSON;
-    # a preview of that run says it would not write.
+    # refused below, and the note would speak of text it never writes; a
+    # preview of that run says it would not write.
     if id_note and not exists:
-        click.echo(id_note, err=True)
+        print_note(id_note)
     if content and not exists:
         note_quote_breaks([{"content": content}])
     if dry_run:
@@ -687,7 +681,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
+        print_note(note)
         tree = tree_without_block_ids(tree)
 
     # "page" in the JSON is the name asked for (ref.fields), and this names
@@ -740,7 +734,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         if root_uuid:
             applied = apply_block_properties(api, root_uuid, properties)
         else:
-            click.echo("Warning: no block created, --property ignored", err=True)
+            print_note("Warning: no block created, --property ignored")
 
     if as_json:
         output({
@@ -804,8 +798,8 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
             refs = api.get_page_linked_references(page)
             referencing = extract_backlink_names(refs) if refs else []
         except Exception as e:
-            click.echo(f"Warning: could not read backlinks ({e}); "
-                       f"reference count unknown", err=True)
+            print_note(f"Warning: could not read backlinks ({e}); "
+                       f"reference count unknown")
 
         payload = {"old_name": page, "new_name": sent, "dry_run": True}
         if referencing is None:
