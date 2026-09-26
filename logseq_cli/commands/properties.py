@@ -11,7 +11,6 @@ from logseq_cli.blockprops import (
     note_renamed_property_key,
     stored_properties,
 )
-from logseq_cli.strictinsert import require_insert
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import is_properties_block
 
@@ -210,7 +209,7 @@ def _write_property_block(api, blocks, block, content):
     """
     if block is None:
         result = api.insert_block(blocks[0]["uuid"], "", {"before": True, "sibling": True})
-        uuid, old = require_insert(result, "the page's property block"), ""
+        uuid, old = result["uuid"], ""
     else:
         uuid, old = block["uuid"], block.get("content") or ""
     if not content and block is not None and not block.get("children") and len(blocks) > 1:

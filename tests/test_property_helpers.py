@@ -158,9 +158,11 @@ class TestInsertTreeAtPageEnd:
         assert args.args[0] == "parent"
         assert args.args[2] == {"sibling": False}
 
-    def test_string_result_also_yields_uuid(self):
-        # API may return a bare uuid string instead of a dict.
+    def test_the_uuid_comes_from_the_block(self):
+        # The API answers the whole block; a bare uuid string it turns into
+        # {"uuid": ...} itself (tests/test_insert_block_tree.py,
+        # test_a_bare_uuid_answer_becomes_a_block), so a caller reads the key.
         api = MagicMock()
-        api.append_block_in_page.return_value = "bare-uuid"
+        api.append_block_in_page.return_value = {"uuid": "solo", "content": "Solo"}
         uuids = insert_tree_at_page_end(api, "Page", parse_hierarchical_content("- Solo"))
-        assert uuids == ["bare-uuid"]
+        assert uuids == ["solo"]

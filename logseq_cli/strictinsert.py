@@ -1,11 +1,12 @@
 """Strict Insert: every write here lands where it was asked to, or is refused.
 
 Logseq answers some failed writes with HTTP 200 and a ``null`` body, so no
-write here is trusted on its answer alone: a returned uuid is required, and
-where Logseq returns nothing the blocks are read back. The note above
-require_insert says which calls need the read and why. A tree written with
-``--keep-ids`` and a block moved by move-block are held to the same contract,
-which is why they live here too.
+write here is trusted on its answer alone: insertBlock and appendBlockInPage
+prove themselves in LogseqAPI (a returned uuid), and where Logseq returns
+nothing the blocks are read back here. The note "Why some writes are verified
+by reading them back" below says which calls need the read and why. A tree
+written with ``--keep-ids`` and a block moved by move-block are held to the
+same contract, which is why they live here too.
 """
 
 import re
@@ -57,21 +58,6 @@ def insert_block_at(api, target: str, content: str, *, sibling: bool,
     return _write_one_keeping_id(api, content, where, target, written_before)
 
 
-def block_uuid_from_result(result):
-    """Extract a block UUID from a Logseq insert/append API result.
-
-    The API returns a block map ``{"uuid": "...", ...}`` on success, a bare
-    UUID string in some paths, or ``None`` when the operation silently failed
-    (e.g. an unknown anchor UUID — the API answers HTTP 200 with ``null``).
-    Returns the UUID string or ``None``.
-    """
-    if isinstance(result, dict):
-        return result.get("uuid")
-    if isinstance(result, str):
-        return result
-    return None
-
-
 # Why some writes are verified by reading them back
 # ---------------------------------------------------
 # Three API methods answer ``null`` for a successful call as well as a failed
@@ -83,53 +69,20 @@ def block_uuid_from_result(result):
 #                     (Logseq declines to move a block into its own subtree)
 #   updateBlock       null on success and on a non-existent block UUID
 #
-# For these, :func:`require_insert` cannot help: there is no UUID to miss. The
-# callers therefore re-read the affected blocks and compare against what they
-# intended to write. That costs one extra API call per operation and is a
-# workaround, not a design choice.
+# For these there is no UUID to miss. The callers therefore re-read the
+# affected blocks and compare against what they intended to write. That costs
+# one extra API call per operation and is a workaround, not a design choice.
 #
 # If a future Logseq version returns the written block (or any error signal) for
-# these methods, drop the verifying read and route them through
-# ``require_insert`` like every other write, keeping the read only where a count
-# has to be compared. The affected call sites are
+# these methods, drop the verifying read and prove them by their answer, as
+# LogseqAPI does for insertBlock and appendBlockInPage, keeping the read only
+# where a count has to be compared. The affected call sites are
 # :func:`insert_block_tree_batched`, :func:`move_block_verified` and the
 # ``replace-text`` command; they are the ones to revisit.
 #
-# ``insertBlock`` and ``appendBlockInPage`` do return the new block, which is
-# why ``require_insert`` works for them and is the cheaper check to prefer.
-
-
-def require_insert(result, what: str, *, written_so_far: int = 0) -> str:
-    """Return the UUID of a just-inserted block, or abort loudly.
-
-    The Logseq API answers a failed insert/append with HTTP 200 + ``null``
-    instead of an error status, so a missing UUID is the only failure signal.
-    Callers that must not continue on a silent write failure use this to turn
-    that ``null`` into a non-zero exit with a clear message, rather than
-    reporting a phantom success.
-
-    ``written_so_far`` is the number of blocks already persisted in this
-    operation. There is no rollback (the API offers none), so on a multi-block
-    insert those blocks stay. Saying "Nothing was written" there would be a
-    lie that invites a retry and thus duplicates, so the message names the
-    partial state instead.
-    """
-    uuid = block_uuid_from_result(result)
-    if not uuid:
-        if written_so_far:
-            tail = (
-                f"{written_so_far} block(s) were already written and remain "
-                "(no rollback available) — check the page before retrying, or "
-                "the retry will duplicate them."
-            )
-        else:
-            tail = "Nothing was written."
-        raise click.ClickException(
-            f"Logseq did not create {what} (API returned no block UUID). "
-            "Likely cause: the target/anchor UUID does not exist, or the page "
-            f"is not loaded. {tail}"
-        )
-    return uuid
+# ``insertBlock`` and ``appendBlockInPage`` do return the new block, so they
+# need no read: LogseqAPI raises WriteNotVerified when the answer names no
+# uuid, and callers here read ``result["uuid"]``.
 
 
 # The lines insertBatchBlock takes out of a block's content when it is not
@@ -156,27 +109,21 @@ def _quotes_an_id_line(tree: list) -> bool:
     return False
 
 
-def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: bool = True, batch: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
+def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, batch: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
     """Recursively insert a parsed tree under ``parent_uuid``.
 
     Returns the UUIDs of inserted blocks in DFS pre-order (parent before
-    children, siblings in declaration order).
-
-    ``strict`` (the default) turns a silent write failure into a hard abort via
-    :func:`require_insert`. Logseq answers a failed insert with HTTP 200 +
-    ``null``, so without this the function pushes a ``None`` UUID, skips that
-    block's children, and the caller reports success for content that was never
-    written — the worst outcome for a journal entry, since the text is gone and
-    nothing says so. ``strict=False`` is only for callers that deliberately
-    tolerate partial writes; it must never be the default.
+    children, siblings in declaration order). A block Logseq does not write
+    raises WriteNotVerified from the API; the blocks before it stay.
 
     ``batch`` (the default) sends a multi-block tree as a single
     ``insertBatchBlock`` call via :func:`insert_block_tree_batched`, which
-    verifies the write by re-reading. It requires ``strict``, because the
-    non-strict contract is to return a ``None`` per unwritten block, and the
-    batch path cannot say which nodes those were: the API reports neither an
-    error nor UUIDs. Set ``batch=False`` to force the per-block path when the
-    caller needs a UUID for every node as it is written.
+    verifies the write by re-reading. Set ``batch=False`` to force the
+    per-block path when the caller needs a UUID for every node as it is
+    written.
+
+    ``_written`` counts blocks this command wrote before, for the message of
+    a failed ``keep_ids`` write only (:func:`insert_tree_keeping_ids`).
 
     While a block is open in Logseq's editor the tree goes block by block
     too: the batch would open its last block and move the cursor out of the
@@ -186,7 +133,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "last_child", parent_uuid,
                                        written_before=_written)
-    if strict and batch and count_blocks(tree) > 1 and not _quotes_an_id_line(tree):
+    if batch and count_blocks(tree) > 1 and not _quotes_an_id_line(tree):
         # One round-trip instead of N. NOT atomic: a batch can still write only
         # part of its nodes (verified against a live graph - a malformed node is
         # skipped while its siblings land), and it answers null either way. That
@@ -201,17 +148,11 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
 
     uuids = []
     for block in tree:
-        result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
-        if strict:
-            new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
-        else:
-            new_uuid = block_uuid_from_result(result)
+        new_uuid = api.insert_block(parent_uuid, block["content"], {"sibling": False})["uuid"]
         uuids.append(new_uuid)
         children = block.get("children") or []
-        if new_uuid and children:
-            uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, strict=strict, batch=batch,
-                _written=_written + len(uuids)))
+        if children:
+            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, batch=batch))
     return uuids
 
 
@@ -228,7 +169,8 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
     exactly the silent-write-failure shape this codebase refuses to accept, so
     the write is proven instead: the parent's children are read back and the new
     UUIDs counted. The read also recovers the UUIDs the batch call withholds.
-    See the note above :func:`require_insert` for when this read can be dropped.
+    See the note "Why some writes are verified by reading them back" for when
+    this read can be dropped.
 
     Positioning: with ``sibling: false`` the batch lands at the HEAD of the child
     list (``before: false`` does not change it), so to append we anchor on the
@@ -409,8 +351,7 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str, *,
         if before_tree:
             anchor, opts["sibling"] = before_tree[-1]["uuid"], True
         else:
-            stand_in = require_insert(api.append_block_in_page(page_name, ""),
-                                      f"a block on '{page_name}'")
+            stand_in = api.append_block_in_page(page_name, "")["uuid"]
             anchor, opts["sibling"] = stand_in, True
     else:
         raise ValueError(f"unknown position {where!r}")
@@ -531,8 +472,8 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
     case is therefore refused here before the call, where it can be named, and
     the move itself is verified by re-reading: for a child move the block must
     appear among the target's children, for ``before`` directly in front of the
-    target. See the note above :func:`require_insert` for when this read can be
-    dropped.
+    target. See the note "Why some writes are verified by reading them back"
+    for when this read can be dropped.
     """
     src_uuid = src_uuid.strip().replace("((", "").replace("))", "")
     target_uuid = target_uuid.strip().replace("((", "").replace("))", "")
@@ -573,26 +514,26 @@ def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, ke
     order the caller wrote.
 
     Returns the UUIDs in DFS pre-order, like the sibling/child variants.
+    ``_written`` is for a failed ``keep_ids`` write, as in
+    :func:`insert_block_tree_with_uuids`.
     """
     if not tree:
         return []
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "first_child", parent_uuid,
                                        written_before=_written)
-    head = api.insert_block(parent_uuid, tree[0]["content"], {"sibling": False, "before": True})
-    head_uuid = require_insert(head, "the first child", written_so_far=_written)
+    head_uuid = api.insert_block(parent_uuid, tree[0]["content"],
+                                 {"sibling": False, "before": True})["uuid"]
     uuids = [head_uuid]
     children = tree[0].get("children") or []
     if children:
-        uuids.extend(insert_block_tree_with_uuids(
-            api, children, head_uuid, strict=True, _written=_written + len(uuids)))
+        uuids.extend(insert_block_tree_with_uuids(api, children, head_uuid))
     if len(tree) > 1:
-        uuids.extend(insert_block_tree_as_siblings(
-            api, tree[1:], head_uuid, _written=_written + len(uuids)))
+        uuids.extend(insert_block_tree_as_siblings(api, tree[1:], head_uuid))
     return uuids
 
 
-def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, strict: bool = True, keep_ids: bool = False, _written: int = 0) -> list:
+def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: bool = False, keep_ids: bool = False, _written: int = 0) -> list:
     """Insert a parsed tree as sibling(s) after (or before) ``anchor_uuid``.
 
     The first top-level node is inserted as a sibling of the anchor; its
@@ -601,8 +542,8 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
     This is the ``--after``/``--before`` counterpart to
     :func:`insert_block_tree_with_uuids` (which only nests under a parent).
 
-    Returns inserted UUIDs in DFS pre-order. ``strict`` (default True) aborts
-    on a silent write failure rather than orphaning the remaining nodes.
+    Returns inserted UUIDs in DFS pre-order. ``_written`` is for a failed
+    ``keep_ids`` write, as in :func:`insert_block_tree_with_uuids`.
     """
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "before" if before else "after",
@@ -614,20 +555,12 @@ def insert_block_tree_as_siblings(api, tree: list, anchor_uuid: str, *, before: 
         # the root just written. Sending every root "before" the one written
         # ahead of it put a, b, c down as c, b, a (measured, 0.10.15).
         ahead = before and position == 0
-        result = api.insert_block(cursor, block["content"], {"sibling": True, "before": ahead})
-        if strict:
-            new_uuid = require_insert(result, "a block", written_so_far=_written + len(uuids))
-        else:
-            new_uuid = block_uuid_from_result(result)
+        new_uuid = api.insert_block(cursor, block["content"],
+                                    {"sibling": True, "before": ahead})["uuid"]
         uuids.append(new_uuid)
-        if not new_uuid:
-            # non-strict and the insert failed: stop walking this chain
-            break
         children = block.get("children") or []
         if children:
-            uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, strict=strict,
-                _written=_written + len(uuids)))
+            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid))
         cursor = new_uuid
     return uuids
 
@@ -637,29 +570,25 @@ def insert_block_tree_at_page_top(api, tree: list, page_name: str, *, keep_ids: 
 
     Top-level nodes use ``append_block_in_page`` (which currently appends; the
     Logseq API has no first-block primitive). Children use insert_block.
-    Returns DFS pre-order UUIDs.
-
-    A failed append answers HTTP 200 + ``null``; :func:`require_insert` turns
-    that into a hard abort so the caller cannot report success for text that
-    was never written.
+    Returns DFS pre-order UUIDs. A failed append raises WriteNotVerified from
+    the API, so the caller cannot report success for text that was never
+    written. ``_written`` is for a failed ``keep_ids`` write, as in
+    :func:`insert_block_tree_with_uuids`.
     """
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "page_end", page_name,
                                        written_before=_written)
     uuids = []
     for block in tree:
-        result = api.append_block_in_page(page_name, block["content"])
-        new_uuid = require_insert(
-            result, f"a block on '{page_name}'", written_so_far=_written + len(uuids))
+        new_uuid = api.append_block_in_page(page_name, block["content"])["uuid"]
         uuids.append(new_uuid)
         children = block.get("children") or []
         if children:
-            uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, _written=_written + len(uuids)))
+            uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid))
     return uuids
 
 
-def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = True, keep_ids: bool = False) -> list:
+def insert_tree_at_page_end(api, page_name: str, tree: list, *, keep_ids: bool = False) -> list:
     """Append a parsed tree to a page, returning the inserted block UUIDs.
 
     It takes the tree, not the text: the caller checked and cleaned that tree
@@ -669,12 +598,10 @@ def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = T
     Top-level nodes are appended to the page; children use insert_block.
     Returns UUIDs in DFS pre-order (parent before children).
 
-    ``strict`` (the default) aborts on a silent write failure, the same
-    contract the other tree inserters follow. Without it this was the one
-    remaining path where a page that Logseq has not loaded answers every
-    append with HTTP 200 + ``null``, the ``None`` UUIDs still get counted, and
-    the caller reports "Added N block(s)" with exit 0 for a journal entry that
-    was never written.
+    A page Logseq has not loaded answers every append with HTTP 200 +
+    ``null``; the API raises WriteNotVerified on the first, where once the
+    ``None`` UUIDs were counted and the caller reported "Added N block(s)"
+    with exit 0 for a journal entry that was never written.
     """
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "page_end", page_name)
@@ -684,16 +611,11 @@ def insert_tree_at_page_end(api, page_name: str, tree: list, *, strict: bool = T
         for block in blocks:
             if parent_uuid:
                 result = api.insert_block(parent_uuid, block["content"], {"sibling": False})
-                what = "a block"
             else:
                 result = api.append_block_in_page(page_name, block["content"])
-                what = f"a block on '{page_name}'"
-            if strict:
-                new_uuid = require_insert(result, what, written_so_far=len(uuids))
-            else:
-                new_uuid = block_uuid_from_result(result)
+            new_uuid = result["uuid"]
             uuids.append(new_uuid)
-            if new_uuid and block["children"]:
+            if block["children"]:
                 insert_tree(block["children"], new_uuid)
 
     insert_tree(tree)

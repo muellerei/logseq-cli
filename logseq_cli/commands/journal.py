@@ -55,7 +55,6 @@ from logseq_cli.strictinsert import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
-    require_insert,
 )
 
 
@@ -410,22 +409,14 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     if not existing:
         api.create_page(page_name, first_block=False)
 
-    # Count what the graph actually took, not how many lines were handed in:
-    # reporting len(lines) turned a partial write into "Added 3 block(s)" with
-    # no hint that two are missing, which invites a retry that duplicates the
-    # one that landed.
-    if as_block:
-        result = api.append_block_in_page(page_name, blocks[0])
-        require_insert(result, f"a block on '{page_name}'")
-        blocks_added = 1
-    else:
-        result = None
-        written = 0
-        for line in blocks:
-            result = api.append_block_in_page(page_name, line)
-            require_insert(result, f"a block on '{page_name}'", written_so_far=written)
-            written += 1
-        blocks_added = written
+    # Each append is proven by the API, which raises on the first one the
+    # graph did not take, naming the ones before it: so the count is what
+    # landed. Counting the lines handed in, unproven, once turned a partial
+    # write into "Added 3 block(s)" and invited a retry that duplicated them.
+    result = None
+    for block in blocks:
+        result = api.append_block_in_page(page_name, block)
+    blocks_added = len(blocks)
 
     if as_json:
         output({
@@ -661,14 +652,12 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             return
 
         heading_uuid = find_or_create_heading(api, page_name, under_heading) if under_heading else None
-        if under_heading and not heading_uuid:
-            click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
         uuids = []
         for kind, payload in planned:
             if kind == "tree":
                 if heading_uuid:
                     uuids.extend(insert_block_tree_with_uuids(
-                        api, payload, heading_uuid, strict=True, keep_ids=keep_ids,
+                        api, payload, heading_uuid, keep_ids=keep_ids,
                         _written=len(uuids)))
                 else:
                     # payload is the parsed tree; insert top nodes + children at page level
@@ -681,19 +670,14 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 else:
                     r = append_in_page(api, page_name, payload, keep_ids,
                                        written_before=len(uuids))
-                uuids.append(require_insert(r, "a journal block", written_so_far=len(uuids)))
+                uuids.append(r["uuid"])
         total = len(uuids)
         if any_hierarchical:
             click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
 
-        # From where the blocks went, not from what was asked: the heading may
-        # not exist, and the blocks then went to the page (#93).
-        if heading_uuid:
-            position = f"under '{under_heading}'"
-        elif under_heading:
-            position = "top-level (heading not found)"
-        else:
-            position = "top-level"
+        # The heading was found or written, or the command failed before
+        # the blocks (#93, spec 030).
+        position = f"under '{under_heading}'" if heading_uuid else "top-level"
         if as_json:
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)
         else:
@@ -724,14 +708,13 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
         found_uuid = None
-        if heading_uuid:
-            heading_block = api.get_block(heading_uuid, include_children=True)
-            children = heading_block.get("children", []) if heading_block else []
-            target_norm = normalize_heading(upsert_heading)
-            for child in children:
-                if normalize_heading(child.get("content", "")) == target_norm:
-                    found_uuid = child.get("uuid")
-                    break
+        heading_block = api.get_block(heading_uuid, include_children=True)
+        children = heading_block.get("children", []) if heading_block else []
+        target_norm = normalize_heading(upsert_heading)
+        for child in children:
+            if normalize_heading(child.get("content", "")) == target_norm:
+                found_uuid = child.get("uuid")
+                break
 
         if found_uuid:
             root_uuid = found_uuid
@@ -743,36 +726,27 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             # The matched block keeps its properties, as with update-block (#67).
             _, kept = kept_properties(api, found_uuid, text)
             api.update_block(found_uuid, text, properties=kept or None)
-            # Both inserts run strict and n counts the UUIDs actually
-            # returned, plus 1 for the update. Using count_blocks(tree)
-            # here would report the intended size even when a write
-            # silently failed, which is the exact "text is gone and
-            # nothing says so" case require_insert exists to prevent.
+            # n counts the UUIDs the inserts returned, plus 1 for the
+            # update. The API proves each insert and raises on one that did
+            # not land, so this is what the graph took, not the size asked
+            # for, as count_blocks(tree) would be.
             n = 1
             if tree:
                 kids = tree[0].get("children", [])
                 if kids:
-                    n += len(insert_block_tree_with_uuids(
-                        api, kids, found_uuid, strict=True, _written=n))
+                    n += len(insert_block_tree_with_uuids(api, kids, found_uuid))
                 if len(tree) > 1:
-                    n += len(insert_block_tree_as_siblings(
-                        api, tree[1:], found_uuid, _written=n))
+                    n += len(insert_block_tree_as_siblings(api, tree[1:], found_uuid))
             status = "updated"
-        elif heading_uuid:
+        else:
             if tree is not None:
                 created = insert_block_tree_with_uuids(api, tree, heading_uuid)
                 n = len(created)
                 root_uuid = created[0] if created else None
             else:
-                r = api.insert_block(heading_uuid, content, {"sibling": False})
                 n = 1
-                root_uuid = require_insert(r, "the upsert block")
+                root_uuid = api.insert_block(heading_uuid, content, {"sibling": False})["uuid"]
             status = "created"
-        else:
-            r = api.append_block_in_page(page_name, content)
-            n = 1
-            root_uuid = require_insert(r, f"a block on '{page_name}'")
-            status = "top-level (heading not found)"
 
         position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
         if as_json:
@@ -803,12 +777,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         if under_heading:
             heading_uuid = find_or_create_heading(api, page_name, under_heading)
-            if heading_uuid:
-                uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
-            else:
-                click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-                uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
-                position = "top-level (heading not found)"
+            uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         else:
             uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
 
@@ -834,34 +803,26 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             click.echo(f"  {content}")
         return
 
-    # Every branch checks its write. The hierarchical path already aborted on a
-    # silent failure via require_insert; without the same check here a single
-    # flat entry (the common case for a timestamped log line) was reported as
-    # "Added block to journal" with exit 0 while nothing had been written.
+    # The write is proven like every other: the API raises when Logseq's
+    # answer names no block. Unchecked, a single flat entry (the common case
+    # for a timestamped log line) was once reported as "Added block to
+    # journal" with exit 0 while nothing had been written.
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
-        if heading_uuid:
-            result = insert_block_at(api, heading_uuid, content, sibling=False,
-                                     keep_ids=keep_ids)
-            position = f"under '{under_heading}'"
-            _u = require_insert(result, f"a block under '{under_heading}'")
-        else:
-            result = append_in_page(api, page_name, content, keep_ids)
-            position = "top-level (heading not found)"
-            click.echo(f"Warning: Could not find or create '{under_heading}', added as top-level block", err=True)
-            _u = require_insert(result, f"a block on '{page_name}'")
+        result = insert_block_at(api, heading_uuid, content, sibling=False,
+                                 keep_ids=keep_ids)
+        position = f"under '{under_heading}'"
     else:
         result = append_in_page(api, page_name, content, keep_ids)
         position = "top-level"
-        _u = require_insert(result, f"a block on '{page_name}'")
+    _u = result["uuid"]
 
     if as_json:
-        output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([u for u in [_u] if u])}, True)
+        output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([_u])}, True)
     else:
         click.echo(f"Added block to journal: {page_name} ({position})")
         # Before the preview: the content may itself contain "uuid: ...".
-        if _u:
-            click.echo(f"  uuid: {_u}")
+        click.echo(f"  uuid: {_u}")
         click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
 
 @cli.command("add-journal-content", epilog="""\b
@@ -963,12 +924,7 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page_name, under_heading)
-        if heading_uuid:
-            uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
-        else:
-            click.echo(f"Warning: Could not find or create '{under_heading}', adding as top-level", err=True)
-            uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
-            position = "top-level (heading not found)"
+        uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
     else:
         uuids = insert_tree_at_page_end(api, page_name, tree, keep_ids=keep_ids)
 

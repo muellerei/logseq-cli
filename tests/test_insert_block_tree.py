@@ -14,18 +14,27 @@ from logseq_cli.outlinetext import (
     normalize_indentation,
     parse_hierarchical_content,
 )
+from logseq_cli.api import LogseqAPI, WriteNotVerified, _block_uuid_from_result
 from logseq_cli.strictinsert import (
-    block_uuid_from_result,
     insert_block_tree_as_siblings,
     insert_block_tree_with_uuids,
-    require_insert,
 )
-import click
 
-from tests.conftest import fake_api
+from tests.conftest import fake_api, split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 # ---------- helpers --------------------------------------------------------
+
+def _null_answering(monkeypatch):
+    """A Logseq answering insertBlock with null and writing nothing, behind
+    the real LogseqAPI: the uuid check sits in the API method (spec 030),
+    which a method mock would replace."""
+    double = LogseqHttpDouble()
+    double.add_page("P", ["anchor block"])
+    double.set_mode("insertBlock", "noop")
+    return double.install(monkeypatch)
+
 
 def _make_api_with_uuid_sequence(uuids):
     """API stand-in handing out UUIDs from ``uuids`` in order.
@@ -250,11 +259,12 @@ class TestInsertBlockTreeAsSiblings:
         # DFS pre-order: header, child1, child2
         assert uuids == ["h", "c1", "c2"]
 
-    def test_strict_aborts_on_null_result(self):
-        api = MagicMock()
-        api.insert_block.return_value = None  # silent API failure
-        with pytest.raises(click.ClickException):
-            insert_block_tree_as_siblings(api, [{"content": "x", "children": []}], "anchor")
+    def test_aborts_on_null_result(self, monkeypatch):
+        # Logseq's silent failure; the real API raises on it (spec 030).
+        double = _null_answering(monkeypatch)
+        with pytest.raises(WriteNotVerified):
+            insert_block_tree_as_siblings(LogseqAPI(token="t"), [{"content": "x", "children": []}],
+                                          double.uuid_of("anchor block"))
 
     def test_cli_after_tree_returns_uuids(self):
         api = _make_api_with_uuid_sequence(["a1", "a2", "a3"])
@@ -355,34 +365,58 @@ class TestInsertBlockDryRun:
         api.insert_block.assert_not_called()
 
 
-# ---------- response validation (require_insert) ---------------------------
+# ---------- response validation (LogseqAPI._prove_uuid) --------------------
 
 class TestResponseValidation:
     def test_block_uuid_from_result_variants(self):
-        assert block_uuid_from_result({"uuid": "x"}) == "x"
-        assert block_uuid_from_result("y") == "y"
-        assert block_uuid_from_result(None) is None
-        assert block_uuid_from_result({}) is None
+        assert _block_uuid_from_result({"uuid": "x"}) == "x"
+        assert _block_uuid_from_result("y") == "y"
+        assert _block_uuid_from_result(None) is None
+        assert _block_uuid_from_result({}) is None
 
-    def test_require_insert_raises_on_null(self):
-        with pytest.raises(click.ClickException):
-            require_insert(None, "a block")
+    def test_insert_raises_on_null(self, monkeypatch):
+        double = _null_answering(monkeypatch)
+        api = LogseqAPI(token="t")
+        anchor = double.uuid_of("anchor block")
+        with pytest.raises(WriteNotVerified) as exc:
+            api.insert_block(anchor, "x")
+        assert exc.value.fields == {"method": "insertBlock", "target": anchor,
+                                    "expected": "a new block",
+                                    "got": "no block uuid in the answer"}
+        assert str(exc.value) == (
+            f"insertBlock on block {anchor[:8]}... did not show in Logseq: "
+            "expected a new block, read no block uuid in the answer.")
+        # Not proven, so not counted.
+        assert api.writes_landed == 0
 
-    def test_require_insert_returns_uuid(self):
-        assert require_insert({"uuid": "ok"}, "a block") == "ok"
+    def test_insert_returns_the_block(self, monkeypatch):
+        double = LogseqHttpDouble()
+        double.add_page("P", ["anchor block"])
+        double.install(monkeypatch)
+        api = LogseqAPI(token="t")
+        block = api.insert_block(double.uuid_of("anchor block"), "x")
+        assert block["uuid"] == double.uuid_of("x")
+        assert api.writes_landed == 1
 
-    def test_cli_after_flat_null_result_exits_nonzero(self):
-        api = MagicMock()
-        api.insert_block.return_value = None  # Logseq returns null for bad anchor
-        runner = CliRunner()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            result = runner.invoke(cli, [
-                "insert-block",
-                "--after", "00000000-0000-0000-0000-000000000000",
-                "--content", "x",
-            ])
+    def test_a_bare_uuid_answer_becomes_a_block(self, monkeypatch):
+        """Not seen from 0.10.15, but tolerated since the first check: the
+        method turns it into a dict, so callers read result["uuid"] alone."""
+        double = LogseqHttpDouble()
+        double.add_page("P", [])
+        double.install(monkeypatch)
+        uuid = "6500c0de-0000-4000-8000-0000000000aa"
+        monkeypatch.setitem(double._handlers, "logseq.Editor.appendBlockInPage",
+                            lambda args: uuid)
+        assert LogseqAPI(token="t").append_block_in_page("P", "x") == {"uuid": uuid}
+
+    def test_cli_after_flat_null_result_exits_nonzero(self, monkeypatch):
+        double = _null_answering(monkeypatch)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "insert-block", "--after", double.uuid_of("anchor block"),
+            "--content", "x", "--json",
+        ])
         assert result.exit_code != 0
-        assert "no block UUID" in result.output or "did not create" in result.output
+        assert _json.loads(result.stderr)["reason"] == "write_not_verified"
 
 
 # ---------- mixed-indentation guard ----------------------------------------
@@ -484,18 +518,16 @@ class TestInsertFirstChild:
         assert "--first only applies to --child-of" in result.output
         api.insert_block.assert_not_called()
 
-    def test_silent_write_failure_aborts(self):
+    def test_silent_write_failure_aborts(self, monkeypatch):
         """API answers 200 + null -> must fail loudly, not report success."""
-        api = MagicMock()
-        api.insert_block.return_value = None
-        runner = CliRunner()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            result = runner.invoke(cli, [
-                "insert-block", "--child-of", "parent", "--first",
-                "--content", "vanishes",
-            ])
+        double = _null_answering(monkeypatch)
+        result = CliRunner().invoke(cli, [
+            "--token", "t", "insert-block", "--child-of", double.uuid_of("anchor block"),
+            "--first", "--content", "vanishes",
+        ])
         assert result.exit_code != 0
-        assert "did not create" in result.output
+        assert "did not show in Logseq" in result.output
+        assert "Inserted" not in result.output
 
     def test_dry_run_reports_first_child_and_writes_nothing(self):
         api, calls = self._api_recording(["never"])

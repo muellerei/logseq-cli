@@ -1,15 +1,20 @@
 """The flat one-block write paths must fail as loudly as the tree paths.
 
-`require_insert` was added because Logseq answers a failed write with HTTP 200 +
-`null`, and it was applied thoroughly to the tree/helper paths. The flat paths in
-cli.py called `api.*` directly and slipped past it, so the same command reported
-success or aborted depending on whether the content happened to carry a tab:
+A check of the returned uuid was added because Logseq answers a failed write
+with HTTP 200 + `null`, and it was applied thoroughly to the tree/helper paths.
+The flat paths in cli.py called `api.*` directly and slipped past it, so the
+same command reported success or aborted depending on whether the content
+happened to carry a tab:
 
     add-journal-block --content "**14:30** X"           -> exit 0, nothing written
     add-journal-block --content "**14:30** X\n\t- Detail" -> exit 1
 
 Every command guarded here writes into the journal or the block-ref network, so a
 silent miss means a log entry or a TODO link that looks present and is not.
+
+The check sits in LogseqAPI now (spec 030), so a failed insert is run against
+the HTTP double, where the real API sees Logseq's `null`; a method mock would
+never raise.
 """
 import json
 from unittest.mock import MagicMock, patch
@@ -18,11 +23,34 @@ from click.testing import CliRunner
 
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
+
+JOURNAL = ["--date", "2099-01-05"]
+
+
+def _dead_graph(monkeypatch, *, from_call=1):
+    """Logseq answering insertBlock and appendBlockInPage with ``null`` and
+    writing nothing, as it does on a page it has not loaded; with
+    ``from_call`` the calls before it still land."""
+    double = LogseqHttpDouble()
+    double.add_page("2099-01-05, Monday", [{"content": "## Log", "children": ["logged"]}])
+    double.add_page("P", ["## Refs", "src block"])
+    for method in ("insertBlock", "appendBlockInPage"):
+        double.set_mode(method, "noop", from_call=from_call)
+    return double.install(monkeypatch)
+
+
+def _run_json(args):
+    """The command under --json: its result and the error object on stderr."""
+    r = split_runner().invoke(cli, ["--token", "t", *args, "--json"])
+    start = r.stderr.find("{")
+    return r, (json.loads(r.stderr[start:]) if start >= 0 else None)
 
 
 def _dead_api():
     """API that accepts every write and persists none, as Logseq does on a
-    page it has not loaded."""
+    page it has not loaded. For updateBlock, which has no proof in LogseqAPI
+    yet; an insert here would not raise as the real method does."""
     api = MagicMock()
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page.return_value = {"name": "journal"}
@@ -47,30 +75,31 @@ def _live_api(uuid="new-uuid"):
 class TestAddJournalBlockFlat:
     """The single-block path: the default shape of an auto-logged entry."""
 
-    def test_under_heading_fails_loudly(self):
-        api = _dead_api()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-journal-block", "--under-heading", "## Log",
-                "--content", "**14:30** Entry"])
+    def test_under_heading_fails_loudly(self, monkeypatch):
+        _dead_graph(monkeypatch)
+        r = CliRunner().invoke(cli, [
+            "--token", "t", "add-journal-block", *JOURNAL, "--under-heading", "## Log",
+            "--content", "**14:30** Entry"])
         assert r.exit_code == 1
         assert "Added" not in r.output
+        assert "did not show in Logseq" in r.output
 
-    def test_top_level_fails_loudly(self):
-        api = _dead_api()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-journal-block", "--content", "**14:30** Entry", "--top-level"])
+    def test_top_level_fails_loudly(self, monkeypatch):
+        _dead_graph(monkeypatch)
+        r = CliRunner().invoke(cli, [
+            "--token", "t", "add-journal-block", *JOURNAL, "--content", "**14:30** Entry",
+            "--top-level"])
         assert r.exit_code == 1
         assert "Added" not in r.output
+        assert "did not show in Logseq" in r.output
 
-    def test_json_mode_does_not_report_a_phantom_block(self):
-        api = _dead_api()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-journal-block", "--under-heading", "## Log",
-                "--content", "**14:30** X", "--json"])
+    def test_json_mode_does_not_report_a_phantom_block(self, monkeypatch):
+        _dead_graph(monkeypatch)
+        r, error = _run_json(["add-journal-block", *JOURNAL, "--under-heading", "## Log",
+                              "--content", "**14:30** X"])
         assert r.exit_code == 1
+        assert r.stdout == ""
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBlock")
 
     def test_successful_write_still_reports(self):
         api = _live_api()
@@ -83,15 +112,14 @@ class TestAddJournalBlockFlat:
 
 
 class TestAddBlockRef:
-    def test_failed_ref_is_not_reported_as_added(self):
-        api = _dead_api()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-block-ref", "--source-id", "src", "--page", "P",
-                "--under-heading", "## Log"])
+    def test_failed_ref_is_not_reported_as_added(self, monkeypatch):
+        double = _dead_graph(monkeypatch)
+        r, error = _run_json(["add-block-ref", "--source-id", double.uuid_of("src block"),
+                              "--page", "P", "--under-heading", "## Refs"])
         assert r.exit_code == 1
         assert "Added block-ref" not in r.output
-        assert "did not create the block-ref" in r.output
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBlock")
+        assert error["target"] == double.uuid_of("## Refs")
 
     def test_successful_ref_reports_its_uuid(self):
         api = _live_api("ref-uuid")
@@ -104,23 +132,23 @@ class TestAddBlockRef:
 
 
 class TestAddJournalEntry:
-    def test_count_comes_from_writes_not_from_line_count(self):
+    def test_count_comes_from_writes_not_from_line_count(self, monkeypatch):
         """One line lands, two do not: it must not claim three."""
-        api = _dead_api()
-        api.append_block_in_page.side_effect = [{"uuid": "u1"}, None, None]
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-journal-entry", "--multi-block", "--content", "A\nB\nC"])
+        _dead_graph(monkeypatch, from_call=2)
+        r, error = _run_json(["add-journal-entry", *JOURNAL, "--multi-block",
+                              "--content", "A\nB\nC"])
         assert r.exit_code == 1
         assert "Added 3 block(s)" not in r.output
-        assert "already written and remain" in r.output  # names the partial state
+        # Names the partial state.
+        assert error["writes_landed"] == 1
+        assert "1 earlier write(s) in this call landed and remain" in error["error"]
 
-    def test_as_block_failure_aborts(self):
-        api = _dead_api()
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "add-journal-entry", "--content", "Text"])
+    def test_as_block_failure_aborts(self, monkeypatch):
+        _dead_graph(monkeypatch)
+        r, error = _run_json(["add-journal-entry", *JOURNAL, "--content", "Text"])
         assert r.exit_code == 1
+        assert error["reason"] == "write_not_verified"
+        assert "Nothing was written." in error["error"]
 
     def test_all_lines_land(self):
         api = _dead_api()
@@ -137,13 +165,13 @@ class TestCreatePageWithContent:
     # create-page refuses a page that already exists, so a run that is meant to
     # reach the write path has to start from an absent one. _dead_api answers
     # get_page with a page, which is the existing case.
-    def test_failed_content_write_aborts(self):
-        api = _dead_api()
-        api.get_page.return_value = None
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "create-page", "--name", "New", "--content", "Text"])
+    def test_failed_content_write_aborts(self, monkeypatch):
+        _dead_graph(monkeypatch)
+        r, error = _run_json(["create-page", "--name", "New", "--content", "Text"])
         assert r.exit_code == 1
+        assert (error["reason"], error["method"]) == ("write_not_verified", "appendBlockInPage")
+        # The page was created before the text failed, and stays.
+        assert error["writes_landed"] == 1
 
     def test_page_without_content_is_unaffected(self):
         api = _dead_api()

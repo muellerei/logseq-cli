@@ -15,6 +15,8 @@ import pytest
 from click.testing import CliRunner
 
 from tests.conftest import fake_api
+from tests.logseq_http_double import LogseqHttpDouble
+from logseq_cli.api import LogseqAPI, WriteNotVerified
 from logseq_cli.cli import cli
 from logseq_cli.strictinsert import insert_block_tree_at_page_top, insert_block_tree_with_uuids
 
@@ -22,21 +24,33 @@ from logseq_cli.strictinsert import insert_block_tree_at_page_top, insert_block_
 TREE = [{"content": "Head", "children": [{"content": "Detail"}]}]
 
 
+def _null_answering(monkeypatch, method):
+    """The real LogseqAPI against a Logseq that answers ``method`` with null
+    and writes nothing: the proof sits in the API method (spec 030), which a
+    method mock would replace."""
+    double = LogseqHttpDouble()
+    double.add_page("Page One", ["parent block"])
+    double.set_mode(method, "noop")
+    double.install(monkeypatch)
+    return LogseqAPI(token="t"), double
+
+
 class TestHelperDefaults:
-    def test_strict_is_the_default(self):
-        """The unsafe mode must be opt-in, never the default."""
+    def test_a_batch_that_wrote_nothing_fails(self):
+        """Once the unsafe mode was the default; there is none now."""
         api = fake_api([], fail_after=0)  # writes nothing, reports nothing
         with pytest.raises(Exception) as exc:
             insert_block_tree_with_uuids(api, TREE, "parent")
         assert "wrote 0 of 2 block(s)" in str(exc.value)
 
-    def test_single_block_failure_uses_the_per_block_path(self):
+    def test_single_block_failure_uses_the_per_block_path(self, monkeypatch):
         """One block needs no batch call, so the UUID check still applies."""
-        api = MagicMock()
-        api.insert_block.return_value = None
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, [{"content": "solo"}], "parent")
-        assert "did not create" in str(exc.value)
+        api, double = _null_answering(monkeypatch, "insertBlock")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, [{"content": "solo"}],
+                                         double.uuid_of("parent block"))
+        assert exc.value.fields["method"] == "insertBlock"
+        assert api.writes_landed == 0
 
     def test_batch_partial_write_is_detected_and_named(self):
         """A batch can write part of its nodes; the count check must catch it."""
@@ -47,23 +61,18 @@ class TestHelperDefaults:
         assert "wrote 1 of 2 block(s)" in msg
         assert "duplicate" in msg
 
-    def test_strict_false_still_tolerates_partial_writes(self):
-        """Opt-out stays available for callers that deliberately want it."""
-        api = MagicMock()
-        api.insert_block.return_value = None
-        uuids = insert_block_tree_with_uuids(api, TREE, "parent", strict=False)
-        assert uuids == [None]
-
     def test_successful_write_returns_uuids_in_dfs_order(self):
         api = fake_api(["u-head", "u-detail"])
         assert insert_block_tree_with_uuids(api, TREE, "parent") == ["u-head", "u-detail"]
 
-    def test_page_top_insert_aborts_on_failed_append(self):
-        api = MagicMock()
-        api.append_block_in_page.return_value = None
-        with pytest.raises(Exception) as exc:
+    def test_page_top_insert_aborts_on_failed_append(self, monkeypatch):
+        api, double = _null_answering(monkeypatch, "appendBlockInPage")
+        with pytest.raises(WriteNotVerified) as exc:
             insert_block_tree_at_page_top(api, TREE, "Page One")
-        assert "did not create" in str(exc.value)
+        assert exc.value.fields["method"] == "appendBlockInPage"
+        # The child was never sent: its parent did not land.
+        assert double.sent("insertBlock") == []
+        assert double.tree("Page One") == [("parent block", [])]
 
     def test_page_top_insert_succeeds_normally(self):
         api = MagicMock()

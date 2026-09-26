@@ -3,9 +3,8 @@
 A heading is found by its text, not by a uuid, so two spellings of one heading
 have to compare equal, and normalize_heading decides when they do. The
 renderer asks the same question when it cuts out a section, which is why this
-stands apart from the commands. find_or_create_heading writes, but not by
-Strict Insert: it appends, and reads the page back when Logseq's answer names
-no uuid.
+stands apart from the commands. find_or_create_heading writes: it appends,
+and the API proves the append.
 """
 
 import re
@@ -54,34 +53,17 @@ def find_heading(api, page_name: str, heading: str) -> str | None:
     return None
 
 
-def find_or_create_heading(api, page_name: str, heading: str) -> str | None:
+def find_or_create_heading(api, page_name: str, heading: str) -> str:
     """Find heading block UUID on page, create if missing.
 
     Matches existing headings tolerantly via :func:`normalize_heading` so that
     renderer macros and whitespace variations do not cause spurious duplicates.
 
-    Returns the UUID of the heading block, or None if creation failed.
+    Returns the UUID of the heading block. A heading Logseq does not create
+    raises WriteNotVerified from the API; the callers once wrote to the top of
+    the page instead, with a warning (removed in spec 030).
     """
-    target = normalize_heading(heading)
     found = find_heading(api, page_name, heading)
     if found:
         return found
-
-    # Heading doesn't exist — create it
-    heading_result = api.append_block_in_page(page_name, heading)
-    if isinstance(heading_result, dict):
-        uuid = heading_result.get("uuid")
-        if uuid:
-            return uuid
-    elif isinstance(heading_result, list) and heading_result:
-        uuid = heading_result[0].get("uuid")
-        if uuid:
-            return uuid
-
-    # Fallback: re-fetch blocks to find the just-created heading
-    blocks = api.get_page_blocks_tree(page_name) or []
-    for block in blocks:
-        if normalize_heading(block.get("content", "")) == target:
-            return block.get("uuid")
-
-    return None
+    return api.append_block_in_page(page_name, heading)["uuid"]

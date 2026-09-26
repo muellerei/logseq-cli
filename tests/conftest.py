@@ -4,6 +4,8 @@ import re
 import pytest
 from click.testing import CliRunner
 
+from logseq_cli.api import _not_verified
+
 
 @pytest.fixture(autouse=True)
 def isolate_environment(monkeypatch):
@@ -134,7 +136,8 @@ class FakeGraph:
     write apart from a silent failure.
 
     ``fail_after`` writes only that many blocks and then stops silently, which
-    is the partial-write shape the graph itself has to expose.
+    is the partial-write shape the graph itself has to expose; ``insert_block``
+    then raises WriteNotVerified, as the real method does.
     """
 
     def __init__(self, uuids, *, fail_after=None):
@@ -212,7 +215,9 @@ class FakeGraph:
         self.insert_calls.append((parent, content, options))
         uuid = self._next_uuid()
         if uuid is None:
-            return None
+            # As LogseqAPI.insert_block does on Logseq's null (_prove_uuid).
+            raise _not_verified("insertBlock", parent, "a new block",
+                                "no block uuid in the answer")
         block = {"uuid": uuid, "content": content, "children": []}
         opts = options or {}
         bucket = self.children.setdefault(parent, [])

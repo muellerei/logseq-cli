@@ -52,7 +52,6 @@ from logseq_cli.render import (
 from logseq_cli.strictinsert import (
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
-    require_insert,
 )
 
 
@@ -594,10 +593,10 @@ def create_page(ctx, page, content, as_json, dry_run):
     result = api.create_page(page, first_block=content is None)
 
     if content:
-        # Unchecked, this appended to a page that create_page may have failed to
-        # create, and both failures stayed invisible behind "Created page: ...".
-        require_insert(api.append_block_in_page(page, content),
-                       f"the initial content on '{page}'")
+        # Proven by the API: unchecked, this appended to a page that
+        # create_page may have failed to create, and both failures stayed
+        # invisible behind "Created page: ...".
+        api.append_block_in_page(page, content)
 
     if as_json:
         output({"created": page, "page": result, "has_content": content is not None}, True)
@@ -709,9 +708,6 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
-        if not heading_uuid:
-            click.echo(f"Failed to find or create heading '{under_heading}' on '{page}'", err=True)
-            sys.exit(1)
         uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
         position = f"under '{under_heading}' on '{page}'"
     else:
