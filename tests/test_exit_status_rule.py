@@ -21,6 +21,7 @@ from logseq_cli.cli import cli
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ["README.md", "AGENTS.md", "CONTRIBUTING.md", "docs/configuration.md",
+        "docs/commands.md",
         "skills/logseq-cli/SKILL.md"]
 
 # A number given a meaning as an exit status: "exits 1", "exit with code 1",

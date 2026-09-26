@@ -467,6 +467,8 @@ refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 
 ## Command Summary
 
+Every command with all its options: [docs/commands.md](docs/commands.md).
+
 | Command | Use When |
 |---------|----------|
 | `add-journal-block` | Single journal entry (recommended) |

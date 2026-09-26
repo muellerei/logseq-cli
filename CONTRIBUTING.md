@@ -124,14 +124,14 @@ logseq-cli/
    appears in:
    - `--help` — the option's own text, and the command epilog if the behaviour
      is not obvious from the flag name
-   - the command table in `README.md`
+   - the command table in `docs/commands.md`
    - `AGENTS.md`, if it affects a common workflow
    - `CHANGELOG.md` under `## [Unreleased]`
 
-   Both flags added in 0.10.0 went out without the README row and the
+   Both flags added in 0.10.0 went out without the command-table row and the
    `AGENTS.md` entry, and were caught the same evening. Twenty further options
-   had never been listed at all. `tests/test_readme_documents_options.py` now
-   holds the command table against the registry, which covers the README row
+   had never been listed at all. `tests/test_command_reference_documents_options.py` now
+   holds the command table against the registry, which covers that row
    and nothing else on this list.
 
    Relative links and anchors across the Markdown files, after any of those:
