@@ -28,6 +28,7 @@ from logseq_cli.output import (
     ambiguous_message,
     fail,
     follow_page,
+    follow_page_to_write,
     follow_pages,
     handle_connection_error,
     json_text,
@@ -38,7 +39,6 @@ from logseq_cli.pagenames import (
     AmbiguousAliasError,
     js_trim,
     page_name_to_create,
-    page_to_write,
     refuse_alias,
     resolve_page,
 )
@@ -658,14 +658,12 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         fail(str(e), as_json=as_json)
     refuse_split_heading(under_heading, command="add-note-content")
 
-    ref = follow_page(api, page, as_json)
-
     # Check if page exists. Not caught: Logseq answers null for a page that
     # does not exist, so an exception is a failed read, and taking it for
     # absence would create a page that may be there (#93). A missing page is
     # written under the name Logseq creates it with: a journal title in
     # another format is the journal, which may exist.
-    target = page_to_write(api, ref.page)
+    ref, target = follow_page_to_write(api, page, as_json)
     page, existing = target.name, target.page
 
     if not existing and not create:

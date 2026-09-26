@@ -16,7 +16,7 @@ from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.headings import TitleHeadingOnly
 from logseq_cli.blocktext import IdLineError, SplitBlockError
 from logseq_cli.notes import hold_notes, release_notes, take_notes
-from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
+from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page, resolve_page_to_write
 from logseq_cli.writerefused import WriteRefused, partial_state
 
 
@@ -215,6 +215,14 @@ def follow_page(api, name: str, as_json: bool):
     ref = resolve_page(api, name)
     note_alias(ref, as_json)
     return ref
+
+
+def follow_page_to_write(api, name: str, as_json: bool):
+    """:func:`follow_page` for a write: ``(PageRef, PageToWrite)`` from
+    pagenames.resolve_page_to_write, the alias said on stderr."""
+    ref, target = resolve_page_to_write(api, name)
+    note_alias(ref, as_json)
+    return ref, target
 
 
 def follow_pages(api, names, as_json: bool):
