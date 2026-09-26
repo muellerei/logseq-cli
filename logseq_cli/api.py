@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 
@@ -19,6 +20,18 @@ from logseq_cli.blocktext import (
     refuse_split_tree,
     tree_texts,
 )
+from logseq_cli.outlinetext import subtree_uuids
+# Raised by the writes below; imported here too so that callers can take them
+# from the API they call (spec 030). They live apart to keep imports acyclic.
+from logseq_cli.writerefused import (  # noqa: F401  re-exported
+    EditorOpen,
+    EditorStateUnknown,
+    LogseqWriteError,
+    PageExists,
+    RenameRefused,
+    WriteNotVerified,
+    WriteRefused,
+)
 
 
 @dataclass(frozen=True)
@@ -34,7 +47,22 @@ class Write:
     ``editor`` and ``proof`` name the ``LogseqAPI._gate_<editor>`` and
     ``_prove_<proof>`` methods the central write dispatches on (spec 030).
     Names rather than descriptions: a label nothing acts on can disagree
-    with the code. ``None`` until those methods exist.
+    with the code. ``None`` until those methods exist: ``proof`` for every
+    write so far (030-C*), ``editor`` for insertBatchBlock (030-B4).
+
+    ``editor`` says when a block open in Logseq's editor refuses the write,
+    given the open block and the write's target:
+
+    * ``target``: the target is the open block;
+    * ``subtree``: the open block is the target or below it (a removed or
+      moved block takes its children along; the anchor of a move does not
+      count, a block beside the open one changes nothing in it, M10);
+    * ``requested``: the open block is one of the blocks asked for;
+    * ``page``: the open block is on the target page;
+    * ``page_or_link``: ... or refers to it (Logseq rewrites the link on a
+      rename, and the open editor would save the old text back);
+    * ``never``: an insert. Logseq saves the open block before it inserts
+      (M10), so it neither asks nor refuses.
     """
     editor: str | None
     proof: str | None
@@ -64,18 +92,18 @@ _METHODS = {
     "logseq.Editor.getAllPages": Read(cache=True),
     "logseq.App.getUserConfigs": Read(cache=True),
     "logseq.DB.datascriptQuery": Read(cache=True),
-    "logseq.Editor.createPage": Write(editor=None, proof=None),
-    "logseq.Editor.deletePage": Write(editor=None, proof=None),
-    "logseq.Editor.renamePage": Write(editor=None, proof=None),
-    "logseq.Editor.appendBlockInPage": Write(editor=None, proof=None),
-    "logseq.Editor.insertBlock": Write(editor=None, proof=None),
-    "logseq.Editor.updateBlock": Write(editor=None, proof=None),
-    "logseq.Editor.removeBlock": Write(editor=None, proof=None),
-    "logseq.Editor.upsertBlockProperty": Write(editor=None, proof=None),
-    "logseq.Editor.removeBlockProperty": Write(editor=None, proof=None),
+    "logseq.Editor.createPage": Write(editor="never", proof=None),
+    "logseq.Editor.deletePage": Write(editor="page", proof=None),
+    "logseq.Editor.renamePage": Write(editor="page_or_link", proof=None),
+    "logseq.Editor.appendBlockInPage": Write(editor="never", proof=None),
+    "logseq.Editor.insertBlock": Write(editor="never", proof=None),
+    "logseq.Editor.updateBlock": Write(editor="target", proof=None),
+    "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
+    "logseq.Editor.upsertBlockProperty": Write(editor="target", proof=None),
+    "logseq.Editor.removeBlockProperty": Write(editor="target", proof=None),
     "logseq.Editor.insertBatchBlock": Write(editor=None, proof=None),
-    "logseq.Editor.moveBlock": Write(editor=None, proof=None),
-    "logseq.Editor.setBlocksId": Write(editor=None, proof=None),
+    "logseq.Editor.moveBlock": Write(editor="subtree", proof=None),
+    "logseq.Editor.setBlocksId": Write(editor="requested", proof=None),
     "logseq.Editor.checkEditing": UI(),
     "logseq.Editor.exitEditingMode": UI(),
 }
@@ -182,6 +210,14 @@ def _without_focus(options: dict | None) -> dict:
     return {**(options or {}), "focus": False}
 
 
+# Default of _write's ``editing``: "not asked yet", since None is an answer
+# (no block open).
+_UNSET = object()
+
+# checkEditing's answer when a block is open: its uuid (M8).
+_UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
 class LogseqAPI:
     def __init__(self, host=None, port=None, token=None):
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
@@ -204,6 +240,10 @@ class LogseqAPI:
         self._cache_ttl = max(0, ttl)
         self.cache_enabled = self._cache_ttl > 0
         self._cache = {}
+        # Writes of this CLI call that landed, for the partial state every
+        # refusal reports (spec 030): one instance per call (group.py), so the
+        # count is the call's, and no command has to keep its own.
+        self.writes_landed = 0
 
     def _cache_key(self, method, args):
         try:
@@ -281,6 +321,141 @@ class LogseqAPI:
 
         return data
 
+    def _write(self, method: str, args: list, *, target, texts=(), own=None,
+               editing=_UNSET, count: int = 1):
+        """Send one write the way its ``_METHODS`` entry says, and count it.
+
+        Every public write goes through here, so the steps below hold for all
+        of them and no command can go around one (spec 030):
+
+        1. ask checkEditing once, if the entry can refuse or ``texts`` hold
+           Block Refs (``editing``, when given, is that answer already, so
+           set_blocks_id does not ask again);
+        2. find the Block Ref targets in ``texts`` that need an id, ``own``
+           excepted (reads only);
+        3. refuse if the open block is one the entry's ``editor`` rule
+           protects;
+        4. store the targets' ids with the answer from step 1, which refuses
+           if one of them is the open block (setBlocksId writes into it);
+        5. the write; ``count`` more writes landed (a batch counts its
+           blocks);
+        6. prove it; a method with a proof counts only once it is proven.
+
+        Asked before the ids are stored, not after: setBlocksId would
+        otherwise write an id:: into a block for a write the gate then
+        refuses. Between the question and the write lie only reads (the ref
+        targets, and the open block's place when one is open); the
+        milliseconds in which someone can enter a block there stay (spec 030,
+        named).
+
+        Step 6 dispatches on the entry's ``proof`` (030-C*). Until then every
+        entry names none, and the step is skipped because the entry says
+        None, not because a method is missing: a name with no step behind it
+        fails here instead of passing as a check nobody made.
+        """
+        kind = _METHODS[method]
+        if kind.proof is not None:
+            raise NotImplementedError(
+                f"{method}: proof {kind.proof!r} named in _METHODS, "
+                "but _write has no step for it yet."
+            )
+        can_refuse = kind.editor not in (None, "never")
+        refs = [u for t in texts for u in block_ref_uuids(t)]
+        if editing is _UNSET:
+            editing = self.check_editing() if can_refuse or refs else None
+        wanted = self._ref_targets_needing_id(refs, own=own)
+        if editing is not None and can_refuse:
+            getattr(self, f"_gate_{kind.editor}")(editing, target)
+        # The ref targets are gated by setBlocksId's own rule, with the same
+        # answer: it is the write into them, and the first write of all.
+        if wanted:
+            self.set_blocks_id(wanted, editing=editing)
+        result = self.call(method, args)
+        self.writes_landed += count
+        return result
+
+    def check_editing(self) -> str | None:
+        """The uuid of the block open in Logseq's editor, lower case, or
+        ``None`` when none is.
+
+        Logseq answers with raw text, not JSON (M8): the uuid, or ``false``;
+        the same values as JSON are taken too. Anything else fails closed
+        with EditorStateUnknown: a write on an answer nobody understood could
+        be the one that discards what is being typed. A timeout, a refused
+        connection and an HTTP error come from _post and go the known way.
+        """
+        text = self._post("logseq.Editor.checkEditing", []).text
+        try:
+            value = json.loads(text)
+        except ValueError:
+            value = text.strip()
+        if value is False:
+            return None
+        if isinstance(value, str) and _UUID_TEXT.fullmatch(value):
+            return value.lower()
+        answer = text[:80]
+        raise EditorStateUnknown(
+            f"Logseq's answer to checkEditing was not understood ({answer!r}); "
+            "the write was not sent.",
+            answer=answer,
+        )
+
+    # The editor rules of _METHODS, one per ``Write.editor`` name. Each gets
+    # the open block's uuid (lower case) and the write's target, and refuses
+    # through _refuse_open. Only called when a block is open, so the reads
+    # that place it cost nothing while nobody types.
+    def _gate_never(self, editing, target):
+        """Inserts; _write does not call it (``never`` asks nothing)."""
+
+    def _gate_target(self, editing, uuid):
+        # Lower case on both sides: update-block passes --id through as
+        # typed, checkEditing answers in lower case, and compared as typed
+        # the write went past the gate (M8).
+        if editing == uuid.lower():
+            self._refuse_open(editing)
+
+    def _gate_subtree(self, editing, uuid):
+        if editing == uuid.lower():
+            self._refuse_open(editing)
+        block = self.get_block(uuid, include_children=True)
+        if block and editing in {u.lower() for u in subtree_uuids(block)}:
+            self._refuse_open(editing)
+
+    def _gate_requested(self, editing, uuids):
+        if editing in {u.lower() for u in uuids}:
+            self._refuse_open(editing)
+
+    def _gate_page(self, editing, page_name):
+        self._gate_page_or_link(editing, page_name, links=False)
+
+    def _gate_page_or_link(self, editing, page_name, *, links=True):
+        # A link is found through the open block's refs, which list every
+        # page it refers to, as [[Page]], #Page or a property value alike
+        # (M15): no parsing of the text here.
+        open_block = self.get_block(editing, include_children=False)
+        page = self.get_page(page_name)
+        if not (open_block and isinstance(page, dict) and page.get("id") is not None):
+            return
+        ids = {(open_block.get("page") or {}).get("id")}
+        if links:
+            ids |= {r.get("id") for r in open_block.get("refs") or [] if isinstance(r, dict)}
+        if page["id"] in ids:
+            self._refuse_open(editing, open_block)
+
+    def _refuse_open(self, editing, open_block=None):
+        """Raise EditorOpen for the open block, naming its page."""
+        if open_block is None:
+            open_block = self.get_block(editing, include_children=False)
+        page_id = ((open_block or {}).get("page") or {}).get("id")
+        page = self.get_page(page_id) if page_id is not None else None
+        page_name = page.get("originalName") or page.get("name") if isinstance(page, dict) else None
+        on = f" on '{page_name}'" if page_name else ""
+        raise EditorOpen(
+            f"Block {editing}{on} is open in Logseq's editor; writing now would "
+            "discard what is being typed there. Leave the block, then retry.",
+            block=editing, page=page_name,
+        )
+
     def get_all_pages(self):
         return self.call("logseq.Editor.getAllPages")
 
@@ -320,7 +495,8 @@ class LogseqAPI:
         options = {"redirect": False}
         if not first_block:
             options["createFirstBlock"] = False
-        return self.call("logseq.Editor.createPage", [page_name, properties or {}, options])
+        return self._write("logseq.Editor.createPage",
+                           [page_name, properties or {}, options], target=page_name)
 
     def append_block_in_page(self, page_name: str, content: str, options: dict = None):
         # Options reach insertBlock unchanged (append_block_in_page in api.cljs),
@@ -329,18 +505,18 @@ class LogseqAPI:
         # instead (#31).
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
-        self._store_ref_target_ids([content])
-        return self.call(
+        return self._write(
             "logseq.Editor.appendBlockInPage",
             [page_name, content, _without_focus(options)],
+            target=page_name, texts=[content],
         )
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
-        self._store_ref_target_ids([content])
-        return self.call(
-            "logseq.Editor.insertBlock", [block_uuid, content, _without_focus(options)]
+        return self._write(
+            "logseq.Editor.insertBlock", [block_uuid, content, _without_focus(options)],
+            target=block_uuid, texts=[content],
         )
 
     def insert_batch_block(self, block_uuid: str, batch: list, options: dict = None):
@@ -364,9 +540,10 @@ class LogseqAPI:
         # should arrive: one that does was decided on by no command.
         if not (options or {}).get("keepUUID"):
             refuse_id_lines_tree(batch)
-        self._store_ref_target_ids(tree_texts(batch))
-        return self.call(
-            "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}]
+        texts = list(tree_texts(batch))
+        return self._write(
+            "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}],
+            target=block_uuid, texts=texts, count=len(texts),
         )
 
     def move_block(self, src_uuid: str, target_uuid: str, options: dict = None):
@@ -375,8 +552,9 @@ class LogseqAPI:
         Structural move, unlike copy+remove: the block keeps its UUID, so
         ``((block-ref))`` backlinks survive.
         """
-        return self.call(
-            "logseq.Editor.moveBlock", [src_uuid, target_uuid, options or {}]
+        return self._write(
+            "logseq.Editor.moveBlock", [src_uuid, target_uuid, options or {}],
+            target=src_uuid,
         )
 
     def update_block(self, block_uuid: str, content: str, properties: dict = None, *,
@@ -406,16 +584,18 @@ class LogseqAPI:
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
         # Properties carried along are written again, a ref among them too.
-        self._store_ref_target_ids([content, *map(str, (properties or {}).values())],
-                                   own=block_uuid)
+        texts = [content, *map(str, (properties or {}).values())]
         args = [block_uuid, content]
         if properties:
             args.append({"properties": properties})
-        return self.call("logseq.Editor.updateBlock", args)
+        return self._write("logseq.Editor.updateBlock", args,
+                           target=block_uuid, texts=texts, own=block_uuid)
 
-    def _store_ref_target_ids(self, contents: list, own: str = None) -> None:
-        """Store the id of every Block Ref target in ``contents`` that has
-        none yet, before the text holding the refs is written (#95).
+    def _ref_targets_needing_id(self, refs: list, own: str = None) -> list:
+        """The Block Ref targets among ``refs`` (lower case, from
+        ``block_ref_uuids``) that have no id yet; _write stores theirs before
+        the text holding the refs is written (#95). Only reads: the editor
+        gate comes between this and the storing.
 
         Logseq's editor does this when a ref is copied (``set-blocks-id!``,
         exported as ``setBlocksId``). Without it Logseq adds the Id Line to the
@@ -430,25 +610,29 @@ class LogseqAPI:
         leaves the target with its id, as a copied ref in the editor does.
         """
         wanted = []
-        for uuid in dict.fromkeys(u for c in contents for u in block_ref_uuids(c)):
+        for uuid in dict.fromkeys(refs):
             if uuid == (own or "").lower():
                 continue
             block = self.get_block(uuid, include_children=False)
             if block and block.get("page") and not (block.get("properties") or {}).get("id"):
                 wanted.append(block["uuid"])
-        if wanted:
-            self.set_blocks_id(wanted)
+        return wanted
 
-    def set_blocks_id(self, block_uuids: list):
+    def set_blocks_id(self, block_uuids: list, *, editing=_UNSET):
         """Store each block's uuid as its ``id`` property, as Logseq's editor
         does for a copied ref. Not in the plugin API's declarations, but
         exported (``logseq.api/set_blocks_id``, 0.10.15); it skips a uuid no
         block has and a page's property block, and leaves a stored id as it
-        is, file untouched (measured)."""
-        return self.call("logseq.Editor.setBlocksId", [block_uuids])
+        is, file untouched (measured).
+
+        ``editing`` is checkEditing's answer when the caller has it already
+        (_write, before the write whose refs these are), so it is not asked
+        twice."""
+        return self._write("logseq.Editor.setBlocksId", [block_uuids], target=block_uuids,
+                           editing=editing)
 
     def remove_block(self, block_uuid: str):
-        return self.call("logseq.Editor.removeBlock", [block_uuid])
+        return self._write("logseq.Editor.removeBlock", [block_uuid], target=block_uuid)
 
     def get_page_linked_references(self, page_name: str):
         """Get backlinks using native Logseq API (faster than brute-force search)."""
@@ -457,20 +641,22 @@ class LogseqAPI:
     def upsert_block_property(self, block_uuid: str, key: str, value):
         """Set or update a property on a block."""
         refuse_split_property(key, value)
-        self._store_ref_target_ids([str(value)], own=block_uuid)
-        return self.call("logseq.Editor.upsertBlockProperty", [block_uuid, key, value])
+        return self._write("logseq.Editor.upsertBlockProperty", [block_uuid, key, value],
+                           target=block_uuid, texts=[str(value)], own=block_uuid)
 
     def remove_block_property(self, block_uuid: str, key: str):
         """Remove a property from a block."""
-        return self.call("logseq.Editor.removeBlockProperty", [block_uuid, key])
+        return self._write("logseq.Editor.removeBlockProperty", [block_uuid, key],
+                           target=block_uuid)
 
     def rename_page(self, old_name: str, new_name: str):
         """Rename a page."""
-        return self.call("logseq.Editor.renamePage", [old_name, new_name])
+        return self._write("logseq.Editor.renamePage", [old_name, new_name],
+                           target=old_name)
 
     def delete_page(self, page_name: str):
         """Delete a page."""
-        return self.call("logseq.Editor.deletePage", [page_name])
+        return self._write("logseq.Editor.deletePage", [page_name], target=page_name)
 
     def get_user_configs(self):
         """Get user configuration including preferredDateFormat."""

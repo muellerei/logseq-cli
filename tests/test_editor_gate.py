@@ -128,69 +128,58 @@ def test_create_page_sends_redirect_false(monkeypatch, double, api):
 
 # --- 030-B3: the gate, method by method --------------------------------------
 
-@_spec("030-B3")
 def test_gate_refuses_update_block(double, api):
     x = _uuid(double, "target block")
     _assert_refused(double, lambda: api.update_block(x, "new text"), x)
 
 
-@_spec("030-B3")
 def test_gate_refuses_upsert_block_property(double, api):
     x = _uuid(double, "target block")
     _assert_refused(double, lambda: api.upsert_block_property(x, "k", "v"), x)
 
 
-@_spec("030-B3")
 def test_gate_refuses_remove_block_property(double, api):
     double.add_page("Props Page", ["body\nprio:: 1"])
     x = _uuid(double, "body\nprio:: 1")
     _assert_refused(double, lambda: api.remove_block_property(x, "prio"), x)
 
 
-@_spec("030-B3")
 def test_gate_refuses_move_block_source(double, api):
     src, anchor = _uuid(double, "target block"), _uuid(double, "anchor block")
     _assert_refused(double, lambda: api.move_block(src, anchor, {"children": True}), src)
 
 
-@_spec("030-B3")
 def test_gate_refuses_move_block_subtree(double, api):
     src, anchor = _uuid(double, "parent block"), _uuid(double, "anchor block")
     kid = _uuid(double, "kid block")
     _assert_refused(double, lambda: api.move_block(src, anchor, {"children": True}), kid)
 
 
-@_spec("030-B3")
 def test_gate_refuses_set_blocks_id(double, api):
     y = _uuid(double, "ref target")
     _assert_refused(double, lambda: api.set_blocks_id([y]), y)
 
 
-@_spec("030-B3")
 def test_gate_refuses_remove_block_target(double, api):
     x = _uuid(double, "target block")
     _assert_refused(double, lambda: api.remove_block(x), x)
 
 
-@_spec("030-B3")
 def test_gate_refuses_remove_block_subtree(double, api):
     parent, kid = _uuid(double, "parent block"), _uuid(double, "kid block")
     _assert_refused(double, lambda: api.remove_block(parent), kid)
 
 
-@_spec("030-B3")
 def test_gate_refuses_delete_page(double, api):
     open_block = _uuid(double, "kid block")
     _assert_refused(double, lambda: api.delete_page("Probe Page"), open_block)
 
 
-@_spec("030-B3")
 def test_gate_refuses_rename_page_block_on_page(double, api):
     open_block = _uuid(double, "target block")
     _assert_refused(double, lambda: api.rename_page("Probe Page", "New Name"), open_block)
 
 
-@_spec("030-B3")
 def test_gate_refuses_rename_page_linking_block(double, api):
     # Logseq rewrites [[Probe Page]] in the open block; leaving the editor
     # would save the old text back (M15: found through the block's refs).
@@ -198,11 +187,13 @@ def test_gate_refuses_rename_page_linking_block(double, api):
     _assert_refused(double, lambda: api.rename_page("Probe Page", "New Name"), open_block)
 
 
-@_spec("030-B3")
 def test_gate_refuses_update_block_uppercase_target(double, api):
     # update-block passes --id through as typed; checkEditing answers in
     # lower case. Compared as typed, the write would pass the gate (M8).
-    x = _uuid(double, "target block")
+    # A uuid with letters: the double's own are digits, the same in either case.
+    double.add_page("Lettered Page", [{"content": "lettered block", "uuid": UNKNOWN}])
+    x = UNKNOWN
+    assert x.upper() != x
     _assert_refused(double, lambda: api.update_block(x.upper(), "new text"), x)
 
 
@@ -248,7 +239,6 @@ def test_gate_never_asks_for_inserts(double, api):
         ["insertBlock", "appendBlockInPage", "createPage"]
 
 
-@_spec("030-B3")
 def test_gate_refuses_before_storing_ref_ids(double, api):
     # X is open, the text refers to Y, which has no id:: yet. Refused before
     # setBlocksId, else Y would get its id:: for a write that never happens.
@@ -257,7 +247,6 @@ def test_gate_refuses_before_storing_ref_ids(double, api):
     assert double.sent("setBlocksId") == []
 
 
-@_spec("030-B3")
 def test_update_block_with_ref_asks_check_editing_once(double, api):
     x, y = _uuid(double, "target block"), _uuid(double, "ref target")
     api.update_block(x, f"new text (({y}))")
@@ -277,7 +266,6 @@ def test_insert_ref_to_its_own_anchor_stores_id(double, api):
     assert block["content"] == f"anchor block\nid:: {x}"
 
 
-@_spec("030-B3")
 def test_insert_with_ref_to_open_block_is_refused(double, api):
     # Not the insert refuses: storing Y's id would write into the open Y.
     anchor, y = _uuid(double, "anchor block"), _uuid(double, "ref target")
@@ -296,7 +284,6 @@ def test_insert_with_ref_to_open_block_that_has_its_id_goes_through(double, api)
 
 # --- 030-B3: what checkEditing answers ---------------------------------------
 
-@_spec("030-B3")
 @pytest.mark.parametrize("form,editing", [
     ("raw", UNKNOWN),       # M8: the uuid as raw text
     ("json", UNKNOWN),      # the same as a JSON string
@@ -309,7 +296,6 @@ def test_check_editing_forms(double, api, form, editing):
     assert api.check_editing() == editing
 
 
-@_spec("030-B3")
 @pytest.mark.parametrize("form", ["empty", "error", "ok1"])
 def test_unknown_editor_state_refuses(double, api, form):
     # Anything else fails closed: no write on an answer not understood.
@@ -323,7 +309,6 @@ def test_unknown_editor_state_refuses(double, api, form):
     assert double.writes() == []
 
 
-@_spec("030-B3")
 def test_check_editing_timeout_is_timeout(double):
     # A timeout is the known failure, not an editor state nobody understood.
     double.check_editing_form = "timeout"
@@ -335,9 +320,28 @@ def test_check_editing_timeout_is_timeout(double):
     assert double.writes() == []
 
 
+def test_check_editing_http_error_is_http_error(monkeypatch, double):
+    # An HTTP error on checkEditing takes the known http_error way, not that
+    # of an editor state nobody understood. Only checkEditing fails here, so
+    # the reads before it do not answer for it.
+    from tests.conftest import _TextResponse
+
+    def post(url, json=None, **kwargs):
+        if json["method"] == "logseq.Editor.checkEditing":
+            return _TextResponse("Unauthorized", 401)
+        return double.post(url, json=json, **kwargs)
+    monkeypatch.setattr("logseq_cli.api.requests.post", post)
+    x = _uuid(double, "target block")
+    r = split_runner().invoke(cli, ["--token", "wrong", "update-block", "--id", x,
+                                    "--content", "new text", "--json"])
+    assert r.exit_code == 1
+    error = _error_object(r)
+    assert error["reason"] == "http_error"
+    assert error["status_code"] == 401
+
+
 # --- 030-B3: through the command ---------------------------------------------
 
-@_spec("030-B3")
 def test_update_block_command_open_in_editor_json(double):
     x = _uuid(double, "target block")
     double.editing = x
@@ -352,7 +356,6 @@ def test_update_block_command_open_in_editor_json(double):
     assert double.writes() == []
 
 
-@_spec("030-B3")
 def test_copy_block_remove_open_source_reports_landed_copies(double):
     # The copies land, then removing the open source is refused. The message
     # says so: a retry would copy again.

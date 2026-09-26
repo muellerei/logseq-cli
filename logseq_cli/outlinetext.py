@@ -4,8 +4,10 @@ parse_hierarchical_content reads the text a caller passes as an outline;
 outline_text is its inverse, so what a write echoes reads back as the same
 tree. The rules that decide where a block ends live here with them: tabs
 against spaces, code blocks a bullet must not split, and quotes a blank line
-stops. Nothing here talks to Logseq, so all of it is tested without a mock;
-the layering tests keep it that way (ADR 0003).
+stops. subtree_uuids walks a block tree as getBlock hands it back; it sits
+here, not in strictinsert, because api needs it for the editor gate and must
+not import the insert helpers. Nothing here talks to Logseq, so all of it
+is tested without a mock; the layering tests keep it that way (ADR 0003).
 """
 
 import re
@@ -23,6 +25,23 @@ def count_blocks(tree: list) -> int:
         if node.get("children"):
             total += count_blocks(node["children"])
     return total
+
+
+def collect_child_uuids(node) -> list:
+    """UUIDs of a getBlock(includeChildren=True) subtree, DFS pre-order."""
+    out = []
+    for child in (node.get("children") or []):
+        if not isinstance(child, dict):
+            continue  # a children list of bare UUID refs carries no content
+        if child.get("uuid"):
+            out.append(child["uuid"])
+        out.extend(collect_child_uuids(child))
+    return out
+
+
+def subtree_uuids(block: dict) -> list:
+    """The block's own UUID and those of all its descendants."""
+    return [block["uuid"], *collect_child_uuids(block)] if block.get("uuid") else []
 
 
 def bullet_lines(content: str, prefix: str) -> list:

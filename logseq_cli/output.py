@@ -15,6 +15,7 @@ from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.blocktext import IdLineError, SplitBlockError
 from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
+from logseq_cli.writerefused import WriteRefused, partial_state
 
 
 def handle_connection_error(func):
@@ -104,6 +105,20 @@ def handle_connection_error(func):
                 reason="splits_into_blocks",
                 line=e.line,
                 kind=e.kind,
+            )
+        except WriteRefused as e:
+            # A write refused or not proven (spec 030). The partial state
+            # comes from the API's count, not from the type: a refusal that
+            # falls after writes of the same call landed (copy-block --remove
+            # with its source open) must say so, and one raised outside the
+            # central write says it too. Exit 1 for all of them.
+            landed = click.get_current_context().obj["api"].writes_landed
+            fail(
+                f"{e} {partial_state(landed)}",
+                as_json=as_json,
+                reason=e.reason,
+                writes_landed=landed,
+                **e.fields,
             )
         except IdLineError as e:
             # Refused before the write, like a line that splits the block: the

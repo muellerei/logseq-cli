@@ -15,6 +15,26 @@ def _mock_response(payload):
     return resp
 
 
+def _answering_writes(payload):
+    """``requests.post`` for a test that writes: every request answers
+    ``payload``, except checkEditing, which the editor gate sends before a
+    write and which Logseq answers with raw text (M8, spec 030): ``false``,
+    nobody is editing."""
+    idle = MagicMock(status_code=200, text="false")
+
+    def post(url, json=None, **kwargs):
+        if json["method"] == "logseq.Editor.checkEditing":
+            return idle
+        return _mock_response(payload)
+    return post
+
+
+def _data_requests(mock_post):
+    """The requests that read or write data, the gate's question left out."""
+    return [c for c in mock_post.call_args_list
+            if c.kwargs["json"]["method"] != "logseq.Editor.checkEditing"]
+
+
 @pytest.fixture(autouse=True)
 def _ensure_cache_default(monkeypatch):
     """Default TTL=60s for tests, unless test overrides."""
@@ -62,20 +82,20 @@ class TestCacheBasic:
 
     def test_mutation_invalidates_cache(self):
         api = LogseqAPI(token="x")
-        with patch("logseq_cli.api.requests.post", return_value=_mock_response({"ok": 1})) as mock_post:
+        with patch("logseq_cli.api.requests.post", side_effect=_answering_writes({"ok": 1})) as mock_post:
             api.get_page("Foo")
             api.update_block("uuid-x", "new content")
             api.get_page("Foo")
         # 1 read + 1 update + 1 fresh read after invalidation
-        assert mock_post.call_count == 3
+        assert len(_data_requests(mock_post)) == 3
 
     def test_non_cacheable_method_passthrough(self):
         api = LogseqAPI(token="x")
-        with patch("logseq_cli.api.requests.post", return_value=_mock_response({"ok": 1})) as mock_post:
+        with patch("logseq_cli.api.requests.post", side_effect=_answering_writes({"ok": 1})) as mock_post:
             api.update_block("uuid-x", "first")
             api.update_block("uuid-x", "second")
         # mutations are never cached
-        assert mock_post.call_count == 2
+        assert len(_data_requests(mock_post)) == 2
 
     def test_datalog_query_cacheable(self):
         api = LogseqAPI(token="x")
