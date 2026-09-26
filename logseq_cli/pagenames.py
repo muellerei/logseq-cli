@@ -141,9 +141,27 @@ def refuse_alias(ref: PageRef, command: str) -> None:
         raise AliasError(ref, command)
 
 
+# What Logseq's ``clojure.string/trim`` takes off both ends of a page name:
+# JavaScript's String.prototype.trim, whose set is WhiteSpace and
+# LineTerminator in the ECMAScript spec. It holds U+FEFF, which str.strip()
+# keeps, and not \x1c-\x1f or \x85, which str.strip() takes. Read in the
+# source and the spec, not measured; the \s of JavaScript that
+# strictinsert's _BATCH_DROPS_RE mirrors is the same set.
+_JS_TRIMMED = ("\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200b)))
+               + "\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
+def js_trim(name: str) -> str:
+    """``name`` trimmed as ``create!`` and ``rename!`` trim a page name
+    (handler/page.cljs, 0.10.15). With str.strip(), a name behind a byte
+    order mark passed as a new one: a rename onto it merged two pages, and a
+    page created under it was looked for under the name with the mark."""
+    return name.strip(_JS_TRIMMED)
+
+
 def title_as_created(name: str) -> str:
     """The title Logseq's ``create!`` makes of ``name`` (handler/page.cljs
-    ``create!``, 0.10.15): trimmed, a whole ``[[...]]`` unwrapped, leading
+    ``create!``, 0.10.15): trimmed (``js_trim``), a whole ``[[...]]`` unwrapped, leading
     ``#`` dropped, then one ``/`` at either end dropped.
 
     createPage and appendBlockInPage create a missing page under this title,
@@ -159,7 +177,7 @@ def title_as_created(name: str) -> str:
     to a name as asked, never to its own result, and createPage is sent the
     name as asked (``LogseqAPI.create_page``).
     """
-    title = name.strip()
+    title = js_trim(name)
     linked = re.fullmatch(r"\[\[(.*)\]\]", title)
     title = re.sub(r"^#+", "", linked.group(1) if linked else title)
     title = title[1:] if title.startswith("/") else title

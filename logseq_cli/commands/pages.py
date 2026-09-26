@@ -36,6 +36,7 @@ from logseq_cli.output import (
 )
 from logseq_cli.pagenames import (
     AmbiguousAliasError,
+    js_trim,
     page_name_to_create,
     page_to_write,
     refuse_alias,
@@ -772,9 +773,9 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
     refuse_alias(resolve_page(api, page), "rename-page")
-    # What the page is called afterwards: the name goes to Logseq stripped
+    # What the page is called afterwards: the name goes to Logseq trimmed
     # (LogseqAPI.rename_page). A refusal quotes the name as given instead.
-    sent = new_name.strip()
+    sent = js_trim(new_name)
 
     if dry_run:
         # The run refuses in LogseqAPI.rename_page; the same check, so the

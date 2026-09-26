@@ -70,3 +70,17 @@ def test_create_page_preview_names_the_page_the_run_creates(monkeypatch):
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout)["page"] == CREATED
     assert double.writes() == []
+
+
+@pytest.mark.parametrize("args", [["create-page", "--page", "\ufeffAlpha Beta"],
+                                  ["add-note-content", "--page", "\ufeffAlpha Beta",
+                                   "--content", "hello"]],
+                         ids=["create-page", "add-note-content"])
+def test_a_name_is_trimmed_as_logseq_trims_it(monkeypatch, args):
+    # create! trims with JavaScript's trim, which takes a byte order mark
+    # off and str.strip() does not: the page was made as "Alpha Beta" and
+    # looked for under the name with the mark, a write that landed reported
+    # as write_not_verified.
+    double, result = _run(monkeypatch, args)
+    assert result.exit_code == 0, result.stderr
+    assert _page_names(double) == {"Source", "Alpha Beta"}
