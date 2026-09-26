@@ -70,6 +70,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written.
   `create-page` without `--content` keeps the empty block: without it Logseq
   writes no file for the page (measured), and a re-index would lose it.
+- A write Logseq threw on no longer counts as done. Logseq answers such a
+  write with HTTP 200 and `{"error": …}` instead of an error status
+  (measured, 0.10.15: a malformed block id on `updateBlock`, `removeBlock`,
+  `upsertBlockProperty` and `removeBlockProperty`, `renamePage` from a page
+  that does not exist, a method Logseq does not know), and the CLI handed
+  the object on as the write's answer. Every write now ends there with exit
+  1 and `reason: "logseq_error"`, naming the `method` and Logseq's own text
+  as `logseq_message`. An answer that carries a `uuid` is a block, as
+  `get-block` already told them apart, and passes. Reads are unchanged.
+  `replace-text` stops at the block Logseq refused; the replacements before
+  it stay, counted in `writes_landed`. Before, it went on and listed the
+  block as `failed` with `reason: "write_not_verified"`.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database
