@@ -429,6 +429,12 @@ rollback), and the message ends with how many, or "Nothing was written.".
 `set-property` and `remove-property --name` check the page themselves and
 name `page` and `property` instead.
 
+A connection that fails after writes of the call landed (`connection_refused`,
+`timeout`, `bad_response`, `http_error`) adds `writes_landed` too. When it
+failed between a write and its proof, `unproven_write` names that write: it
+may have landed or not. Read the target before retrying; a retry of the whole
+command writes again what landed.
+
 On `open_in_editor`: the refused write did not happen; earlier writes of the
 same call may have (the message says how many). Ask the user to leave the
 block, check, then retry. Do not retry in a loop.
