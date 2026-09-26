@@ -1,6 +1,8 @@
 import json
 import os
 import time
+from dataclasses import dataclass
+
 import requests
 
 # Every write of block text is checked here, whichever command sent it: text
@@ -19,39 +21,87 @@ from logseq_cli.blocktext import (
 )
 
 
-# Methods that are pure reads and safe to cache.
+@dataclass(frozen=True)
+class Read:
+    """Reads data. ``cache``: the answer may be kept for the cache TTL."""
+    cache: bool
+
+
+@dataclass(frozen=True)
+class Write:
+    """Changes the graph, so the whole cache is cleared after it.
+
+    ``editor`` and ``proof`` name the ``LogseqAPI._gate_<editor>`` and
+    ``_prove_<proof>`` methods the central write dispatches on (spec 030).
+    Names rather than descriptions: a label nothing acts on can disagree
+    with the code. ``None`` until those methods exist.
+    """
+    editor: str | None
+    proof: str | None
+
+
+@dataclass(frozen=True)
+class UI:
+    """Asks or changes Logseq's editor, not the graph: no cache either way."""
+
+
+# Every method call() may send, and what it is. call() refuses anything not
+# here: a write nobody registered would otherwise run past the cache, and
+# later past the editor gate and the proof, without a trace.
+#
 # Deliberately absent: logseq.Editor.getPageProperties. It is declared in
-# Logseq's plugin API (LSPlugin.ts), which is presumably where this list was
-# first copied from, but the HTTP server does not expose it — it answers
-# `MethodNotExist: get_page_properties` (checked against 0.10.15). It was in
-# this set from the initial commit and never called even once, so the entry
+# Logseq's plugin API (LSPlugin.ts), which is presumably where the old read
+# list was first copied from, but the HTTP server does not expose it — it
+# answers `MethodNotExist: get_page_properties` (checked against 0.10.15). It
+# was listed from the initial commit and never called even once, so the entry
 # claimed a read the tool does not make. Page properties are read through
 # get_page plus the first block instead; see the 0.6.0 changelog entry.
-_CACHEABLE_METHODS = frozenset({
-    "logseq.Editor.getPage",
-    "logseq.Editor.getBlock",
-    "logseq.Editor.getPageBlocksTree",
-    "logseq.Editor.getPageLinkedReferences",
-    "logseq.Editor.getAllPages",
-    "logseq.App.getUserConfigs",
-    "logseq.DB.datascriptQuery",
-})
+_METHODS = {
+    "logseq.Editor.getPage": Read(cache=True),
+    "logseq.Editor.getBlock": Read(cache=True),
+    "logseq.Editor.getPageBlocksTree": Read(cache=True),
+    "logseq.Editor.getPageLinkedReferences": Read(cache=True),
+    "logseq.Editor.getAllPages": Read(cache=True),
+    "logseq.App.getUserConfigs": Read(cache=True),
+    "logseq.DB.datascriptQuery": Read(cache=True),
+    "logseq.Editor.createPage": Write(editor=None, proof=None),
+    "logseq.Editor.deletePage": Write(editor=None, proof=None),
+    "logseq.Editor.renamePage": Write(editor=None, proof=None),
+    "logseq.Editor.appendBlockInPage": Write(editor=None, proof=None),
+    "logseq.Editor.insertBlock": Write(editor=None, proof=None),
+    "logseq.Editor.updateBlock": Write(editor=None, proof=None),
+    "logseq.Editor.removeBlock": Write(editor=None, proof=None),
+    "logseq.Editor.upsertBlockProperty": Write(editor=None, proof=None),
+    "logseq.Editor.removeBlockProperty": Write(editor=None, proof=None),
+    "logseq.Editor.insertBatchBlock": Write(editor=None, proof=None),
+    "logseq.Editor.moveBlock": Write(editor=None, proof=None),
+    "logseq.Editor.setBlocksId": Write(editor=None, proof=None),
+    "logseq.Editor.checkEditing": UI(),
+    "logseq.Editor.exitEditingMode": UI(),
+}
 
-# Methods whose invocation must invalidate the entire cache.
-_MUTATING_METHODS = frozenset({
-    "logseq.Editor.createPage",
-    "logseq.Editor.deletePage",
-    "logseq.Editor.renamePage",
-    "logseq.Editor.appendBlockInPage",
-    "logseq.Editor.insertBlock",
-    "logseq.Editor.updateBlock",
-    "logseq.Editor.removeBlock",
-    "logseq.Editor.upsertBlockProperty",
-    "logseq.Editor.removeBlockProperty",
-    "logseq.Editor.insertBatchBlock",
-    "logseq.Editor.moveBlock",
-    "logseq.Editor.setBlocksId",
-})
+# Derived, never listed by hand: the names predate the registry and tests
+# import them.
+_MUTATING_METHODS = frozenset(m for m, k in _METHODS.items() if isinstance(k, Write))
+_CACHEABLE_METHODS = frozenset(
+    m for m, k in _METHODS.items() if isinstance(k, Read) and k.cache
+)
+
+
+class UnknownMethod(Exception):
+    """call() was asked for a method the registry does not list.
+
+    A programming error, not something a user can cause or fix: the method
+    has to be added to ``_METHODS`` with its kind. Deliberately not a
+    LookupError: commands catch those as "page not found".
+    """
+
+    def __init__(self, method: str):
+        super().__init__(
+            f"{method} is not in logseq_cli.api._METHODS; register it as "
+            "Read, Write or UI before calling it."
+        )
+        self.method = method
 
 
 class BadResponseError(RuntimeError):
@@ -165,17 +215,18 @@ class LogseqAPI:
     def clear_cache(self):
         self._cache.clear()
 
-    def call(self, method: str, args: list = None):
-        args = args or []
-        cacheable = self.cache_enabled and method in _CACHEABLE_METHODS
-        if cacheable:
-            key = self._cache_key(method, args)
-            cached = self._cache_get(key)
-            if cached is not None:
-                return cached
-        else:
-            key = None
+    def _post(self, method: str, args: list):
+        """Send one request and hand back the raw response.
 
+        The one place a request leaves the process, and therefore the one
+        place the registry is enforced: nothing unregistered goes out, however
+        it is sent. The answer is not parsed here, because checkEditing
+        answers with raw text instead of JSON. ``requests.post`` is looked up
+        on the module at call time, with the arguments it always had, so
+        tests that patch it keep working.
+        """
+        if method not in _METHODS:
+            raise UnknownMethod(method)
         resp = requests.post(
             self.base_url,
             json={"method": method, "args": args},
@@ -186,6 +237,22 @@ class LogseqAPI:
             timeout=30,
         )
         resp.raise_for_status()
+        return resp
+
+    def call(self, method: str, args: list = None):
+        args = args or []
+        # None for an unregistered method, which _post refuses before sending.
+        kind = _METHODS.get(method)
+        cacheable = self.cache_enabled and isinstance(kind, Read) and kind.cache
+        if cacheable:
+            key = self._cache_key(method, args)
+            cached = self._cache_get(key)
+            if cached is not None:
+                return cached
+        else:
+            key = None
+
+        resp = self._post(method, args)
         try:
             data = resp.json()
         except requests.exceptions.JSONDecodeError:
@@ -197,7 +264,7 @@ class LogseqAPI:
             # seconds after the caller fixed the input.
             if not (isinstance(data, dict) and "error" in data):
                 self._cache_set(key, data)
-        elif method in _MUTATING_METHODS:
+        elif isinstance(kind, Write):
             self.clear_cache()
 
         return data

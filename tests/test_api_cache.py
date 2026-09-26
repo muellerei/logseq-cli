@@ -127,21 +127,12 @@ class TestCacheableSetMatchesReality:
     never called once: the method is declared in Logseq's plugin API but the
     HTTP server answers `MethodNotExist` for it. An entry for a call that does
     not happen misleads anyone reading the set to learn what the tool does.
+
+    That every entry is called is held in test_api_endpoint_binding.py
+    (test_every_cacheable_method_has_a_wrapper), bound to a wrapper. The text
+    check that stood here asked whether the name appears in api.py, which the
+    registry there now guarantees: it could no longer fail.
     """
-
-    def test_every_cacheable_method_is_actually_called_somewhere(self):
-        from pathlib import Path
-        from logseq_cli.api import _CACHEABLE_METHODS
-
-        src = Path(__file__).resolve().parent.parent / "logseq_cli"
-        api_src = (src / "api.py").read_text(encoding="utf-8")
-
-        for method in _CACHEABLE_METHODS:
-            # api.py names the method in the call() that wraps it; the rest of
-            # the package reaches it through that wrapper.
-            assert f'"{method}"' in api_src, (
-                f"{method} is cacheable but api.py never calls it"
-            )
 
     def test_get_page_properties_stays_out(self):
         from logseq_cli.api import _CACHEABLE_METHODS
