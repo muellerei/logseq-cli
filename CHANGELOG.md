@@ -51,10 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the window runs full, 100 ms for each multi-block write. While a block
   is open, a tree goes block by block with `focus: false` instead, and a
   write with `--keep-ids`, which only the batch can do (#31), is refused
-  with `reason: "open_in_editor"` before anything is written. Someone who
-  enters a block within those 100 ms has it closed; Logseq saves a block
-  when its editor is left (`lifecycle.cljs:35`, read in the code, not
-  measured for this case).
+  with `reason: "open_in_editor"` before anything is written. Only a block
+  of the batch is closed: one someone else enters within those 100 ms stays
+  open, since Logseq does not save a block left while its last editor
+  operation is the batch (`lifecycle.cljs:35-43`, `editor.cljs:2024`; read
+  in the code, not measured). Should `checkEditing` give no usable answer
+  after the batch, the write fails with `reason: "editor_state_unknown"`,
+  and the blocks that landed count in `writes_landed`.
 - A page or journal the CLI creates no longer turns Logseq's view to it.
   `createPage` without options redirects the view to the new page (measured,
   0.10.15); the CLI now sends `redirect: false`.
@@ -143,6 +146,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `position: "top-level (heading not found)"`; `add-note-content` exited 1.
   A heading Logseq does not create now fails like any insert, before a
   block of the text is written.
+- A write of several blocks at once, and every `--keep-ids` write, now fails
+  with `reason: "write_not_verified"` when Logseq did not write all of it,
+  and names what landed and what is missing: `method: "insertBatchBlock"`,
+  `expected: "5 blocks"`, `got: "3"`, and the three that landed in
+  `writes_landed`. `insertBatchBlock` answers `null` whatever it did, so the
+  CLI reads the place it wrote to before and after; that check sat with the
+  callers and failed with "Batch insert wrote 3 of 5 block(s)", which under
+  `--json` carried no reason. It sits in the API method now, and also
+  compares each new block's text with what was sent. A `--keep-ids` write
+  whose blocks came out under other ids or in another place fails the same
+  way. On a page with no blocks such a write goes after a stand-in block
+  that is removed again; a stand-in that cannot be removed is now named in
+  the error of a batch that failed, instead of that error being lost.
+- `move-block` that Logseq did not carry out fails with
+  `reason: "write_not_verified"` and `method: "moveBlock"`, where it failed
+  with "Move of … did not take effect" and no reason under `--json`. The
+  check reads the block back where it was sent, as before, now in the API
+  method.
 
 ## [0.15.0] - 2026-09-25
 

@@ -540,3 +540,150 @@ class TestInsertFirstChild:
         assert result.exit_code == 0, result.output
         assert "first child" in result.output
         assert calls == []
+
+
+# ---------- insertBatchBlock proves itself (spec 030, 030-C3) ---------------
+
+TREE3 = [{"content": "root", "children": [{"content": "kid"}]}, {"content": "next"}]
+
+
+def _batch_double(monkeypatch, *, keep=None):
+    """A page with a nested and a top-level place to write, behind the real
+    LogseqAPI: the batch's proof sits in the method (spec 030).
+
+    ``keep`` writes only that many roots of every batch, the partial write a
+    batch can do (a malformed node is skipped while its siblings land)."""
+    double = LogseqHttpDouble()
+    double.add_page("P", [{"content": "parent block", "children": ["old kid"]},
+                          "last top"])
+    if keep is not None:
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock",
+                            lambda args: real([args[0], args[1][:keep], *args[2:]]))
+    double.install(monkeypatch)
+    return double, LogseqAPI(token="t")
+
+
+class TestTheBatchProvesItself:
+    """insertBatchBlock answers null whether it wrote all, part or nothing;
+    the method reads the place the batch lands before and after the write."""
+
+    def test_blocks_in_another_order_are_not_verified(self, monkeypatch):
+        # As many blocks as sent, each text among them, but not in the order
+        # sent: the proof compares them in order.
+        double, api = _batch_double(monkeypatch)
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock",
+                            lambda args: real([args[0], args[1][::-1], *args[2:]]))
+        with pytest.raises(WriteNotVerified) as caught:
+            api.insert_batch_block(double.uuid_of("last top"),
+                                   [{"content": "first"}, {"content": "second"}],
+                                   {"sibling": True})
+        assert (caught.value.fields["expected"], caught.value.fields["got"]) == \
+            ("'first'", "'second'")
+        assert api.writes_landed == 2
+
+    @pytest.mark.parametrize("anchor,options", [
+        ("parent block", {"sibling": False}),   # head of a block's children
+        ("old kid", {"sibling": True}),         # after a nested sibling
+        ("last top", {"sibling": True}),        # top level: the page is the parent
+    ])
+    def test_answers_the_new_uuids_in_preorder(self, monkeypatch, anchor, options):
+        double, api = _batch_double(monkeypatch)
+        new = api.insert_batch_block(double.uuid_of(anchor), TREE3, options)
+        assert new == [double.uuid_of(t) for t in ("root", "kid", "next")]
+        assert api.writes_landed == 3
+
+    def test_a_partial_write_names_what_landed(self, monkeypatch):
+        double, api = _batch_double(monkeypatch, keep=1)
+        anchor = double.uuid_of("parent block")
+        with pytest.raises(WriteNotVerified) as exc:
+            api.insert_batch_block(anchor, TREE3, {"sibling": False})
+        assert exc.value.fields == {"method": "insertBatchBlock", "target": anchor,
+                                    "expected": "3 blocks", "got": "2"}
+        # root and kid landed and stay; the count says so.
+        assert api.writes_landed == 2
+
+    def test_a_batch_that_wrote_nothing_counts_nothing(self, monkeypatch):
+        double, api = _batch_double(monkeypatch)
+        double.set_mode("insertBatchBlock", "noop")
+        with pytest.raises(WriteNotVerified) as exc:
+            api.insert_batch_block(double.uuid_of("last top"), TREE3, {"sibling": True})
+        assert (exc.value.fields["expected"], exc.value.fields["got"]) == ("3 blocks", "0")
+        assert api.writes_landed == 0
+
+    def test_a_block_with_other_text_fails(self, monkeypatch):
+        """The count alone passes a batch whose text came out changed, such as
+        the "* " Logseq puts in front of every node anchored before a page's
+        first block (#31)."""
+        double, api = _batch_double(monkeypatch)
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+
+        def starred(args):
+            nodes = [{**n, "content": "* " + n["content"]} for n in args[1]]
+            return real([args[0], nodes, *args[2:]])
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock", starred)
+        with pytest.raises(WriteNotVerified) as exc:
+            api.insert_batch_block(double.uuid_of("last top"),
+                                   [{"content": "a"}, {"content": "b"}], {"sibling": True})
+        assert exc.value.fields["got"] == "'* a'"
+
+    def test_the_proof_reads_logseq_not_the_cache(self, monkeypatch):
+        """The read before the write is cached; the write clears the cache, so
+        the read after it reaches Logseq (spec 030)."""
+        double, api = _batch_double(monkeypatch)
+        assert api.cache_enabled
+        anchor = double.uuid_of("parent block")
+        api.insert_batch_block(anchor, TREE3, {"sibling": False})
+        at = [m for m, _ in double.requests].index("logseq.Editor.insertBatchBlock")
+        assert [a for m, a in double.requests[at:] if m == "logseq.Editor.getBlock"
+                and a[0] == anchor]
+
+    def test_a_failed_proof_still_closes_the_editor_the_batch_opened(self, monkeypatch):
+        """The batch opens its last block on a visible page (E2, M16). A proof
+        that fails must not leave it open: the agent's next write to it would
+        meet open_in_editor."""
+        double, api = _batch_double(monkeypatch, keep=1)
+        double.show_page("P")
+        with pytest.raises(WriteNotVerified):
+            api.insert_batch_block(double.uuid_of("parent block"), TREE3, {"sibling": False})
+        assert len(double.sent("exitEditingMode")) == 1
+        assert double.editing is None
+
+
+class TestTheStandInIsReported:
+    """--keep-ids on a page with no blocks writes after a stand-in block and
+    removes it again (#31). A removal that fails must not hide the batch's
+    error, nor be swallowed when the batch landed."""
+
+    ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
+
+    def _run(self, monkeypatch, *, batch):
+        double = LogseqHttpDouble()
+        double.add_page("Empty", [])
+        if batch:
+            double.set_mode("insertBatchBlock", batch)
+        double.set_mode("removeBlock", "error")
+        double.install(monkeypatch)
+        r = split_runner().invoke(cli, [
+            "--token", "t", "add-note-content", "--page", "Empty", "--content",
+            f"restored\nid:: {self.ID}", "--keep-ids", "--json"])
+        return double, r
+
+    def test_stand_in_removal_failure_does_not_hide_batch_error(self, monkeypatch):
+        double, r = self._run(monkeypatch, batch="noop")
+        assert r.exit_code == 1
+        error = _json.loads(r.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        stand_in = double.sent("removeBlock")[0][0]
+        assert f"stand-in block {stand_in[:8]}..." in error["error"]
+        assert "removeBlock failed" in error["error"]
+        # The stand-in landed and stays.
+        assert error["writes_landed"] == 1
+
+    def test_a_stand_in_left_after_a_batch_that_landed_is_reported(self, monkeypatch):
+        double, r = self._run(monkeypatch, batch=None)
+        assert r.exit_code == 1
+        error = _json.loads(r.stderr)
+        assert (error["reason"], error["method"]) == ("logseq_error", "removeBlock")
+        assert error["writes_landed"] == 2

@@ -218,8 +218,6 @@ def test_ui_call_neither_caches_nor_clears(method):
 # rules come earlier (030-B3), so the proof decides when a case turns green.
 # A write missing here has its proof.
 _PROOF_TASK = {
-    "logseq.Editor.insertBatchBlock": "030-C3",
-    "logseq.Editor.moveBlock": "030-C3",
     "logseq.Editor.updateBlock": "030-C4",
     "logseq.Editor.upsertBlockProperty": "030-C4",
     "logseq.Editor.removeBlockProperty": "030-C4",

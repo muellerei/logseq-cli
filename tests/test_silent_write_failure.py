@@ -36,12 +36,14 @@ def _null_answering(monkeypatch, method):
 
 
 class TestHelperDefaults:
-    def test_a_batch_that_wrote_nothing_fails(self):
+    def test_a_batch_that_wrote_nothing_fails(self, monkeypatch):
         """Once the unsafe mode was the default; there is none now."""
-        api = fake_api([], fail_after=0)  # writes nothing, reports nothing
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, TREE, "parent")
-        assert "wrote 0 of 2 block(s)" in str(exc.value)
+        api, double = _null_answering(monkeypatch, "insertBatchBlock")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, TREE, double.uuid_of("parent block"))
+        assert exc.value.fields["method"] == "insertBatchBlock"
+        assert (exc.value.fields["expected"], exc.value.fields["got"]) == ("2 blocks", "0")
+        assert api.writes_landed == 0
 
     def test_single_block_failure_uses_the_per_block_path(self, monkeypatch):
         """One block needs no batch call, so the UUID check still applies."""
@@ -52,14 +54,21 @@ class TestHelperDefaults:
         assert exc.value.fields["method"] == "insertBlock"
         assert api.writes_landed == 0
 
-    def test_batch_partial_write_is_detected_and_named(self):
-        """A batch can write part of its nodes; the count check must catch it."""
-        api = fake_api(["u1", "u2"], fail_after=1)
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, TREE, "parent")
-        msg = str(exc.value)
-        assert "wrote 1 of 2 block(s)" in msg
-        assert "duplicate" in msg
+    def test_batch_partial_write_is_detected_and_named(self, monkeypatch):
+        """A batch can write part of its nodes; the method's count catches it,
+        and counts what landed for the message (spec 030)."""
+        double = LogseqHttpDouble()
+        double.add_page("Page One", ["parent block"])
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        # The roots land, their children are skipped.
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock", lambda args: real(
+            [args[0], [{**n, "children": []} for n in args[1]], *args[2:]]))
+        double.install(monkeypatch)
+        api = LogseqAPI(token="t")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, TREE, double.uuid_of("parent block"))
+        assert (exc.value.fields["expected"], exc.value.fields["got"]) == ("2 blocks", "1")
+        assert api.writes_landed == 1
 
     def test_successful_write_returns_uuids_in_dfs_order(self):
         api = fake_api(["u-head", "u-detail"])
@@ -104,7 +113,7 @@ class TestCommandsSurfaceTheFailure:
             "add-journal-block", "--under-heading", "## Log",
             "--content", "**09:00** Head\n\t- Detail"])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output
 
     def test_add_journal_block_succeeds_when_writes_land(self, api):
@@ -123,5 +132,5 @@ class TestCommandsSurfaceTheFailure:
             "add-note-content", "--page", "Page One",
             "--under-heading", "## Log", "--content", "Head\n\t- Detail"])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output

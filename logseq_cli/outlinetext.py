@@ -4,9 +4,10 @@ parse_hierarchical_content reads the text a caller passes as an outline;
 outline_text is its inverse, so what a write echoes reads back as the same
 tree. The rules that decide where a block ends live here with them: tabs
 against spaces, code blocks a bullet must not split, and quotes a blank line
-stops. subtree_uuids walks a block tree as getBlock hands it back; it sits
-here, not in strictinsert, because api needs it for the editor gate and must
-not import the insert helpers. Nothing here talks to Logseq, so all of it
+stops. subtree_uuids and the preorder walks read a block tree as getBlock or
+getPageBlocksTree hands it back; they sit here, not in strictinsert, because
+api needs them for the editor gate and the batch proof and must not import
+the insert helpers. Nothing here talks to Logseq, so all of it
 is tested without a mock; the layering tests keep it that way (ADR 0003).
 """
 
@@ -42,6 +43,35 @@ def collect_child_uuids(node) -> list:
 def subtree_uuids(block: dict) -> list:
     """The block's own UUID and those of all its descendants."""
     return [block["uuid"], *collect_child_uuids(block)] if block.get("uuid") else []
+
+
+def preorder_blocks(blocks) -> list:
+    """``blocks`` and all their descendants, DFS pre-order, as getBlock's
+    ``children`` or getPageBlocksTree hand them back. A child given as a bare
+    uuid ref carries no content and is skipped, as in collect_child_uuids."""
+    out = []
+    for block in blocks or []:
+        if isinstance(block, dict):
+            out.append(block)
+            out.extend(preorder_blocks(block.get("children")))
+    return out
+
+
+def preorder_uuids(tree: list) -> list:
+    """The uuids of a page tree, DFS pre-order."""
+    return [b["uuid"] for b in preorder_blocks(tree) if b.get("uuid")]
+
+
+def page_blocks_by_uuid(tree: list) -> dict:
+    """``uuid -> (siblings, index, parent block or None)`` over a page tree."""
+    found = {}
+
+    def walk(blocks, parent):
+        for i, block in enumerate(blocks):
+            found[block["uuid"]] = (blocks, i, parent)
+            walk(block.get("children") or [], block)
+    walk(tree, None)
+    return found
 
 
 def bullet_lines(content: str, prefix: str) -> list:
