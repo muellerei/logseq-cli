@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
+import click
 import pytest
 
 from logseq_cli.cli import cli
@@ -17,6 +18,7 @@ from logseq_cli.outlinetext import (
 from logseq_cli.api import LogseqAPI, WriteNotVerified, _block_uuid_from_result
 from logseq_cli.strictinsert import (
     insert_block_tree_as_siblings,
+    insert_block_tree_batched,
     insert_block_tree_with_uuids,
 )
 
@@ -710,3 +712,29 @@ class TestTheStandInIsReported:
         error = _json.loads(r.stderr)
         assert (error["reason"], error["method"]) == ("logseq_error", "removeBlock")
         assert error["writes_landed"] == 2
+
+
+class TestAMissingParentSaysWhatLanded:
+    """The batch path checks its parent before it writes. That check can come
+    after writes of the same call: the journal or page created first, the
+    heading written, a parent block written by the per-block path whose
+    children then go as one batch. "Nothing was written" was said whatever
+    had landed; the count is the API's."""
+
+    TREE = [{"content": "a", "children": []}, {"content": "b", "children": []}]
+
+    def _refusal(self, landed):
+        api = MagicMock(writes_landed=landed)
+        api.get_block.return_value = None
+        with pytest.raises(click.ClickException) as caught:
+            insert_block_tree_batched(api, self.TREE, "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b")
+        api.insert_batch_block.assert_not_called()
+        return caught.value.message
+
+    def test_after_writes_that_landed(self):
+        message = self._refusal(2)
+        assert "2 earlier write(s) in this call landed and remain" in message
+        assert "Nothing was written" not in message
+
+    def test_before_any_write(self):
+        assert self._refusal(0).endswith("Nothing was written.")

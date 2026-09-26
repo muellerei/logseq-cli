@@ -195,6 +195,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own subtree past the refusal that names it. Logseq's uuids are lower
   case, and both checks compared the ids as typed. They are now taken in
   lower case, the move sent that way too.
+- A tree whose parent block Logseq did not find ended with "Nothing was
+  written." even when writes of the same call had landed before the
+  check: the page or journal created first, the heading, or the parent
+  block of a tree whose children then go as one batch. The message now
+  names the writes that landed, from the same count as every refusal.
 
 ### Changed
 
