@@ -510,6 +510,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
         note_quote_breaks(tree)
         if dry_run:
+            if child_of or after or before:
+                refuse_missing_anchor(api, clean_id, as_json)
             planned = count_blocks(tree)
             if as_json:
                 output({"position": position, "blocks": planned, "dry_run": True, **alias}, True)
@@ -581,6 +583,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
     note_quote_breaks(tree)
     if dry_run:
+        if not page:
+            refuse_missing_anchor(api, after or before or child_of, as_json)
         planned = count_blocks(tree)
         target = page or (f"after {after[:8]}..." if after else
                           f"before {before[:8]}..." if before else
@@ -655,6 +659,22 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         click.echo(f"  {preview}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
+
+def refuse_missing_anchor(api, anchor, as_json):
+    """Refuse an insert-block preview whose anchor no block has.
+
+    The run finds out by writing: Logseq answers an insert at an unknown
+    uuid with null (write_not_verified), and a tree or a --keep-ids write
+    reads the anchor first. The preview writes nothing, so it asks here, and
+    does not promise an insert the run refuses (move-block's preview shares
+    check_move for the same reason). getBlock finds a uuid in capitals too.
+    """
+    uuid = anchor.strip().replace("((", "").replace("))", "").lower()
+    if not api.get_block(uuid, include_children=False):
+        fail(f"Cannot insert: block {uuid[:8]}... not found (the uuid does not "
+             "exist, or its page is not loaded). Nothing was written.",
+             as_json=as_json, reason="block_not_found", id=uuid)
+
 
 @cli.command("add-block-ref", epilog="""\b
 Examples:
