@@ -48,7 +48,7 @@ class Write:
     ``_prove_<proof>`` methods the central write dispatches on (spec 030).
     Names rather than descriptions: a label nothing acts on can disagree
     with the code. ``None`` until those methods exist: ``proof`` for every
-    write so far (030-C*), ``editor`` for insertBatchBlock (030-B4).
+    write so far (030-C*).
 
     ``editor`` says when a block open in Logseq's editor refuses the write,
     given the open block and the write's target:
@@ -61,6 +61,10 @@ class Write:
     * ``page``: the open block is on the target page;
     * ``page_or_link``: ... or refers to it (Logseq rewrites the link on a
       rename, and the open editor would save the old text back);
+    * ``any``: any block is open. insertBatchBlock opens its last block in
+      the editor once the page is on screen, with no option against it
+      (editor.cljs:1998, M16): the cursor would leave the block being typed
+      in (E2);
     * ``never``: an insert. Logseq saves the open block before it inserts
       (M10), so it neither asks nor refuses.
     """
@@ -101,7 +105,7 @@ _METHODS = {
     "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
     "logseq.Editor.upsertBlockProperty": Write(editor="target", proof=None),
     "logseq.Editor.removeBlockProperty": Write(editor="target", proof=None),
-    "logseq.Editor.insertBatchBlock": Write(editor=None, proof=None),
+    "logseq.Editor.insertBatchBlock": Write(editor="any", proof=None),
     "logseq.Editor.moveBlock": Write(editor="subtree", proof=None),
     "logseq.Editor.setBlocksId": Write(editor="requested", proof=None),
     "logseq.Editor.checkEditing": UI(),
@@ -217,8 +221,26 @@ _UNSET = object()
 # checkEditing's answer when a block is open: its uuid (M8).
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 
+# The reasons EditorOpen gives. A write into the open block loses what is
+# typed there; a batch beside it only moves the cursor, since Logseq saves
+# the open block before it inserts (M10).
+DISCARDS_TYPING = "writing now would discard what is being typed there"
+MOVES_CURSOR = "a batch insert would move the cursor out of the block being edited"
+
+# How often LogseqAPI asks after a batch whether Logseq opened a block.
+_BATCH_EDITOR_POLL_S = 0.01
+
 
 class LogseqAPI:
+    # After a batch, how long to watch for the block Logseq opens in its
+    # editor: it opened 16–34 ms after the answer (M16), so 100 ms, counted
+    # as ten naps of 10 ms; the checkEditing requests between them come on
+    # top. A page not on screen opens nothing, and the window runs full for
+    # each multi-block write. Attributes, so that tests need not wait:
+    # conftest sets the window to 0, a test of the window replaces _sleep.
+    batch_editor_wait_s = 0.1
+    _sleep = staticmethod(time.sleep)
+
     def __init__(self, host=None, port=None, token=None):
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
         port_source = "--port" if port else "LOGSEQ_PORT"
@@ -400,9 +422,13 @@ class LogseqAPI:
             answer=answer,
         )
 
+    def exit_editing_mode(self):
+        """Close Logseq's editor, saving the open block (M10). Answers null."""
+        return self.call("logseq.Editor.exitEditingMode")
+
     # The editor rules of _METHODS, one per ``Write.editor`` name. Each gets
     # the open block's uuid (lower case) and the write's target, and refuses
-    # through _refuse_open. Only called when a block is open, so the reads
+    # through refuse_open. Only called when a block is open, so the reads
     # that place it cost nothing while nobody types.
     def _gate_never(self, editing, target):
         """Inserts; _write does not call it (``never`` asks nothing)."""
@@ -412,18 +438,21 @@ class LogseqAPI:
         # typed, checkEditing answers in lower case, and compared as typed
         # the write went past the gate (M8).
         if editing == uuid.lower():
-            self._refuse_open(editing)
+            self.refuse_open(editing)
 
     def _gate_subtree(self, editing, uuid):
         if editing == uuid.lower():
-            self._refuse_open(editing)
+            self.refuse_open(editing)
         block = self.get_block(uuid, include_children=True)
         if block and editing in {u.lower() for u in subtree_uuids(block)}:
-            self._refuse_open(editing)
+            self.refuse_open(editing)
 
     def _gate_requested(self, editing, uuids):
         if editing in {u.lower() for u in uuids}:
-            self._refuse_open(editing)
+            self.refuse_open(editing)
+
+    def _gate_any(self, editing, target):
+        self.refuse_open(editing, why=MOVES_CURSOR)
 
     def _gate_page(self, editing, page_name):
         self._gate_page_or_link(editing, page_name, links=False)
@@ -440,10 +469,13 @@ class LogseqAPI:
         if links:
             ids |= {r.get("id") for r in open_block.get("refs") or [] if isinstance(r, dict)}
         if page["id"] in ids:
-            self._refuse_open(editing, open_block)
+            self.refuse_open(editing, open_block)
 
-    def _refuse_open(self, editing, open_block=None):
-        """Raise EditorOpen for the open block, naming its page."""
+    def refuse_open(self, editing, open_block=None, *, why=DISCARDS_TYPING):
+        """Raise EditorOpen for the open block, naming its page.
+
+        Public for strictinsert, which refuses a --keep-ids write before its
+        first write (E2) with its own ``why``."""
         if open_block is None:
             open_block = self.get_block(editing, include_children=False)
         page_id = ((open_block or {}).get("page") or {}).get("id")
@@ -451,8 +483,8 @@ class LogseqAPI:
         page_name = page.get("originalName") or page.get("name") if isinstance(page, dict) else None
         on = f" on '{page_name}'" if page_name else ""
         raise EditorOpen(
-            f"Block {editing}{on} is open in Logseq's editor; writing now would "
-            "discard what is being typed there. Leave the block, then retry.",
+            f"Block {editing}{on} is open in Logseq's editor; {why}. "
+            "Leave the block, then retry.",
             block=editing, page=page_name,
         )
 
@@ -541,10 +573,32 @@ class LogseqAPI:
         if not (options or {}).get("keepUUID"):
             refuse_id_lines_tree(batch)
         texts = list(tree_texts(batch))
-        return self._write(
+        result = self._write(
             "logseq.Editor.insertBatchBlock", [block_uuid, batch, options or {}],
             target=block_uuid, texts=texts, count=len(texts),
         )
+        self._close_editor_the_batch_opened()
+        return result
+
+    def _close_editor_the_batch_opened(self):
+        """Leave the block the batch just opened in Logseq's editor, if it did.
+
+        The gate (``any``) let the batch through only with no block open, so a
+        block open now is the batch's (E2). Left open, it would refuse the
+        agent's next write to it with open_in_editor. Here rather than in
+        strictinsert, so it holds for every batch, --keep-ids included, and
+        needs none of the new uuids. Logseq opens it asynchronously (M16), so
+        it is asked again every 10 ms within ``batch_editor_wait_s``.
+        Someone entering a block in that window has it closed; Logseq saves on
+        leaving (M10), nothing is lost.
+        """
+        polls = round(self.batch_editor_wait_s / _BATCH_EDITOR_POLL_S)
+        for poll in range(polls + 1):
+            if self.check_editing() is not None:
+                self.exit_editing_mode()
+                return
+            if poll < polls:
+                self._sleep(_BATCH_EDITOR_POLL_S)
 
     def move_block(self, src_uuid: str, target_uuid: str, options: dict = None):
         """Move a block (with its children) next to / under ``target_uuid``.

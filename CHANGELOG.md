@@ -40,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into the agent's block and whatever you typed next landed there (measured,
   0.10.15). Every `insertBlock` and `appendBlockInPage` now goes with
   `focus: false`, and the cursor stays where it was.
+- A write of several blocks at once no longer leaves the last of them open
+  in Logseq's editor, and no longer pulls your cursor out of the block you
+  are typing in. `insertBatchBlock` opens its last block once the page is on
+  screen, with no option against it (`editor.cljs:1998`; measured, 0.10.15:
+  16–34 ms after it answered). With nobody typing, the agent locked itself
+  out: its next write to its own block ended in `open_in_editor`. The CLI
+  now watches for that block for up to 100 ms after each batch and closes
+  the editor once it shows. On a page that is not on screen nothing opens
+  and the window runs full, 100 ms for each multi-block write. While a block
+  is open, a tree goes block by block with `focus: false` instead, and a
+  write with `--keep-ids`, which only the batch can do (#31), is refused
+  with `reason: "open_in_editor"` before anything is written. Someone who
+  enters a block within those 100 ms has it closed; Logseq saves a block
+  when its editor is left (`lifecycle.cljs:35`, read in the code, not
+  measured for this case).
 - A page or journal the CLI creates no longer turns Logseq's view to it.
   `createPage` without options redirects the view to the new page (measured,
   0.10.15); the CLI now sends `redirect: false`.

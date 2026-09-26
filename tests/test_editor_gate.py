@@ -380,7 +380,6 @@ MULTI_BLOCK = ["insert-block", "--child-of", "@parent block", "--content", "new 
 KEEP_IDS = ["insert-block", "--after", "@alpha block", "--content", "new one", "--keep-ids"]
 
 
-@_spec("030-B4")
 def test_batch_goes_block_by_block_while_editing(monkeypatch):
     # insertBatchBlock opens its last block in the editor (editor.cljs:1998,
     # M16); with someone typing, the tree goes block by block, focus: false.
@@ -395,7 +394,6 @@ def test_batch_goes_block_by_block_while_editing(monkeypatch):
     assert graph.editing == graph.uuid_of("other block")
 
 
-@_spec("030-B4")
 def test_keep_ids_refused_while_editing(monkeypatch):
     # A kept id can only go through the batch (#31), which would move the cursor.
     graph = _graph().install(monkeypatch)
@@ -406,7 +404,6 @@ def test_keep_ids_refused_while_editing(monkeypatch):
     assert graph.writes() == []
 
 
-@_spec("030-B4")
 @pytest.mark.parametrize("args", [MULTI_BLOCK, KEEP_IDS], ids=["multi-block", "keep-ids"])
 def test_exit_editing_mode_after_batch_when_nobody_typed(monkeypatch, args):
     # Nobody typed, the page is on screen: the batch opens its last block,
@@ -420,10 +417,65 @@ def test_exit_editing_mode_after_batch_when_nobody_typed(monkeypatch, args):
     assert graph.editing is None
 
 
-@_spec("030-B4")
 def test_insert_batch_block_refuses_while_editing(double, api):
     # The method refuses on its own, so no caller can set off the jump.
     anchor = _uuid(double, "anchor block")
     _assert_refused(double, lambda: api.insert_batch_block(
         anchor, [{"content": "x"}, {"content": "y"}], {"sibling": True}),
         _uuid(double, "unrelated block"))
+
+
+def test_keep_ids_refusal_names_the_cursor(monkeypatch):
+    # Inserting saves the open block first (M10): nothing typed is lost, the
+    # cursor would move. The message says that, not "would discard".
+    graph = _graph().install(monkeypatch)
+    graph.editing = graph.uuid_of("other block")
+    r = _invoke(graph, KEEP_IDS)
+    error = _error_object(r)
+    assert "move the cursor out of the block being edited" in error["error"]
+    assert "discard" not in error["error"]
+    assert error["block"] == graph.uuid_of("other block")
+    assert error["page"] == "Other Page"
+
+
+def test_keep_ids_refused_before_the_page_is_made(monkeypatch):
+    # page_end on a missing page creates it first; the refusal comes before.
+    graph = _graph().install(monkeypatch)
+    graph.editing = graph.uuid_of("other block")
+    r = _invoke(graph, ["insert-block", "--page", "Fresh Page", "--content", "x",
+                        "--keep-ids"])
+    assert r.exit_code == 1
+    assert _error_object(r)["reason"] == "open_in_editor"
+    assert graph.writes() == []
+
+
+def _batch(api, double):
+    api.insert_batch_block(_uuid(double, "anchor block"),
+                           [{"content": "x"}, {"content": "y"}], {"sibling": True})
+
+
+def test_batch_waits_for_the_editor_logseq_opens_late(monkeypatch, double, api):
+    # M16: Logseq opens the block 16–34 ms after it answered the batch. The
+    # method asks again every 10 ms, up to 100 ms, and closes it once it shows.
+    naps = []
+    monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0.1)
+    monkeypatch.setattr(api, "_sleep", naps.append)
+    double.show_page("Probe Page")
+    double.batch_opens_after_checks = 3
+    _batch(api, double)
+    assert len(double.sent("exitEditingMode")) == 1
+    assert double.editing is None
+    assert naps == [0.01] * 3
+
+
+def test_batch_window_runs_full_when_nothing_opens(monkeypatch, double, api):
+    # The page is not on screen (the usual agent case): nothing opens, the
+    # window runs its 100 ms, and nothing is closed.
+    naps = []
+    monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0.1)
+    monkeypatch.setattr(api, "_sleep", naps.append)
+    _batch(api, double)
+    assert double.sent("exitEditingMode") == []
+    assert len(naps) == 10 and sum(naps) == pytest.approx(0.1)
+    # One question before the batch (the gate), eleven after it.
+    assert len(double.sent("checkEditing")) == 12

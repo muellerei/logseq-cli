@@ -35,6 +35,18 @@ class _TextResponse:
             raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
 
 
+@pytest.fixture(autouse=True)
+def no_batch_editor_wait(monkeypatch):
+    """Ask checkEditing once after a batch, without waiting.
+
+    LogseqAPI waits up to 100 ms after each insertBatchBlock for the block
+    Logseq opens in its editor (M16). The doubles open it at once, so the
+    wait would only slow the suite. Tests of the wait set it themselves.
+    """
+    from logseq_cli.api import LogseqAPI
+    monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0)
+
+
 @pytest.fixture
 def real_host_calls():
     """Requests ``block_real_hosts`` refused in this test.
@@ -180,6 +192,10 @@ class FakeGraph:
         return made
 
     # --- API surface -----------------------------------------------------
+    def check_editing(self):
+        # Nobody types in a fake: its batches go through.
+        return None
+
     def insert_batch_block(self, anchor, batch, options=None):
         self.batch_calls.append((anchor, batch, options))
         opts = options or {}
@@ -510,6 +526,10 @@ class PageGraph:
             lines = [ln for ln in siblings[i]["content"].split("\n")
                      if not re.match(rf"[ \t]*{re.escape(key)}:: ", ln)]
             siblings[i]["content"] = "\n".join([*filter(None, lines), f"{key}:: {value}"])
+        return None
+
+    def check_editing(self):
+        # Nobody types in a fake: its batches go through.
         return None
 
     def insert_batch_block(self, anchor, batch, options=None):

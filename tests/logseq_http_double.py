@@ -25,6 +25,10 @@ Switches, all on the instance:
   ``json``, ``empty``, ``error``, ``ok1``, ``timeout`` for the gate's
   fail-closed cases).
 * ``show_page(name)``: the page is on screen, so an insert opens a block.
+* ``batch_opens_after_checks``: after a batch on a visible page, how many
+  ``checkEditing`` requests still answer ``false`` before the opened block
+  shows. Logseq opens it asynchronously, 16–34 ms after answering (M16);
+  0, the default, opens it at once.
 * ``time_tracking``: Logseq's time tracking, off as in the measured graph.
 
 Every request is recorded in ``requests`` as ``(method, args)``.
@@ -280,6 +284,8 @@ class LogseqHttpDouble:
         self.check_editing_form = "raw"
         self.time_tracking = False
         self._visible = set()       # page ids on screen
+        self.batch_opens_after_checks = 0
+        self._opening = None        # [uuid, checks left] of a batch's block
         self._modes = {}            # method -> (mode, from_call)
         self._calls = {}            # method -> write calls counted so far
         self._next_id = 100
@@ -558,6 +564,13 @@ class LogseqHttpDouble:
             return self._answer({"error": "checkEditing failed"})
         if form == "ok1":
             return self._answer({"ok": 1})
+        if self._opening is not None:
+            uuid, left = self._opening
+            if left:
+                self._opening[1] -= 1
+            else:
+                self._opening = None
+                self.editing = uuid
         if self.editing is None:
             return Response("false")
         return Response(json.dumps(self.editing) if form == "json" else self.editing)
@@ -883,7 +896,10 @@ class LogseqHttpDouble:
         for node in made:
             self._index(node)
         if made and page["id"] in self._visible:
-            self.editing = made[-1]["uuid"]
+            if self.batch_opens_after_checks:
+                self._opening = [made[-1]["uuid"], self.batch_opens_after_checks]
+            else:
+                self.editing = made[-1]["uuid"]
         return None
 
     def _track_time(self, old, new):
