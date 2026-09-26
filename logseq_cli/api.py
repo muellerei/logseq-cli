@@ -970,13 +970,25 @@ class LogseqAPI:
         """
         self._first_write_refuses_open = why
 
+    def page_name_of(self, block) -> str:
+        """The name of the page ``block`` (as getBlock answers it) is on, or "".
+
+        Asked without children, getBlock answers the page as ``{id}`` alone,
+        and with its name only when asked with them, which reads the block's
+        whole subtree (measured, 0.10.15). getPage takes the id (measured);
+        with the read cache on, as by default, a page is read once.
+        """
+        page_id = ((block or {}).get("page") or {}).get("id")
+        page = self.get_page(page_id) if page_id is not None else None
+        if not isinstance(page, dict):
+            return ""
+        return page.get("originalName") or page.get("name") or ""
+
     def refuse_open(self, editing, open_block=None, *, why=DISCARDS_TYPING):
         """Raise EditorOpen for the open block, naming its page."""
         if open_block is None:
             open_block = self.get_block(editing, include_children=False)
-        page_id = ((open_block or {}).get("page") or {}).get("id")
-        page = self.get_page(page_id) if page_id is not None else None
-        page_name = page.get("originalName") or page.get("name") if isinstance(page, dict) else None
+        page_name = self.page_name_of(open_block) or None
         on = f" on '{page_name}'" if page_name else ""
         raise EditorOpen(
             f"Block {editing}{on} is open in Logseq's editor; {why}. "
@@ -990,7 +1002,8 @@ class LogseqAPI:
     def get_page_blocks_tree(self, page_name: str):
         return self.call("logseq.Editor.getPageBlocksTree", [page_name])
 
-    def get_page(self, page_name: str, *, cached: bool = True):
+    def get_page(self, page_name, *, cached: bool = True):
+        """The page by its name, or by its db id as a number (measured, 0.10.15)."""
         return self.call("logseq.Editor.getPage", [page_name], cached=cached)
 
     def get_block(self, block_id: str, include_children: bool = True, *, cached: bool = True):

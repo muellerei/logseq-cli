@@ -15,11 +15,12 @@ LIVE = "8f2a3b4c-5d6e-4f70-8a9b-0c1d2e3f4a81"
 def test_resolve_refs_reads_a_ref_in_capitals():
     api = MagicMock()
     api.get_page.return_value = {"name": "page"}
+    api.page_name_of.return_value = "Source"
     api.get_page_linked_references.return_value = []
     api.get_page_blocks_tree.return_value = [
         {"uuid": "b1", "content": f"see (({LIVE.upper()}))", "children": []}]
     api.get_block.side_effect = lambda uuid, include_children=True: (
-        {"uuid": LIVE, "content": "the live one", "page": {"originalName": "Source"}}
+        {"uuid": LIVE, "content": "the live one", "page": {"id": 7}}
         if uuid.lower() == LIVE else None)
     with patch("logseq_cli.group.LogseqAPI", return_value=api):
         result = split_runner().invoke(cli, ["get-page", "--page", "Page", "--resolve-refs"])

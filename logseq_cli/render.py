@@ -32,10 +32,7 @@ def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
     block = api.get_block(uuid, include_children=False)
     if block:
         ref_content = (block.get("content") or "").strip()
-        page_info = block.get("page") or {}
-        page_name = ""
-        if isinstance(page_info, dict):
-            page_name = page_info.get("originalName") or page_info.get("name") or ""
+        page_name = api.page_name_of(block)
         source = f" ↳ {page_name}" if page_name else ""
         return f"{ref_content}{source}"
     if dead is not None and uuid not in dead:

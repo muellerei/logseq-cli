@@ -247,7 +247,8 @@ class TestMaxCharsOnGetPage:
         api = MagicMock()
         api.get_page.return_value = {"name": "p"}
         api.get_page_blocks_tree.return_value = tree
-        api.get_block.return_value = {"content": "z" * 200, "page": {"originalName": "Q"}}
+        api.get_block.return_value = {"content": "z" * 200, "page": {"id": 7}}
+        api.page_name_of.return_value = "Q"
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(cli, [
                 "get-page", "--name", "p", "--no-backlinks", "--resolve-refs",
