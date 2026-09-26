@@ -218,6 +218,7 @@ Date formatting is locale-independent — weekday and month names are always Eng
 See `examples/` directory:
 
 - `backup-graph.sh` - Export all pages as a JSON backup
+- `carry-todos-to-today.sh` - Carry open tasks older than N days into today's journal as `((block-refs))`; dry run unless `--write` (suitable for a morning cronjob)
 - `carried-over-todos.sh` - Tasks standing in the last N days, longest-carried first (uses `references` to show how long each has been taken along)
 - `daily-todos.sh` - Daily TODO overview (suitable for cronjob)
 - `export-all-pages.sh` - Export all pages as individual JSON files
