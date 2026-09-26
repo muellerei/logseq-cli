@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-26
+
 Every write is now proven, and none overwrites a block you are editing.
 Logseq's HTTP API answers `null` to a write whether it happened or not, and
 reports a thrown error as HTTP 200; measured on 0.10.15, a write to the
