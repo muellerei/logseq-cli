@@ -231,3 +231,21 @@ def page_to_write(api, name: str) -> PageToWrite:
         return PageToWrite(name, name, page)
     created = page_name_to_create(api, name)
     return PageToWrite(name, created, api.get_page(created) if created != name else page)
+
+
+def resolve_page_to_write(api, name: str) -> tuple:
+    """``(PageRef, PageToWrite)`` for a write to the page ``name`` means.
+
+    In this order: first the page Logseq takes ``name`` for
+    (:func:`page_to_write`), then the alias that page may be. The other way
+    round, ``[[X]]``, ``#X`` or `` X `` for an alias X was looked up as a
+    page of its own, found none, and was cleaned to X only when the write
+    came: the text landed on the alias's stub, which Logseq does not show
+    under X, and every step called it written. The ref keeps ``name`` as
+    asked, for the output.
+    """
+    target = page_to_write(api, name)
+    ref = resolve_page(api, target.name)
+    if not ref.redirected:
+        return PageRef(name, target.name), target
+    return PageRef(name, ref.page, redirected=True), page_to_write(api, ref.page)

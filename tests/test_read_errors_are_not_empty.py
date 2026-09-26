@@ -157,8 +157,9 @@ def _resolved(name):
 def test_note_content_does_not_create_a_page_it_failed_to_look_up():
     api = _api("Beta")
     api.get_page.side_effect = requests.ConnectionError("connection dropped")
-    with _resolved("pages"):
-        result = _run(api, "add-note-content", "--page", "Alpha", "--content", "x", "--create")
+    # The read under test is the first: the page is looked up before any
+    # alias is resolved (pagenames.resolve_page_to_write).
+    result = _run(api, "add-note-content", "--page", "Alpha", "--content", "x", "--create")
     assert result.exit_code != 0
     api.create_page.assert_not_called()
 

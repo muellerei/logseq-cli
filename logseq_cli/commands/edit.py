@@ -40,8 +40,15 @@ from logseq_cli.outlinetext import (
     parse_hierarchical_content,
     subtree_uuids,
 )
-from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
-from logseq_cli.pagenames import PageToWrite, journal_page_name, page_to_write
+from logseq_cli.output import (
+    fail,
+    follow_page,
+    follow_page_to_write,
+    handle_connection_error,
+    output,
+    uuid_fields,
+)
+from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
     append_in_page,
     check_move,
@@ -428,11 +435,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     alias = {}
     target = None
     if page and not (after or before or child_of):
-        ref = follow_page(api, page, as_json)
-        alias = {"alias_of": ref.page} if ref.redirected else {}
         # A missing page is written under the name Logseq creates it with: a
         # journal title in another format is the journal (measured).
-        target = page_to_write(api, ref.page)
+        ref, target = follow_page_to_write(api, page, as_json)
+        alias = {"alias_of": ref.page} if ref.redirected else {}
         page = target.name
 
     # --tree-file is --tree from a file; resolve it before any other validation
@@ -725,11 +731,10 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     # journal named by its date has no alias to follow.
     names = {}
     if page:
-        ref = follow_page(api, page, as_json)
-        names = ref.fields()
         # A missing page under the name Logseq creates it with, as for
         # insert-block --page.
-        target = page_to_write(api, ref.page)
+        ref, target = follow_page_to_write(api, page, as_json)
+        names = ref.fields()
     else:
         d = parse_date_keyword(journal_date)
         name = journal_page_name(api, d)
@@ -823,11 +828,10 @@ Note:
 def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
-    ref = follow_page(api, to_page, as_json)
-    names = ref.fields("to_page")
     # A missing page under the name Logseq creates it with, as for
     # insert-block --page.
-    target = page_to_write(api, ref.page)
+    ref, target = follow_page_to_write(api, to_page, as_json)
+    names = ref.fields("to_page")
     to_page = target.name
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)

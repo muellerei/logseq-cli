@@ -20,6 +20,7 @@ from logseq_cli.cli import cli
 from logseq_cli.pagenames import (AmbiguousAliasError, PageRef, alias_sources,
                                   empty_or_placeholder, resolve_page)
 from tests.conftest import PageGraph, page_graph_api, split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 ALIAS = "zz-al"
 TARGET = "Target"
@@ -324,3 +325,30 @@ def test_ambiguous_alias_refuses_a_write():
     assert error["ambiguous"] == ["Other", TARGET]
     api.append_block_in_page.assert_not_called()
     api.insert_batch_block.assert_not_called()
+
+
+# The name Logseq makes of the one given, resolved as an alias only after:
+# "[[Alias]]" read as a page of its own found nothing, was then cleaned to
+# Alias, and the write landed on the alias's stub with exit 0.
+WRITES_TO_A_NAME = {
+    "add-note-content": ["add-note-content", "--page", "NAME", "--content", "hello"],
+    "insert-block": ["insert-block", "--page", "NAME", "--content", "hello"],
+    "insert-block keep-ids": ["insert-block", "--page", "NAME", "--content", "hello",
+                              "--keep-ids"],
+    "add-block-ref": ["add-block-ref", "--source-id", "SOURCE", "--page", "NAME"],
+    "copy-block": ["copy-block", "--id", "SOURCE", "--to-page", "NAME"],
+}
+
+
+@pytest.mark.parametrize("name", ["[[Alias]]", "#Alias", " Alias "])
+@pytest.mark.parametrize("args", WRITES_TO_A_NAME.values(), ids=WRITES_TO_A_NAME.keys())
+def test_a_name_logseq_cleans_to_an_alias_writes_to_its_page(monkeypatch, args, name):
+    double = LogseqHttpDouble.installed(
+        monkeypatch, {"Source Page": ["alias:: Alias", "body"], "Other": ["the source"]})
+    args = [a.replace("SOURCE", double.uuid_of("the source")).replace("NAME", name)
+            for a in args]
+    result = split_runner().invoke(cli, ["--token", "t", *args, "--json"])
+    assert result.exit_code == 0, result.stderr
+    assert double.tree("Alias") == []
+    assert len(double.tree("Source Page")) == 3
+    assert json.loads(result.stdout)["alias_of"] == "Source Page"

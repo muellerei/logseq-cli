@@ -222,7 +222,9 @@ of about 0.1 s after a multi-block insert.
   and every `--keep-ids` write to the end of a page now use the name
   Logseq creates, worked out once from the name given, for the check for a
   page that exists, `--dry-run`, the write and the output, and write into
-  a journal of that name that exists. `createPage` itself is sent the name
+  a journal of that name that exists. An alias is followed from that name,
+  not from the one given: `--page "[[X]]"`, `#X` or ` X ` for an alias X
+  writes to X's page, as `--page X` does. `createPage` itself is sent the name
   as given, which Logseq cleans into that name; a journal title goes in
   the graph's format. Under `--json`, `add-note-content` names that page in
   `position`, in the run as in its preview; `page` stays the name asked
