@@ -165,7 +165,11 @@ of about 0.1 s after a multi-block insert.
   its stored value, without surrounding spaces, which Logseq's parser
   trims; a removed property by its absence, under the key as Logseq's
   parser stores it and as sent (a key the parser would drop is removed as
-  given, and the database may hold it so). A block that does not exist
+  given, and the database may hold it so), and under any spelling of it:
+  a key an earlier version or another client stored as given, `Status`
+  say, stays when `status` is removed (Logseq removes the keyword it is
+  sent; `editor/property.cljs` `remove-block-property!`, 0.10.15, read in
+  the code), and `remove-property --key Status` reported it removed. A block that does not exist
   fails the check: it holds no key, which would otherwise read as removed.
   `set-property`, which checks that the page shows the value, now fails
   with `reason: "write_not_verified"` too.
