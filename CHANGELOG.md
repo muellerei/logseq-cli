@@ -222,6 +222,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the heading is removed, for every writer that removes it, including
   `add-journal-entry`, and answers like an empty `--content`, in the run and
   under `--dry-run`.
+- `insert-block --page`, `add-block-ref --page` and `copy-block --to-page`
+  on a page that does not exist no longer leave an empty block at its top.
+  `appendBlockInPage` created the page itself, with an empty block before
+  the one written (measured). They now create the page first with
+  `createFirstBlock: false`, as `add-note-content` does, under the name
+  Logseq creates it with, so a journal title in another format writes to
+  the journal. `add-block-ref --page --dry-run` now reports
+  `would_create_page: true` for such a page. A `--keep-ids` write creates
+  the page as before, after the check for a block open in the editor.
 
 ### Changed
 
