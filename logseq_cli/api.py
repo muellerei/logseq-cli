@@ -444,7 +444,8 @@ class LogseqAPI:
         self.writes_landed = 0
         # The write sent and not yet proven, by its short name: a connection
         # that fails before the proof holds leaves it unknown, and the error
-        # handler names it beside writes_landed. None between writes.
+        # handler names it beside writes_landed. None between writes, unless
+        # one was left in doubt and the call went on writing (_write).
         self.write_unproven = None
         # Why the call's first write is refused while any block is open
         # (refuse_open_before_first_write); None once it is sent, or when
@@ -567,7 +568,7 @@ class LogseqAPI:
            method returns; ``proof_args`` are what it compares with beyond
            the target (a batch: what it sent, and its place as read before).
            From the write until the proof holds or refuses, the write is
-           ``write_unproven``;
+           ``write_unproven``, unless an earlier write of the call still is;
         7. ``count`` more writes landed (a batch counts its blocks; the
            removal of a block written earlier in the call takes one back):
            after the proof, so a write that fails it does not count. A batch that
@@ -601,16 +602,21 @@ class LogseqAPI:
         # answer: it is the write into them, and the first write of all.
         if wanted:
             self.set_blocks_id(wanted, editing=editing)
-        self.write_unproven = method.rsplit(".", 1)[-1]
+        # A write of this call already in doubt stays so, and is the one
+        # named: a failed batch left in doubt was followed by the removal of
+        # its stand-in (strictinsert), which landed and cleared it, and a
+        # retry wrote the batch twice.
+        earlier = self.write_unproven
+        self.write_unproven = earlier or method.rsplit(".", 1)[-1]
         try:
             result = self.call(method, args)
             result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
                                                             **(proof_args or {}))
         except WriteRefused:
-            # Refused or not shown: the refusal says so, nothing is in doubt.
-            self.write_unproven = None
+            # Refused or not shown: the refusal says so, this write is not in doubt.
+            self.write_unproven = earlier
             raise
-        self.write_unproven = None
+        self.write_unproven = earlier
         self.writes_landed += count
         return result
 

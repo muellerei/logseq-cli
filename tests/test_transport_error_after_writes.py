@@ -126,3 +126,28 @@ def test_a_failure_before_any_write_is_reported_as_before(monkeypatch):
     error = json.loads(r.stderr)
     assert error == {"error": "Logseq did not answer in time.", "reason": "timeout"}
     assert double.writes() == []
+
+
+@pytest.mark.parametrize("reason", sorted(FAILURES))
+def test_a_later_write_leaves_the_batch_in_doubt(monkeypatch, reason):
+    # --keep-ids on an empty page anchors the batch on an empty stand-in and
+    # removes it when the batch fails. That removal went through the same
+    # bookkeeping and landed, so it cleared the batch it followed: the
+    # error named no write in doubt, and a retry wrote the text twice.
+    double = LogseqHttpDouble.installed(monkeypatch, {"Empty Page": []})
+    real = double._handlers["logseq.Editor.insertBatchBlock"]
+
+    def landed_without_answer(args):
+        real(args)
+        raise FAILURES[reason]
+    monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock",
+                        landed_without_answer)
+    r = split_runner().invoke(cli, ["--token", "t", "add-note-content", "--page",
+                                    "Empty Page", "--keep-ids", "--content", "one line",
+                                    "--json"])
+    assert r.exit_code == 1
+    error = json.loads(r.stderr)
+    assert error["reason"] == reason
+    assert (error["writes_landed"], error["unproven_write"]) == (0, "insertBatchBlock")
+    assert "Whether insertBatchBlock landed is not known." in error["error"]
+    assert double.tree("Empty Page") == [("one line", [])]

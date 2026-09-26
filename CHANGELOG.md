@@ -297,7 +297,9 @@ of about 0.1 s after a multi-block insert.
   connection after writes of the call landed (`connection_refused`,
   `timeout`, `bad_response`, `http_error`) names them the same way, and a
   write sent and not yet proven when it came as `unproven_write`: it may
-  have landed. Before the first write these errors read as they did. Exit
+  have landed. A write in doubt stays named when the call writes on after
+  it, as `--keep-ids` does to remove the empty block it wrote to anchor a
+  batch on an empty page. Before the first write these errors read as they did. Exit
   status stays 1. Checks of the input before the first write are unchanged: an
   anchor that does not exist for `--tree` or `--keep-ids` still fails with
   an `Error:` line, and `update-block` on an id no block has with an error
