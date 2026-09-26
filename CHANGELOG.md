@@ -82,9 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1 and `reason: "logseq_error"`, naming the `method` and Logseq's own text
   as `logseq_message`. An answer that carries a `uuid` is a block, as
   `get-block` already told them apart, and passes. Reads are unchanged.
-  `replace-text` stops at the block Logseq refused; the replacements before
-  it stay, counted in `writes_landed`. Before, it went on and listed the
-  block as `failed` with `reason: "write_not_verified"`.
+  `replace-text` goes on with the other blocks, as before, and lists the
+  refused one as `failed`, now with `logseq_error` as its reason in
+  `failed_reasons` (see below) instead of `write_not_verified`.
 - `rename-page` onto the name of another page no longer merges the two.
   Logseq answers `null` and moves the renamed page's blocks to the other
   page, the renamed page gone; to an empty name it answers `null` too and
@@ -114,6 +114,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --follow-refs` read a ref in capitals, `((8F2A…))`, as the ref it is to
   Logseq (measured, 0.10.15); they took lower case only and left it as a
   hole. One pattern now defines a Block Ref for every reader and writer.
+- `update-block`, `set-todo-status`, `set-block-property`,
+  `remove-property --id` and the `--property` option of `insert-block` and
+  `add-note-content` reported success for a write Logseq had not done.
+  `updateBlock`, `upsertBlockProperty` and `removeBlockProperty` answer
+  `null` whether they wrote or not, for a uuid no block has too (measured,
+  0.10.15). The three API methods now read the block back right after the
+  write and fail with `reason: "write_not_verified"`, naming `method`,
+  `expected` and `got`. An update is compared by its text, without the
+  whitespace Logseq trims at either end, a ref to the block itself, which
+  Logseq drops from its text (both measured, 0.10.15), `id::` lines and
+  `:LOGBOOK:` drawers, and
+  the properties it carries along by their stored values; a property by
+  its stored value, without surrounding spaces, which Logseq's parser
+  trims; a removed property by its absence. A block that does not exist
+  fails the check: it holds no key, which would otherwise read as removed.
+  `set-property`, which checks that the page shows the value, now fails
+  with `reason: "write_not_verified"` too.
+- `replace-text` counted a replacement that changed a task marker as not
+  written when Logseq's time tracking is on, its default: Logseq then
+  appends a `:LOGBOOK:` drawer or rewrites its last `CLOCK:` line
+  (upstream `editor.cljs:256-285`, `util/clock.cljs:75-93`; read in the
+  code, not measured, since time tracking is off in the measured graph),
+  and the text read back no longer equalled the text sent. The drawer is
+  now left out of the comparison on both sides.
 
 ### Changed
 
@@ -164,6 +188,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with "Move of … did not take effect" and no reason under `--json`. The
   check reads the block back where it was sent, as before, now in the API
   method.
+- `replace-text` names the reason of each block it did not write in
+  `failed_reasons` (`{id: reason}`), in its report and in the error object,
+  beside `failed`, which stays the list of ids, and `writes_landed`. The
+  error's `reason` is the blocks' common one, or `write_not_verified` when
+  they differ. A block open in Logseq's editor fails alone, and the other
+  replacements are written. The text report names the reason after "not
+  written".
 
 ## [0.15.0] - 2026-09-25
 

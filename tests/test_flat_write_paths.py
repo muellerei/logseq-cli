@@ -183,50 +183,54 @@ class TestCreatePageWithContent:
 
 
 class TestReplaceTextVerifiesByReading:
-    """updateBlock answers null either way, so the count must come from a read."""
+    """updateBlock answers null either way, so the count must come from a
+    read. update_block makes that read itself (spec 030); against the HTTP
+    double answering null and writing nothing, it raises, and replace-text
+    lists the block."""
 
-    def _api(self, after_content):
-        api = _dead_api()
-        api.get_page_blocks_tree.return_value = [
-            {"uuid": "b1", "content": "old here", "children": []}]
-        api.get_block.return_value = {"uuid": "b1", "content": after_content}
-        return api
+    def _double(self, monkeypatch):
+        double = LogseqHttpDouble()
+        double.add_page("P", ["old here"])
+        return double.install(monkeypatch)
 
-    def test_write_that_did_not_land_is_reported(self):
-        api = self._api("old here")  # unchanged: the update never took
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
+    def _unwritten(self, monkeypatch):
+        double = self._double(monkeypatch)
+        double.set_mode("updateBlock", "noop")
+        return double.uuid_of("old here")
+
+    def test_write_that_did_not_land_is_reported(self, monkeypatch):
+        self._unwritten(monkeypatch)
+        r = CliRunner().invoke(cli, [
+            "--token", "t", "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 1
-        assert "did not reach the graph" in r.output
+        assert "1 of 1 replacement(s) were not written or did not show in Logseq" in r.output
 
-    def test_write_that_did_not_land_fails_under_json_too(self):
+    def test_write_that_did_not_land_fails_under_json_too(self, monkeypatch):
         """--json exited 0 here, with the miss only in a `failed` field (#93)."""
-        api = self._api("old here")
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = split_runner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "old", "--replace", "new",
-                "--json"])
+        b1 = self._unwritten(monkeypatch)
+        r = split_runner().invoke(cli, [
+            "--token", "t", "replace-text", "--page", "P", "--find", "old", "--replace", "new",
+            "--json"])
         assert r.exit_code != 0
-        assert json.loads(r.stdout)["failed"] == ["b1"]
+        assert json.loads(r.stdout)["failed"] == [b1]
         error = json.loads(r.stderr)
         assert error["reason"] == "write_not_verified"
-        assert error["failed"] == ["b1"]
+        assert error["failed"] == [b1]
 
-    def test_write_that_landed_is_counted(self):
-        api = self._api("new here")
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
+    def test_write_that_landed_is_counted(self, monkeypatch):
+        double = self._double(monkeypatch)
+        r = CliRunner().invoke(cli, [
+            "--token", "t", "replace-text", "--page", "P", "--find", "old", "--replace", "new"])
         assert r.exit_code == 0, r.output
         assert "Replaced 1 block(s)" in r.output
+        assert double.tree("P") == [("new here", [])]
 
-    def test_dry_run_does_not_read_back_or_write(self):
-        api = self._api("old here")
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "old", "--replace", "new",
-                "--dry-run"])
+    def test_dry_run_does_not_read_back_or_write(self, monkeypatch):
+        double = self._double(monkeypatch)
+        r = CliRunner().invoke(cli, [
+            "--token", "t", "replace-text", "--page", "P", "--find", "old", "--replace", "new",
+            "--dry-run"])
         assert r.exit_code == 0, r.output
         assert "Would replace 1 block(s)" in r.output
-        api.update_block.assert_not_called()
+        assert double.writes() == []
+        assert "getBlock" not in [m.rsplit(".", 1)[-1] for m, _ in double.requests]

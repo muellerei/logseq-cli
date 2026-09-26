@@ -98,18 +98,32 @@ class TestTheApiRefusesAnUndecidedIdLine:
         api.insert_block(TARGET, f"x\nid:: {FOREIGN}\r")
         api.call.assert_called_once()
 
+    def _updated(self, text):
+        """An API whose Logseq holds ``text`` once written: the update is
+        read back as its proof (spec 030)."""
+        api = LogseqAPI(token="t")
+        api.call = MagicMock(return_value={"uuid": TARGET, "content": text})
+        return api
+
+    @staticmethod
+    def _updates_sent(api):
+        return [c.args for c in api.call.call_args_list
+                if c.args[0] == "logseq.Editor.updateBlock"]
+
     def test_an_update_may_carry_the_blocks_own_id(self):
         # What getBlock hands out, written back: the uuid stays (measured).
-        api = self._api()
-        api.update_block(TARGET, f"new\nid:: {TARGET.upper()}")
-        api.call.assert_called_once()
+        text = f"new\nid:: {TARGET.upper()}"
+        api = self._updated(text)
+        api.update_block(TARGET, text)
+        assert self._updates_sent(api) == [("logseq.Editor.updateBlock", [TARGET, text])]
 
     def test_an_update_may_keep_a_line_the_block_had(self):
         # A copy carries its source's line until the file is read again
         # (measured); replace-text and set-todo-status change another line.
-        api = self._api()
-        api.update_block(TARGET, f"DONE x\nid:: {FOREIGN}", replacing=f"TODO x\nid:: {FOREIGN}")
-        api.call.assert_called_once()
+        text = f"DONE x\nid:: {FOREIGN}"
+        api = self._updated(text)
+        api.update_block(TARGET, text, replacing=f"TODO x\nid:: {FOREIGN}")
+        assert self._updates_sent(api) == [("logseq.Editor.updateBlock", [TARGET, text])]
 
     def test_but_not_add_one(self):
         api = self._api()
