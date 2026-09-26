@@ -1,0 +1,94 @@
+"""Content that is nothing but the page's title heading is refused.
+
+The writers drop a ``# <page name>`` line from the content, since the page
+already shows its name. Content that was only that line was left empty after
+the removal, and the check for empty content had run before it: the value
+passed, and ``add-journal-block`` wrote an empty block with exit 0, while
+``add-note-content`` and ``add-journal-content`` reported "Added 0 block(s)"
+with exit 0, dropping any ``--property`` with a warning. The check now runs on
+the text as it is written, in the one function that removes the heading.
+"""
+import datetime
+
+import click
+import pytest
+
+from logseq_cli.cli import cli
+from logseq_cli.headings import strip_title_heading
+from logseq_cli.pagenames import journal_page_name
+from tests.conftest import fake_api, split_runner
+
+DAY = "2026-01-05"
+PAGE = "Reading List"
+
+
+def _api(monkeypatch):
+    api = fake_api(["u1", "u2"])
+    api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
+    api.get_page.return_value = {"name": PAGE.lower(), "originalName": PAGE, "uuid": "p1"}
+    monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
+    return api
+
+
+def _journal(api):
+    return journal_page_name(api, datetime.date.fromisoformat(DAY))
+
+
+def _nothing_written(api):
+    for method in ("insert_block", "insert_batch_block", "append_block_in_page",
+                   "create_page", "update_block", "upsert_block_property"):
+        getattr(api, method).assert_not_called()
+
+
+class TestStripTitleHeading:
+    def test_only_the_heading_is_refused(self):
+        with pytest.raises(click.BadParameter) as exc:
+            strip_title_heading("# Reading List\n", PAGE)
+        assert "only the page's title heading" in str(exc.value)
+
+    def test_heading_with_text_below_keeps_the_text(self):
+        assert strip_title_heading("# Reading List\nfirst entry", PAGE) == "first entry"
+
+    def test_empty_content_is_left_to_the_empty_check(self):
+        # "" is refused as "--content is empty" by require_content where the
+        # command checks it; this function only refuses what it emptied.
+        assert strip_title_heading("", PAGE) == ""
+
+
+class TestCommandsRefuse:
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_add_journal_block(self, monkeypatch, dry_run):
+        api = _api(monkeypatch)
+        args = ["--token", "t", "add-journal-block", "--date", DAY, "--top-level",
+                "--content", f"# {_journal(api)}"] + (["--dry-run"] if dry_run else [])
+        result = split_runner().invoke(cli, args)
+        assert result.exit_code != 0, result.stdout
+        assert "only the page's title heading" in result.stderr
+        _nothing_written(api)
+
+    def test_add_journal_content(self, monkeypatch):
+        api = _api(monkeypatch)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-content", "--date", DAY, "--top-level",
+            "--content", f"# {_journal(api)}"])
+        assert result.exit_code != 0, result.stdout
+        assert "only the page's title heading" in result.stderr
+        _nothing_written(api)
+
+    def test_add_journal_entry(self, monkeypatch):
+        api = _api(monkeypatch)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-entry", "--date", DAY,
+            "--content", f"# {_journal(api)}"])
+        assert result.exit_code != 0, result.stdout
+        assert "only the page's title heading" in result.stderr
+        _nothing_written(api)
+
+    def test_add_note_content_with_property(self, monkeypatch):
+        api = _api(monkeypatch)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-note-content", "--page", PAGE,
+            "--content", f"# {PAGE}", "--property", "status=open"])
+        assert result.exit_code != 0, result.stdout
+        assert "only the page's title heading" in result.stderr
+        _nothing_written(api)

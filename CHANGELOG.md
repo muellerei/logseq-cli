@@ -213,6 +213,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and otherwise they are printed after the result. `get-backlinks`, which
   dropped its fallback warning under `--json` for that reason, reports it
   the same way now. Without `--json` nothing changes.
+- Content that is nothing but the page's title heading (`# <page name>`)
+  is refused before anything is written. The heading is dropped since the
+  page shows its name, and the check for empty content ran before that:
+  `add-journal-block` wrote an empty block with exit 0, and
+  `add-note-content` and `add-journal-content` reported "Added 0 block(s)"
+  with exit 0, `--property` dropped with a warning. The check now sits
+  where the heading is removed, for every writer that removes it, including
+  `add-journal-entry`, and answers like an empty `--content`, in the run and
+  under `--dry-run`.
 
 ### Changed
 
