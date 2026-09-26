@@ -11,6 +11,7 @@ from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
 
 TARGET = "00000000-0000-4000-8000-0000000000a1"
+DEAD = "00000000-0000-4000-8000-0000000000d1"
 
 
 def _read(monkeypatch, target_text, ref_block, *args):
@@ -36,3 +37,15 @@ class TestTheResolvedPage:
         assert result.stdout.count("↳ Meeting Notes") == 2
         by_id = [a for a in double.sent("getPage") if isinstance(a[0], int)]
         assert len(by_id) == 1
+
+
+class TestADeadRef:
+    def test_a_placeholder_is_dead_not_resolved(self, monkeypatch):
+        """Logseq keeps a placeholder, ``id:: <uuid>`` without a page, for a
+        ref whose block does not exist (#70); it was inlined as text."""
+        result, double = _read(monkeypatch, "x", f"see (({DEAD}))")
+        assert DEAD in double.placeholders
+        assert result.exit_code == 0, result.stderr
+        assert f"- see (({DEAD}))\n" in result.stdout
+        assert "id::" not in result.stdout
+        assert "no longer exists" in result.stderr

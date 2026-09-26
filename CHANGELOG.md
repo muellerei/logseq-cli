@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.10.15), and asking with them reads the target's whole subtree. The name
   now comes from `getPage` by that id, with the read cache on once per page.
   The tests answered the page with a name, which Logseq does not, and passed.
+- A ref whose block does not exist stays `((uuid))` under `--resolve-refs`,
+  and `get-page` reports it as dead, also once Logseq has read the page
+  holding it from its file. Logseq then keeps a placeholder `id:: <uuid>`
+  without a page (#70), which was inlined as the ref's text.
 
 ## [0.16.0] - 2026-09-26
 
