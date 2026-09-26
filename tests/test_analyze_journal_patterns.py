@@ -74,9 +74,9 @@ class TestTaskCounting:
 
 
 class TestMoodWordsComeFromConfig:
-    def test_english_defaults_find_nothing_in_a_german_journal(self, tmp_path):
+    def test_english_defaults_find_nothing_in_a_spanish_journal(self, tmp_path):
         """The state before [analysis] existed — and why it was worth adding."""
-        d = payload(run("- war heute richtig gut und produktiv", tmp_path=tmp_path))
+        d = payload(run("- hoy fue muy bueno y productivo", tmp_path=tmp_path))
         assert d["mood_summary"]["positive_signals"] == 0
 
     def test_configured_words_classify_a_stated_mood(self, tmp_path):
@@ -86,21 +86,21 @@ class TestMoodWordsComeFromConfig:
         see TestMoodCountsStatementsNotWords in
         tests/test_read_only_commands_smoke.py.
         """
-        d = payload(run("- stimmung: gut",
-                        config=('[analysis]\nmood_positive = ["gut"]\n'
-                                'mood_labels = ["stimmung"]\n'),
+        d = payload(run("- vibe: upbeat",
+                        config=('[analysis]\nmood_positive = ["upbeat"]\n'
+                                'mood_labels = ["vibe"]\n'),
                         tmp_path=tmp_path))
         assert d["mood_summary"]["positive_signals"] == 1
 
     def test_a_positive_word_in_prose_is_not_a_signal(self, tmp_path):
-        d = payload(run("- der Build lief gut durch",
-                        config='[analysis]\nmood_positive = ["gut"]\n',
+        d = payload(run("- the team was upbeat after the build",
+                        config='[analysis]\nmood_positive = ["upbeat"]\n',
                         tmp_path=tmp_path))
         assert d["mood_summary"]["positive_signals"] == 0
 
     def test_configured_words_replace_the_defaults_rather_than_adding(self, tmp_path):
         d = payload(run("- this was great and productive",
-                        config='[analysis]\nmood_positive = ["gut"]\n',
+                        config='[analysis]\nmood_positive = ["upbeat"]\n',
                         tmp_path=tmp_path))
         assert d["mood_summary"]["positive_signals"] == 0
 

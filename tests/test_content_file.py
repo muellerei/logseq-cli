@@ -30,8 +30,8 @@ import click
 class TestReadContentFile:
     def test_reads_utf8_verbatim(self, tmp_path):
         f = tmp_path / "entry.md"
-        f.write_text("**09:00** Größe geprüft\n\t- Alice' Hinweis", encoding="utf-8")
-        assert read_content_file(str(f)) == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
+        f.write_text("**09:00** Café menu checked\n\t- Alice's note", encoding="utf-8")
+        assert read_content_file(str(f)) == "**09:00** Café menu checked\n\t- Alice's note"
 
     def test_strips_only_trailing_newlines(self, tmp_path):
         f = tmp_path / "entry.md"
@@ -57,7 +57,7 @@ class TestReadContentFile:
 
     def test_non_utf8_is_bad_parameter(self, tmp_path):
         f = tmp_path / "latin.md"
-        f.write_bytes(b"Gr\xf6\xdfe")  # latin-1, invalid UTF-8
+        f.write_bytes(b"Caf\xe9")  # latin-1, invalid UTF-8
         with pytest.raises(click.BadParameter) as exc:
             read_content_file(str(f))
         assert "UTF-8" in str(exc.value)
@@ -158,15 +158,15 @@ class TestAddJournalBlockContentFile:
         assert "Added 3 block(s)" in result.output
 
     def test_special_characters_survive(self, api, tmp_path):
-        """Apostrophes, quotes and umlauts reach the API unmangled."""
-        f = tmp_path / "umlaut.md"
-        f.write_text("**14:30** Alice' \"Größe\" geprüft: Straße, Übergabe", encoding="utf-8")
+        """Apostrophes, quotes and accented letters reach the API unmangled."""
+        f = tmp_path / "accents.md"
+        f.write_text("**14:30** Alice's \"Café\" checked: naïve façade, jalapeño", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 0, result.output
         written = api.insert_block.call_args_list[0].args[1]
-        assert written == "**14:30** Alice' \"Größe\" geprüft: Straße, Übergabe"
+        assert written == "**14:30** Alice's \"Café\" checked: naïve façade, jalapeño"
 
     def test_top_level_without_heading(self, api, tmp_path):
         f = tmp_path / "top.md"
@@ -203,7 +203,7 @@ class TestAddJournalBlockContentFile:
 
     def test_date_flag_still_applies(self, api, tmp_path):
         f = tmp_path / "d.md"
-        f.write_text("- Nachtrag", encoding="utf-8")
+        f.write_text("- Addendum", encoding="utf-8")
         result = split_runner().invoke(cli, [
             "add-journal-block", "--date", "2026-08-03",
             "--content-file", str(f), "--json"])
@@ -260,9 +260,9 @@ class TestAddJournalBlockFlagValidation:
         """The rejection is specific to --content-file, not a global ban."""
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
-            "--content", "ein  langer   Satz", "--no-preserve"])
+            "--content", "a  long   sentence", "--no-preserve"])
         assert result.exit_code == 0, result.output
-        assert api.insert_block.call_args_list[0].args[1] == "ein langer Satz"
+        assert api.insert_block.call_args_list[0].args[1] == "a long sentence"
 
 
 class TestUpsertHeadingKeepsAllRoots:
@@ -532,8 +532,8 @@ class TestContentFromStdin:
 
     def test_stdin_keeps_utf8_and_indentation(self, monkeypatch):
         monkeypatch.setattr(
-            "sys.stdin", _stdin("**09:00** Größe geprüft\n\t- Alice' Hinweis\n"))
-        assert read_content_file("-") == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
+            "sys.stdin", _stdin("**09:00** Café menu checked\n\t- Alice's note\n"))
+        assert read_content_file("-") == "**09:00** Café menu checked\n\t- Alice's note"
 
     def test_empty_stdin_is_rejected(self, monkeypatch):
         """Same guard as an empty file: fail before any write, not after."""
@@ -589,11 +589,11 @@ class TestStdinReadLikeAFile:
         monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data), encoding="latin-1", newline="\n"))
 
     def test_stdin_is_utf8_whatever_the_locale(self, monkeypatch):
-        self._stdin(monkeypatch, "Größe\n".encode("utf-8"))
-        assert read_content_file("-") == "Größe"
+        self._stdin(monkeypatch, "Café\n".encode("utf-8"))
+        assert read_content_file("-") == "Café"
 
     def test_invalid_utf8_on_stdin_is_refused(self, monkeypatch):
-        self._stdin(monkeypatch, b"Gr\xf6\xdfe")
+        self._stdin(monkeypatch, b"Caf\xe9")
         with pytest.raises(click.BadParameter) as exc:
             read_content_file("-")
         assert "UTF-8" in str(exc.value)

@@ -22,13 +22,13 @@ from logseq_cli.pagenames import (AmbiguousAliasError, PageRef, alias_sources,
 from tests.conftest import PageGraph, page_graph_api, split_runner
 
 ALIAS = "zz-al"
-TARGET = "Ziel"
+TARGET = "Target"
 TODO = "00000000-0000-4000-8000-00000000aaaa"
 
 
 def _graph(**extra):
-    pages = {TARGET: [f"alias:: {ALIAS}\nfarbe:: rot",
-                      {"content": "TODO inhalt", "uuid": TODO}]}
+    pages = {TARGET: [f"alias:: {ALIAS}\ncolor:: red",
+                      {"content": "TODO errand", "uuid": TODO}]}
     pages.update(extra.pop("pages", {}))
     return PageGraph(pages, aliases=extra.pop("aliases", {ALIAS: [TARGET]}), **extra)
 
@@ -114,8 +114,8 @@ class TestResolvePage:
         api.datascript_query.assert_not_called()
 
     def test_alias_written_in_another_unicode_form_matches(self):
-        rows = [["Ziel", ["mu\u0308ller"]]]
-        assert alias_sources(_query_api(rows), "m\u00fcller") == ["Ziel"]
+        rows = [["Target", ["cafe\u0301"]]]
+        assert alias_sources(_query_api(rows), "caf\u00e9") == ["Target"]
 
     def test_unknown_name_is_itself(self):
         assert resolve_page(page_graph_api(_graph()), "nowhere") == PageRef("nowhere", "nowhere")
@@ -139,8 +139,8 @@ class TestResolvePage:
     def test_only_a_source_naming_the_alias_counts(self):
         # :block/alias links a whole group; a sibling alias with a file of its
         # own answers too, but its alias:: does not name this one.
-        rows = [["Ziel", ["zz-al", "zz-b"]], ["zz-b", ["zz-c"]]]
-        assert alias_sources(_query_api(rows), ALIAS) == ["Ziel"]
+        rows = [["Target", ["zz-al", "zz-b"]], ["zz-b", ["zz-c"]]]
+        assert alias_sources(_query_api(rows), ALIAS) == ["Target"]
 
     @pytest.mark.parametrize("tree,expected", [
         ([], True), (None, True),
@@ -160,25 +160,25 @@ FOLLOWS = {
     "get-page-stats": ["get-page-stats", "--name", ALIAS, "--json"],
     "get-properties": ["get-properties", "--name", ALIAS, "--json"],
     "get-backlinks": ["get-backlinks", "--name", ALIAS, "--json"],
-    "find-block": ["find-block", "--content", "inhalt", "--page", ALIAS, "--json"],
-    "replace-text": ["replace-text", "--page", ALIAS, "--find", "inhalt",
-                     "--replace", "neu", "--json"],
-    "update-block": ["update-block", "--where-content", "inhalt", "--page", ALIAS,
-                     "--content", "neu", "--json"],
-    "set-todo-status": ["set-todo-status", "--content", "inhalt", "--page", ALIAS,
+    "find-block": ["find-block", "--content", "errand", "--page", ALIAS, "--json"],
+    "replace-text": ["replace-text", "--page", ALIAS, "--find", "errand",
+                     "--replace", "new", "--json"],
+    "update-block": ["update-block", "--where-content", "errand", "--page", ALIAS,
+                     "--content", "new", "--json"],
+    "set-todo-status": ["set-todo-status", "--content", "errand", "--page", ALIAS,
                         "--status", "DONE", "--json"],
-    "add-note-content": ["add-note-content", "--page", ALIAS, "--content", "neu", "--json"],
-    "insert-block": ["insert-block", "--page", ALIAS, "--content", "neu", "--json"],
+    "add-note-content": ["add-note-content", "--page", ALIAS, "--content", "new", "--json"],
+    "insert-block": ["insert-block", "--page", ALIAS, "--content", "new", "--json"],
     "add-block-ref": ["add-block-ref", "--source-id", TODO, "--page", ALIAS,
                       "--under-heading", "## Refs", "--json"],
     "copy-block": ["copy-block", "--id", TODO, "--to-page", ALIAS, "--json"],
-    "set-property": ["set-property", "--page", ALIAS, "--key", "farbe",
-                     "--value", "blau", "--json"],
-    "remove-property": ["remove-property", "--page", ALIAS, "--key", "farbe", "--json"],
+    "set-property": ["set-property", "--page", ALIAS, "--key", "color",
+                     "--value", "blue", "--json"],
+    "remove-property": ["remove-property", "--page", ALIAS, "--key", "color", "--json"],
 }
 REFUSES = {
     "delete-page": ["delete-page", "--name", ALIAS, "--force", "--json"],
-    "rename-page": ["rename-page", "--name", ALIAS, "--new-name", "Neu", "--json"],
+    "rename-page": ["rename-page", "--name", ALIAS, "--new-name", "New", "--json"],
 }
 # Page options that do not name an existing page, with the reason.
 EXEMPT = {
@@ -233,11 +233,11 @@ class TestGetPage:
         payload = json.loads(result.stdout)
         # page stays the name asked for; alias_of names the page read.
         assert (payload["page"], payload["alias_of"]) == (ALIAS, TARGET)
-        assert [b["content"] for b in payload["blocks"]][1] == "TODO inhalt"
+        assert [b["content"] for b in payload["blocks"]][1] == "TODO errand"
 
     def test_text_mode_notes_it(self):
         result, _, _ = _run(["get-page", "--name", ALIAS, "--no-backlinks"])
-        assert "TODO inhalt" in result.stdout
+        assert "TODO errand" in result.stdout
         assert f"'{ALIAS}' is an alias of '{TARGET}'" in result.stderr
 
     def test_plain_page_has_no_alias_field(self):
@@ -265,9 +265,9 @@ class TestGetPage:
 
 
 def test_write_goes_to_the_target_and_says_so():
-    result, _, graph = _run(["add-note-content", "--page", ALIAS, "--content", "neu", "--json"])
+    result, _, graph = _run(["add-note-content", "--page", ALIAS, "--content", "new", "--json"])
     assert result.exit_code == 0, result.output
-    assert graph.tree(TARGET)[-1] == ("neu", [])
+    assert graph.tree(TARGET)[-1] == ("new", [])
     payload = json.loads(result.stdout)
     assert (payload["page"], payload["alias_of"], payload["created"]) == (ALIAS, TARGET, False)
 
@@ -300,10 +300,10 @@ def test_create_page_preview_reports_an_ambiguous_alias():
 def test_insert_block_with_an_anchor_does_not_resolve_page():
     # --page is not the target next to --after; it names nothing written to.
     result, _, graph = _run(["insert-block", "--after", TODO, "--page", ALIAS,
-                             "--tree", "neu", "--json"])
+                             "--tree", "new", "--json"])
     assert result.exit_code == 0, result.output
     assert "alias_of" not in json.loads(result.stdout)
-    assert graph.tree(TARGET)[-1] == ("neu", [])
+    assert graph.tree(TARGET)[-1] == ("new", [])
 
 
 def test_create_page_on_an_alias_names_its_page():
@@ -316,7 +316,7 @@ def test_create_page_on_an_alias_names_its_page():
 
 def test_ambiguous_alias_refuses_a_write():
     graph = _ambiguous_graph()
-    result, api, _ = _run(["add-note-content", "--page", ALIAS, "--content", "neu",
+    result, api, _ = _run(["add-note-content", "--page", ALIAS, "--content", "new",
                            "--json"], graph)
     assert result.exit_code == 1
     error = json.loads(result.stderr)

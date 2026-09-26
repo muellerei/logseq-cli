@@ -133,12 +133,12 @@ def test_refs_for_link_tag_and_tags_property(double):
 
 def test_pre_block_flag(double):
     # A page's property block carries preBlock? true, others false.
-    double.add_page("Probe Page", ["typ:: probe", "body"])
-    pre = answer(double, "getBlock", double.uuid_of("typ:: probe"), {"includeChildren": False})
+    double.add_page("Probe Page", ["kind:: probe", "body"])
+    pre = answer(double, "getBlock", double.uuid_of("kind:: probe"), {"includeChildren": False})
     body = answer(double, "getBlock", double.uuid_of("body"), {"includeChildren": False})
     assert pre["preBlock?"] is True
     assert body["preBlock?"] is False
-    assert answer(double, "getPage", "probe page")["properties"] == {"typ": "probe"}
+    assert answer(double, "getPage", "probe page")["properties"] == {"kind": "probe"}
 
 
 # --- getPage and friends -----------------------------------------------------
@@ -211,18 +211,18 @@ def test_properties_camel_case_and_text_values(double, api):
     # created_at, and the values 5, a,b, 01234, [[Link]].
     double.add_page("Probe Page", ["props\ncreated_at:: 1"])
     uuid = double.uuid_of("props\ncreated_at:: 1")
-    for key, value in (("zahl", 5), ("liste", ["a", "b"]), ("zip", "01234"),
+    for key, value in (("count", 5), ("items", ["a", "b"]), ("zip", "01234"),
                        ("link", "[[Link]]")):
         assert answer(double, "upsertBlockProperty", uuid, key, value) is None
     block = answer(double, "getBlock", uuid, {"includeChildren": False})
-    assert block["content"] == ("props\ncreated_at:: 1\nzahl:: 5\nliste:: a,b\n"
+    assert block["content"] == ("props\ncreated_at:: 1\ncount:: 5\nitems:: a,b\n"
                                 "zip:: 01234\nlink:: [[Link]]")
-    assert block["properties"] == {"createdAt": 1, "zahl": 5, "liste": ["a", "b"],
+    assert block["properties"] == {"createdAt": 1, "count": 5, "items": ["a", "b"],
                                    "zip": "01234", "link": "[[Link]]"}
     values, texts = stored_properties(api, uuid)
-    assert values == {"created-at": 1, "zahl": 5, "liste": ["a", "b"],
+    assert values == {"created-at": 1, "count": 5, "items": ["a", "b"],
                       "zip": "01234", "link": "[[Link]]"}
-    assert texts == {"created-at": "1", "zahl": "5", "liste": "a,b",
+    assert texts == {"created-at": "1", "count": "5", "items": "a,b",
                      "zip": "01234", "link": "[[Link]]"}
 
 
@@ -296,8 +296,8 @@ def test_update_block_answers_null_in_execute_and_noop(double, mode):
 def test_update_block_trims_trailing_spaces(double):
     double.add_page("Probe Page", ["old"])
     uuid = double.uuid_of("old")
-    answer(double, "updateBlock", uuid, "neu  ")
-    assert answer(double, "getBlock", uuid, {"includeChildren": False})["content"] == "neu"
+    answer(double, "updateBlock", uuid, "new  ")
+    assert answer(double, "getBlock", uuid, {"includeChildren": False})["content"] == "new"
 
 
 def test_update_block_with_properties_writes_lines(double, api):
@@ -324,8 +324,8 @@ def test_update_block_takes_a_foreign_id_line_as_its_uuid(double):
 def test_update_block_makes_or_unmakes_the_property_block(double):
     double.add_page("Probe Page", ["plain", "body"])
     uuid = double.uuid_of("plain")
-    answer(double, "updateBlock", uuid, "typ:: probe")
-    assert answer(double, "getPage", "probe page")["properties"] == {"typ": "probe"}
+    answer(double, "updateBlock", uuid, "kind:: probe")
+    assert answer(double, "getPage", "probe page")["properties"] == {"kind": "probe"}
     assert answer(double, "getBlock", uuid, {"includeChildren": False})["preBlock?"] is True
     answer(double, "updateBlock", uuid, "plain again")
     assert "properties" not in answer(double, "getPage", "probe page")
@@ -533,8 +533,8 @@ def test_move_block(double):
 def test_set_blocks_id_forms(double):
     # Sets id in each asked block's properties; skips an unknown uuid and a
     # page's property block; leaves a stored id as it is.
-    double.add_page("Probe Page", ["typ:: probe", "plain", "has id"])
-    pre, plain, has = (double.uuid_of(c) for c in ("typ:: probe", "plain", "has id"))
+    double.add_page("Probe Page", ["kind:: probe", "plain", "has id"])
+    pre, plain, has = (double.uuid_of(c) for c in ("kind:: probe", "plain", "has id"))
     answer(double, "setBlocksId", [has])
     had = answer(double, "getBlock", has, {"includeChildren": False})["content"]
     assert answer(double, "setBlocksId", [plain, pre, has, UNKNOWN]) is None
@@ -682,7 +682,7 @@ def test_time_tracking_clocks_in_and_out(double):
 # --- protocol ------------------------------------------------------------------
 
 def test_unknown_method_is_error_object(double):
-    assert answer(double, "logseq.Editor.gibtsNicht") == {"error": "MethodNotExist: gibts_nicht"}
+    assert answer(double, "logseq.Editor.doesNotExist") == {"error": "MethodNotExist: does_not_exist"}
 
 
 def test_records_requests(double, api):

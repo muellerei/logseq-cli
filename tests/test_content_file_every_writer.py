@@ -18,8 +18,8 @@ import pytest
 from logseq_cli.cli import cli
 from tests.conftest import fake_api, split_runner
 
-TEXT = "Alice's note: Größe geprüft\n\t- a child"
-ONE_LINE = "Alice's note: Größe geprüft"
+TEXT = "Alice's note: café menu checked\n\t- a child"
+ONE_LINE = "Alice's note: café menu checked"
 B1 = "6650d3a4-1b2c-4d5e-8f90-0a1b2c3d4e5f"
 
 # (command, arguments before the content, text) — a text each command takes

@@ -43,19 +43,19 @@ BECOMES_ID = ["custom-id", "custom_id", "Custom_ID", "id", "ID", "Id"]
 
 # Undecodable argv bytes arrive as lone surrogates (PEP 383). Measured on the
 # Python side: the upsert went out, then printing the confirmation raised.
-UNDECODABLE = ["Gr\udcf6\udcdfe"]
+UNDECODABLE = ["Caf\udce9"]
 
 # Keys the parser keeps, but under another name.
 RENAMED = [
     ("Mixed", "mixed"),
     ("a_b", "a-b"),
     ("Ab_C", "ab-c"),
-    ("ÄB", "äb"),
+    ("ÉB", "éb"),
     ("a-_b", "a--b"),
 ]
 
 # Keys the parser keeps exactly as written.
-KEPT = ["type", "a-b", "a.b", "a.b.c", "ümlaut", "1abc", "a1", "a#b", "a?b",
+KEPT = ["type", "a-b", "a.b", "a.b.c", "crème", "1abc", "a1", "a#b", "a?b",
         "a!b", "a*b", "a+b", "a'b", "a%b", "a&b", "a=b", "a<b", "a$b",
         "-ab", ".ab", "a.", "ab-"]
 
@@ -210,10 +210,10 @@ class TestRemoveProperty:
     reported success while removing nothing."""
 
     def test_removes_the_key_set_property_stored_from_the_page(self):
-        api = _api(first="due-date:: 2026-10-01\ntyp:: a")
+        api = _api(first="due-date:: 2026-10-01\nkind:: a")
         r = _run(["remove-property", "--name", "Page A", "--key", "Due_Date"], api)
         assert r.exit_code == 0, r.stderr
-        assert api.graph.tree("Page A")[0] == ("typ:: a", [])
+        assert api.graph.tree("Page A")[0] == ("kind:: a", [])
         assert "'Due_Date'" in r.stderr and "'due-date'" in r.stderr
 
     def test_removes_the_key_set_property_stored_from_a_block(self):

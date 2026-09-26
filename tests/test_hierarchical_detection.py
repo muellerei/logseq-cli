@@ -14,7 +14,7 @@ class TestContainsHierarchicalContent:
     """Tests for the auto-detection of hierarchical content."""
 
     def test_simple_text_returns_false(self):
-        assert contains_hierarchical_content("einfacher text") is False
+        assert contains_hierarchical_content("plain text") is False
 
     def test_empty_string_returns_false(self):
         assert contains_hierarchical_content("") is False
@@ -41,7 +41,7 @@ class TestContainsHierarchicalContent:
         assert contains_hierarchical_content(content) is False
 
     def test_realistic_log_entry_returns_true(self):
-        content = "**17:38** Intune-Strategie erarbeitet\n\t- Recherche: 9 Dokumente\n\t- Musterschreiben erstellt"
+        content = "**17:38** Rollout plan drafted\n\t- Research: 9 documents\n\t- Template letter written"
         assert contains_hierarchical_content(content) is True
 
     def test_literal_backslash_n_returns_false(self):
@@ -146,13 +146,13 @@ class TestParseHierarchicalPropertyLines:
 
     def test_leading_property_line_stays_a_block(self):
         """No preceding block to merge into: keep old behavior."""
-        tree = parse_hierarchical_content("type:: Person\n- ## Kontakt")
+        tree = parse_hierarchical_content("type:: Person\n- ## Contact")
         assert tree[0]["content"] == "type:: Person"
-        assert tree[1]["content"] == "## Kontakt"
+        assert tree[1]["content"] == "## Contact"
 
     def test_normal_content_with_double_colon_midline_not_merged(self):
         """Only lines *starting* with key:: are property lines."""
-        tree = parse_hierarchical_content("- A\n- Siehe key:: value Doku")
+        tree = parse_hierarchical_content("- A\n- See key:: value docs")
         assert len(tree) == 2
 
     def test_timestamp_entry_unaffected(self):

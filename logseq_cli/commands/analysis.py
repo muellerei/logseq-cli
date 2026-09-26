@@ -86,7 +86,7 @@ def analyze_graph(ctx, days, as_json):
     pages = api.get_all_pages()
 
     # Open tasks only, and only where Logseq puts a marker: at the start of a
-    # block. Matching "todo" anywhere, case-insensitively, counted "Todo-Liste"
+    # block. Matching "todo" anywhere, case-insensitively, counted "Todo-Zettel"
     # in prose and the "TODO" inside a DONE block's logbook line, so the number
     # was neither the open tasks nor all of them.
     todo_pattern = re.compile(
@@ -224,9 +224,9 @@ def _is_incidental_page(name: str) -> bool:
     # An unclosed bracket dragged in from prose: "#Active)", "3b82f6)".
     if stripped.endswith(")") and "(" not in stripped:
         return True
-    # A ticket number that took the next word with it: "#272-Designentscheidung"
-    # comes from "#272-Designentscheidung" in a sentence. Three digits or more,
-    # so that "2-Faktor-Auth" and "4-Level-Struktur" — real terms — survive.
+    # A ticket number that took the next word with it: "#123-Entwurf" in a
+    # sentence becomes a page "123-Entwurf". Three digits or more,
+    # so that "2-Faktor-Auth" and "3-Wege-Abgleich" — real terms — survive.
     if re.match(r"\d{3,}-", stripped):
         return True
     return False
@@ -405,7 +405,7 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     # graph with over a thousand tasks — a number that reads like a
     # measurement rather than a pattern that cannot match.
     # The markers are upper-case in Logseq and only there, so they are matched
-    # case-sensitively: "Now that we finished" and "Later kam die Rückmeldung"
+    # case-sensitively: "Now that we finished" and "Later kam der Regen"
     # open a sentence, not a task. The checkbox alternative keeps (?i), where
     # "[X]" and "[x]" are both in the wild.
     # The bullet may repeat: get_page_content prefixes each block with "- ",
@@ -471,7 +471,7 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
         #
         # Counting every occurrence of a positive word measured how often such
         # words appear in technical prose, not how the day went: "nicht
-        # zufrieden" and "läuft nicht gut" both scored as positive, and in the
+        # erfolgreich" and "schmeckt nicht gut" both scored as positive, and in the
         # journal this was checked against 16% of positive hits were negations
         # — concentrated in exactly the sentences that carry a judgement. A
         # number that says the opposite of its own evidence is worse than no

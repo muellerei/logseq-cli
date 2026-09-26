@@ -14,7 +14,7 @@
 # Heading that journal writes go under by default. Without it, entries land at
 # the top level of the journal page. LOGSEQ_JOURNAL_HEADING wins when set.
 # The heading is created if the journal page does not have it yet.
-default_heading = "## Protokoll"
+default_heading = "## Tagesnotizen"
 
 
 [journal.headings]
@@ -25,31 +25,31 @@ default_heading = "## Protokoll"
 # capitalisation, since "## Log" and "## log" are two different headings.
 # An unlisted name is used verbatim, so a typo never resolves to another
 # section.
-protokoll = "## Protokoll"
-aufgaben = "## Aufgaben"
+notizen = "## Tagesnotizen"
+besorgungen = "## Besorgungen"
 termine = "## Termine"
 
 # Keys need not share the language of the headings. Typing an English shortcut
 # for a German section is often the point of this table.
-tasks = "## Aufgaben"
-log = "## Protokoll"
+errands = "## Besorgungen"
+log = "## Tagesnotizen"
 
 
 [graph]
 
-# Namespace prefix of your project pages, e.g. "projekte/Projekt Alpha".
+# Namespace prefix of your project pages, e.g. "vorhaben/Gartenhaus".
 # Used by `smart-query --request "projekte"`. Without it, that query reports
 # the missing setting and exits 1 instead of returning an empty list.
-projects_namespace = "projekte/"
+projects_namespace = "vorhaben/"
 
 # Property and value that mark a person page, e.g. a page carrying
-# `type:: Person`. Used by `smart-query --request "personen"`.
+# `type:: Kontakt`. Used by `smart-query --request "personen"`.
 # Both are required; the property name alone is not enough.
 # Property names usually stay English even in a German graph, because that is
 # what Logseq's own conventions and most plugins use — put here whatever your
 # pages really carry.
 person_property = "type"
-person_value = "Person"
+person_value = "Kontakt"
 
 
 [analysis]
@@ -64,4 +64,4 @@ mood_negative = ["müde", "gestresst", "frustriert", "schwierig"]
 mood_labels = ["mood", "feeling", "stimmung", "laune"]
 
 # Projects as a namespace; matches the tag and the link form.
-project_tag_prefix = "#projekte/"
+project_tag_prefix = "#vorhaben/"

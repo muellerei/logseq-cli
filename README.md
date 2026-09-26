@@ -516,7 +516,7 @@ See [0.9.0, Security](CHANGELOG.md#090---2026-09-14).
 
 `analyze-graph` reported 438 open tasks for a graph with 256, because it
 counted "todo" anywhere in any casing; the mood counters scored "nicht
-zufrieden" as positive, 16% of positive hits in a 90-day sample; and
+erfolgreich" as positive, 16% of positive hits in a 90-day sample; and
 `find-knowledge-gaps` reported 596 orphans that were mostly Logseq's own
 by-products. None of that was caught by tests asserting that output exists —
 it took reading the numbers next to a graph whose real answer was known. A

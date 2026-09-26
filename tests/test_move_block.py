@@ -38,7 +38,7 @@ def _api(*, children_after=None, target_parent=1, src_parent_after=None,
     """
     api = MagicMock()
     blocks = {
-        SRC: {"uuid": SRC, "content": "QUELLE", "children": [],
+        SRC: {"uuid": SRC, "content": "SOURCE", "children": [],
               "parent": {"id": src_parent_after if src_parent_after is not None else 9}},
         TGT: {"uuid": TGT, "content": "TARGET", "parent": {"id": target_parent},
               "children": children_after if children_after is not None else []},
@@ -129,12 +129,12 @@ class TestCopyBlockRemoveIsGuarded:
         return double, r
 
     def test_failed_copy_does_not_remove_source(self, monkeypatch):
-        double, r = self._copy_failing(monkeypatch, "appendBlockInPage", "WICHTIG")
+        double, r = self._copy_failing(monkeypatch, "appendBlockInPage", "IMPORTANT")
         assert r.exit_code == 1
         assert "Moved" not in r.output
         assert json.loads(r.stderr)["reason"] == "write_not_verified"
         assert double.sent("removeBlock") == []
-        assert double.tree("Source") == [("WICHTIG", [])]
+        assert double.tree("Source") == [("IMPORTANT", [])]
 
     def test_failed_child_copy_does_not_remove_source(self, monkeypatch):
         """The root lands, a child does not: still no removal."""

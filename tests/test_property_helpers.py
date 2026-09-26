@@ -76,7 +76,7 @@ class TestParsePropertyPairs:
 
     def test_value_may_contain_commas_and_spaces(self):
         # Split on FIRST '=' only.
-        assert parse_property_pairs(["tags=mcp, agents"]) == [("tags", "mcp, agents")]
+        assert parse_property_pairs(["tags=alpha, beta"]) == [("tags", "alpha, beta")]
 
     def test_value_may_contain_equals(self):
         assert parse_property_pairs(["expr=a=b"]) == [("expr", "a=b")]

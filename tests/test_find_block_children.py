@@ -30,14 +30,14 @@ def _api(matches, children_by_uuid=None):
 
 HIT = {
     "uuid": "u-1",
-    "content": "**14:22** Ticket 10 abgeschlossen",
+    "content": "**14:22** Ticket 10 closed",
     "page": {"original-name": "2026-08-21, friday"},
 }
 KIDS = [
     {"content": "**Implementation:** fix pushed", "children": [
         {"content": "=> state matches", "children": []},
     ]},
-    {"content": "**Roadmap:** nachgezogen", "children": []},
+    {"content": "**Roadmap:** updated", "children": []},
 ]
 
 

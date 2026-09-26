@@ -89,45 +89,45 @@ class TestSetProperty:
 
     def test_a_new_key_on_a_property_block_reaches_the_page(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
+        graph.with_property_block("P", "kind:: a", "text")
         _, r = _run(graph, "set-property", "--name", "P", "--key", "team", "--value", "x")
         assert r.exit_code == 0, r.output
-        assert _props(graph, "P") == {"typ": "a", "team": "x"}
+        assert _props(graph, "P") == {"kind": "a", "team": "x"}
 
     def test_a_new_value_reaches_the_page(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
-        _, r = _run(graph, "set-property", "--name", "P", "--key", "typ", "--value", "b")
+        graph.with_property_block("P", "kind:: a", "text")
+        _, r = _run(graph, "set-property", "--name", "P", "--key", "kind", "--value", "b")
         assert r.exit_code == 0, r.output
-        assert _props(graph, "P") == {"typ": "b"}
+        assert _props(graph, "P") == {"kind": "b"}
 
     def test_a_page_starting_with_text_gets_a_property_block_before_it(self):
         graph = PageGraph({"P": ["hello text", "second"]})
-        _, r = _run(graph, "set-property", "--name", "P", "--key", "typ", "--value", "x")
+        _, r = _run(graph, "set-property", "--name", "P", "--key", "kind", "--value", "x")
         assert r.exit_code == 0, r.output
-        assert graph.tree("P") == [("typ:: x", []), ("hello text", []), ("second", [])]
-        assert _props(graph, "P") == {"typ": "x"}
+        assert graph.tree("P") == [("kind:: x", []), ("hello text", []), ("second", [])]
+        assert _props(graph, "P") == {"kind": "x"}
 
     def test_an_empty_first_block_is_filled(self):
         graph = PageGraph({"P": ["", "text"]})
-        _, r = _run(graph, "set-property", "--name", "P", "--key", "typ", "--value", "x")
+        _, r = _run(graph, "set-property", "--name", "P", "--key", "kind", "--value", "x")
         assert r.exit_code == 0, r.output
-        assert graph.tree("P") == [("typ:: x", []), ("text", [])]
-        assert _props(graph, "P") == {"typ": "x"}
+        assert graph.tree("P") == [("kind:: x", []), ("text", [])]
+        assert _props(graph, "P") == {"kind": "x"}
 
     def test_a_first_block_of_property_lines_becomes_the_property_block(self):
         """What set-property left on a page created empty: the line is in
         the file, the page has no properties."""
-        graph = PageGraph({"P": ["typ:: x", "text"]})
+        graph = PageGraph({"P": ["kind:: x", "text"]})
         _, r = _run(graph, "set-property", "--name", "P", "--key", "team", "--value", "y")
         assert r.exit_code == 0, r.output
-        assert graph.tree("P") == [("typ:: x", []), ("text", [])]
-        assert _props(graph, "P") == {"typ": "x", "team": "y"}
+        assert graph.tree("P") == [("kind:: x", []), ("text", [])]
+        assert _props(graph, "P") == {"kind": "x", "team": "y"}
 
     def test_the_same_value_again_writes_nothing(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
-        api, r = _run(graph, "set-property", "--name", "P", "--key", "typ",
+        graph.with_property_block("P", "kind:: a", "text")
+        api, r = _run(graph, "set-property", "--name", "P", "--key", "kind",
                       "--value", "a", "--json")
         assert r.exit_code == 0, r.output
         assert json.loads(r.stdout)["status"] == "unchanged"
@@ -137,21 +137,21 @@ class TestSetProperty:
         """What set-property left on a page created empty: the line is right,
         the page never took it. Logseq saves only a change, so the block is
         saved empty first, then with its text."""
-        graph = PageGraph({"P": ["typ:: x", "text"]})
-        api, r = _run(graph, "set-property", "--name", "P", "--key", "typ",
+        graph = PageGraph({"P": ["kind:: x", "text"]})
+        api, r = _run(graph, "set-property", "--name", "P", "--key", "kind",
                       "--value", "x", "--json")
         assert r.exit_code == 0, r.output
         assert json.loads(r.stdout)["status"] == "updated"
-        assert _props(graph, "P") == {"typ": "x"}
-        assert graph.tree("P") == [("typ:: x", []), ("text", [])]
+        assert _props(graph, "P") == {"kind": "x"}
+        assert graph.tree("P") == [("kind:: x", []), ("text", [])]
 
     def test_a_key_the_old_way_added_to_a_property_block_reaches_the_page(self):
         graph = PageGraph()
-        page = graph.with_property_block("P", "typ:: a", "text")
+        page = graph.with_property_block("P", "kind:: a", "text")
         graph.upsert_block_property(page["blocks"][0]["uuid"], "team", "x")
         _, r = _run(graph, "set-property", "--name", "P", "--key", "team", "--value", "x")
         assert r.exit_code == 0, r.output
-        assert _props(graph, "P") == {"typ": "a", "team": "x"}
+        assert _props(graph, "P") == {"kind": "a", "team": "x"}
 
     def test_title_is_refused(self):
         """Saved into the property block, ``title::`` renames the page, past
@@ -164,14 +164,14 @@ class TestSetProperty:
 
     def test_a_front_matter_block_is_refused(self):
         graph = PageGraph()
-        graph.with_property_block("P", "---\ntyp: a\n---", "text")
-        api, r = _run(graph, "set-property", "--name", "P", "--key", "typ", "--value", "b")
+        graph.with_property_block("P", "---\nkind: a\n---", "text")
+        api, r = _run(graph, "set-property", "--name", "P", "--key", "kind", "--value", "b")
         assert r.exit_code == 1
         api.update_block.assert_not_called()
 
     def test_a_write_the_page_does_not_show_fails(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
+        graph.with_property_block("P", "kind:: a", "text")
         api = page_graph_api(graph)
         api.update_block.side_effect = None  # Logseq drops it
         r = _invoke(api, "set-property", "--name", "P", "--key", "team", "--value", "x")
@@ -190,15 +190,15 @@ class TestSetProperty:
         """The block's text is written whole, so it is read again just before:
         a key another call set in between must not be undone."""
         graph = PageGraph()
-        page = graph.with_property_block("P", "typ:: a", "text")
-        api = _with_a_write_in_between(graph, page, "typ:: a\nother:: b")
+        page = graph.with_property_block("P", "kind:: a", "text")
+        api = _with_a_write_in_between(graph, page, "kind:: a\nother:: b")
         r = _invoke(api, "set-property", "--name", "P", "--key", "team", "--value", "x")
         assert r.exit_code == 0, r.stderr
-        assert _props(graph, "P") == {"typ": "a", "other": "b", "team": "x"}
+        assert _props(graph, "P") == {"kind": "a", "other": "b", "team": "x"}
 
     def test_upsert_is_not_used(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
+        graph.with_property_block("P", "kind:: a", "text")
         api, r = _run(graph, "set-property", "--name", "P", "--key", "team", "--value", "x")
         api.upsert_block_property.assert_not_called()
 
@@ -207,47 +207,47 @@ class TestRemoveProperty:
 
     def test_a_key_leaves_the_page(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a\nteam:: x", "text")
+        graph.with_property_block("P", "kind:: a\nteam:: x", "text")
         _, r = _run(graph, "remove-property", "--name", "P", "--key", "team")
         assert r.exit_code == 0, r.output
-        assert _props(graph, "P") == {"typ": "a"}
+        assert _props(graph, "P") == {"kind": "a"}
 
     def test_the_last_key_takes_the_block_with_it(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
-        _, r = _run(graph, "remove-property", "--name", "P", "--key", "typ")
+        graph.with_property_block("P", "kind:: a", "text")
+        _, r = _run(graph, "remove-property", "--name", "P", "--key", "kind")
         assert r.exit_code == 0, r.output
         assert graph.tree("P") == [("text", [])]
         assert _props(graph, "P") == {}
 
     def test_a_write_since_the_page_was_read_is_kept(self):
         graph = PageGraph()
-        page = graph.with_property_block("P", "typ:: a\nteam:: x", "text")
-        api = _with_a_write_in_between(graph, page, "typ:: a\nteam:: x\nother:: b")
+        page = graph.with_property_block("P", "kind:: a\nteam:: x", "text")
+        api = _with_a_write_in_between(graph, page, "kind:: a\nteam:: x\nother:: b")
         r = _invoke(api, "remove-property", "--name", "P", "--key", "team")
         assert r.exit_code == 0, r.stderr
-        assert _props(graph, "P") == {"typ": "a", "other": "b"}
+        assert _props(graph, "P") == {"kind": "a", "other": "b"}
 
     def test_the_last_key_of_a_page_with_no_other_block_leaves_it_empty(self):
         """Removed, it would leave a page without blocks, which set-property
         then refuses."""
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a")
-        _, r = _run(graph, "remove-property", "--name", "P", "--key", "typ")
+        graph.with_property_block("P", "kind:: a")
+        _, r = _run(graph, "remove-property", "--name", "P", "--key", "kind")
         assert r.exit_code == 0, r.output
         assert graph.tree("P") == [("", [])]
         assert _props(graph, "P") == {}
 
     def test_a_property_in_a_first_text_block_is_removed_from_it(self):
         """Where set-property put it on a page starting with text."""
-        graph = PageGraph({"P": ["hello text\ntyp:: x", "second"]})
-        _, r = _run(graph, "remove-property", "--name", "P", "--key", "typ")
+        graph = PageGraph({"P": ["hello text\nkind:: x", "second"]})
+        _, r = _run(graph, "remove-property", "--name", "P", "--key", "kind")
         assert r.exit_code == 0, r.output
         assert graph.page_named("P")["blocks"][0]["content"] == "hello text"
 
     def test_a_removal_the_page_does_not_show_fails(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a\nteam:: x", "text")
+        graph.with_property_block("P", "kind:: a\nteam:: x", "text")
         api = page_graph_api(graph)
         api.update_block.side_effect = None  # Logseq drops it
         r = _invoke(api, "remove-property", "--name", "P", "--key", "team")
@@ -258,22 +258,22 @@ class TestRemoveProperty:
         """The line went, the page kept the key: what remove-property did on
         a property block before #80."""
         graph = PageGraph()
-        page = graph.with_property_block("P", "typ:: a\nteam:: x", "text")
-        page["blocks"][0]["content"] = "typ:: a"
+        page = graph.with_property_block("P", "kind:: a\nteam:: x", "text")
+        page["blocks"][0]["content"] = "kind:: a"
         _, r = _run(graph, "remove-property", "--name", "P", "--key", "team")
         assert r.exit_code == 0, r.output
-        assert _props(graph, "P") == {"typ": "a"}
+        assert _props(graph, "P") == {"kind": "a"}
 
     def test_a_rule_in_a_first_text_block_is_not_front_matter(self):
         """Only a property block written as front matter is refused."""
         graph = PageGraph({"P": ["---", "text"]})
-        _, r = _run(graph, "remove-property", "--name", "P", "--key", "typ", "--json")
+        _, r = _run(graph, "remove-property", "--name", "P", "--key", "kind", "--json")
         assert r.exit_code == 0, r.stderr
         assert json.loads(r.stdout)["status"] == "not_present"
 
     def test_an_absent_key_writes_nothing_and_says_so(self):
         graph = PageGraph()
-        graph.with_property_block("P", "typ:: a", "text")
+        graph.with_property_block("P", "kind:: a", "text")
         api, r = _run(graph, "remove-property", "--name", "P", "--key", "team", "--json")
         assert r.exit_code == 0, r.output
         assert json.loads(r.stdout)["status"] == "not_present"
@@ -285,11 +285,11 @@ class TestDryRunShowsTheSameTarget:
 
     @pytest.mark.parametrize("blocks, where", [
         (["hello text"], "new property block"),
-        (["typ:: a", "text"], "property block"),
+        (["kind:: a", "text"], "property block"),
     ])
     def test_set(self, blocks, where):
         graph = PageGraph({"P": blocks})
-        api, r = _run(graph, "set-property", "--name", "P", "--key", "typ",
+        api, r = _run(graph, "set-property", "--name", "P", "--key", "kind",
                       "--value", "b", "--dry-run", "--json")
         assert r.exit_code == 0, r.output
         preview = json.loads(r.stdout)
@@ -299,8 +299,8 @@ class TestDryRunShowsTheSameTarget:
 
     def test_the_old_value_is_the_one_the_write_replaces(self):
         """Not one from a text block the write would leave alone."""
-        graph = PageGraph({"P": ["hello text\ntyp:: a"]})
-        _, r = _run(graph, "set-property", "--name", "P", "--key", "typ",
+        graph = PageGraph({"P": ["hello text\nkind:: a"]})
+        _, r = _run(graph, "set-property", "--name", "P", "--key", "kind",
                     "--value", "b", "--dry-run", "--json")
         preview = json.loads(r.stdout)
         assert preview["existed"] is False

@@ -138,7 +138,7 @@ def parse_property_pairs(pairs) -> list:
     """Parse ('key=value', ...) strings into [(key, coerced_value), ...].
 
     Splits on the FIRST '=' only, so values may contain '=', commas and spaces
-    (e.g. ``tags=mcp, agents``). Keys come back as :func:`normalize_property_key`
+    (e.g. ``tags=alpha, beta``). Keys come back as :func:`normalize_property_key`
     returns them. Raises ValueError on a missing '=', an empty key, or a key
     Logseq would not read back.
     """

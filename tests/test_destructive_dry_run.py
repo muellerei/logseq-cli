@@ -72,7 +72,7 @@ class TestRemoveBlockDryRun:
             "children": [
                 {"uuid": "c1", "content": "Child A"},
                 {"uuid": "c2", "content": "Child B",
-                 "children": [{"uuid": "g1", "content": "Enkel"}]},
+                 "children": [{"uuid": "g1", "content": "Grandchild"}]},
             ],
         }
         result = CliRunner().invoke(cli, ["remove-block", "--id", "root",

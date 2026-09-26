@@ -1590,7 +1590,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   known latent defect.
   The listing also printed a collection as Python's repr (`team:: ['Core']`);
   it now reads as the page spells it (`team:: Core`, and
-  `tags:: git, Monorepo, Multiapps` for several values). `get-properties` was
+  `tags:: red, green, blue` for several values). `get-properties` was
   not affected — it prefers Logseq's own text values.
 
 ### Changed

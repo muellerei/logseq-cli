@@ -992,7 +992,7 @@ class LogseqHttpDouble:
 
     def _update_block(self, args):
         """Answers null on success, for the same text and for an unknown uuid.
-        The text is trimmed on both sides ("neu  " → "neu"; at the start
+        The text is trimmed on both sides ("new  " → "new"; at the start
         measured for spaces, a tab and blank lines, 0.10.15), and a ref to
         the block itself is dropped ("see ((own)) here" → "see  here",
         measured; editor.cljs:323-324 replaces the lower-case form). ``{"properties":

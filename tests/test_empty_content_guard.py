@@ -140,10 +140,10 @@ class TestRealContentStillWrites:
     def test_update_block_writes(self, monkeypatch):
         api = fake_api(["u1"])
         api.get_block.side_effect = None
-        api.get_block.return_value = {"uuid": BLOCK, "content": "alt", "properties": {}}
+        api.get_block.return_value = {"uuid": BLOCK, "content": "old", "properties": {}}
         monkeypatch.setattr("logseq_cli.group.LogseqAPI", lambda **kw: api)
         result = split_runner().invoke(
-            cli, ["--token", "t", "update-block", "--id", BLOCK, "--content", "neu"]
+            cli, ["--token", "t", "update-block", "--id", BLOCK, "--content", "new"]
         )
         assert result.exit_code == 0, result.stderr
         api.update_block.assert_called_once()

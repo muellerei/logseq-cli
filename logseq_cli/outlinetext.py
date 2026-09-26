@@ -222,7 +222,7 @@ def parse_hierarchical_content(content: str) -> list:
         # ("- ## Plan" / "\t- collapsed:: true", a 22-block plan insert on
         # 2026-08-10). At the same level or above, Logseq reads "- k:: v" as a
         # block of its own (measured, 0.10.15), and merging it would move it
-        # into whatever block came last, e.g. "- Priorität:: hoch" after a
+        # into whatever block came last, e.g. "- Priority:: high" after a
         # nested detail (#39).
         if (PROPERTY_LINE_RE.match(stripped) and last_node is not None
                 and (not bulleted or indent > last_indent)):

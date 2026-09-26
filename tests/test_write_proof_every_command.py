@@ -522,9 +522,9 @@ def test_set_blocks_id_skips_pre_block(monkeypatch):
     # A page's property block is skipped by setBlocksId (measured); asked for it,
     # the proof would fail a write whose ref Logseq keeps without the id.
     double = LogseqHttpDouble()
-    double.add_page("Props Page", ["typ:: probe", "body"])
+    double.add_page("Props Page", ["kind:: probe", "body"])
     double.install(monkeypatch)
-    pre = double.uuid_of("typ:: probe")
+    pre = double.uuid_of("kind:: probe")
     api = LogseqAPI(token="t")
     api.insert_block(double.uuid_of("body"), f"see (({pre}))")
     assert double.sent("setBlocksId") == []

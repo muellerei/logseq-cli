@@ -43,8 +43,8 @@ def test_an_id_line_in_code_stays():
 
 
 def test_spaces_at_the_end_go():
-    # Measured: "neu  " is read back as "neu".
-    assert _normalize("neu  ") == "neu"
+    # Measured: a text ending in spaces is read back without them.
+    assert _normalize("new  ") == "new"
 
 
 def test_spaces_at_each_line_end_go():
@@ -102,8 +102,8 @@ def test_replace_text_appended_logbook_is_success(monkeypatch):
 
 
 def test_whitespace_at_the_start_goes():
-    # Measured, 0.10.15: "  eingerückt", "\tmit tab"
-    # and "\n\nnach leerzeilen" are read back without it; Logseq trims the
+    # Measured, 0.10.15: leading spaces, a leading tab and leading blank
+    # lines are read back without them; Logseq trims the
     # text on both sides (editor.cljs:1291-1296).
     assert _normalize("  indented") == "indented"
     assert _normalize("\ttabbed") == "tabbed"
