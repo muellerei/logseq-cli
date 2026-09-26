@@ -8,6 +8,7 @@ and the API proves the append.
 """
 
 import re
+import textwrap
 
 
 class TitleHeadingOnly(Exception):
@@ -25,7 +26,11 @@ class TitleHeadingOnly(Exception):
 
 
 def strip_title_heading(content: str, page_name: str) -> str:
-    """Remove '# PageName' heading from content to prevent duplication.
+    """Remove a leading '# PageName' heading from content to prevent
+    duplication, and the indentation the lines below it share.
+
+    Only the first line with text is the title. A '# PageName' line further
+    down, or in a code block, is the caller's text and stays.
 
     Refuses content that was nothing but that heading (TitleHeadingOnly). The
     commands check for empty content before they get here, so text the
@@ -33,8 +38,16 @@ def strip_title_heading(content: str, page_name: str) -> str:
     or as "Added 0 block(s)" with exit 0. Checked here, where the text is
     emptied, so every writer that removes the heading refuses it the same way.
     """
-    pattern = re.compile(rf"^#\s+{re.escape(page_name)}\s*$", re.IGNORECASE | re.MULTILINE)
-    stripped = pattern.sub("", content).strip()
+    lines = content.split("\n")
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    # From the line's start, as before: " # Title" stays text (see
+    # test_the_title_is_stripped_once).
+    title = re.compile(rf"#\s+{re.escape(page_name)}\s*", re.IGNORECASE)
+    if first is not None and title.fullmatch(lines[first]):
+        lines = lines[first + 1:]
+    # The lines below go out together: stripped alone, the first lost its
+    # indentation and became the parent of the lines that shared it.
+    stripped = textwrap.dedent("\n".join(lines)).strip()
     if content.strip() and not stripped:
         raise TitleHeadingOnly(page_name)
     return stripped
