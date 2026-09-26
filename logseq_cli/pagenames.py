@@ -142,9 +142,9 @@ def refuse_alias(ref: PageRef, command: str) -> None:
 
 
 def title_as_created(name: str) -> str:
-    """The title Logseq's ``create!`` makes of ``name`` (handler/page.cljs:
-    137-142): trimmed, a whole ``[[...]]`` unwrapped, leading ``#`` dropped,
-    then one ``/`` at either end dropped.
+    """The title Logseq's ``create!`` makes of ``name`` (handler/page.cljs
+    ``create!``, 0.10.15): trimmed, a whole ``[[...]]`` unwrapped, leading
+    ``#`` dropped, then one ``/`` at either end dropped.
 
     createPage and appendBlockInPage create a missing page under this title,
     while getPage looks the name up as given, so ``[[X]]`` finds nothing and
@@ -152,6 +152,12 @@ def title_as_created(name: str) -> str:
     `` X `` answered the page X, getPage under the name sent null; ``/X/``
     getPage finds, as it drops the slashes itself). Not mirrored: a Markdown
     or Org link to a file as the name.
+
+    One pass, as ``create!`` makes it, and not idempotent: ``#[[X]]`` becomes
+    ``[[X]]``, since the brackets are unwrapped only around the whole name,
+    and ``[[X]]`` again becomes ``X`` (measured, 0.10.15). So it is applied
+    to a name as asked, never to its own result, and createPage is sent the
+    name as asked (``LogseqAPI.create_page``).
     """
     title = name.strip()
     linked = re.fullmatch(r"\[\[(.*)\]\]", title)
@@ -177,20 +183,33 @@ def page_name_to_create(api, name: str) -> str:
     name sent: a page that was made read as one that was not. Shared by
     LogseqAPI.create_page and the commands that name the page they write to
     or report, so the check for a page that exists, the write and the output
-    use one name.
+    use one name. ``name`` is the name as asked: see ``title_as_created``.
     """
     title = title_as_created(name)
     day = parse_journal_name(title)
     return journal_page_name(api, day) if day else title
 
 
-def page_to_write(api, name: str):
-    """``(name, page)`` for a write to ``name`` that creates a missing page:
-    the page getPage finds under ``name``, or else the name Logseq would
+class PageToWrite(NamedTuple):
+    """Where a write to a page name goes, from :func:`page_to_write`.
+
+    ``name`` is the page's name for every step after: the check, the
+    preview, the write and the output. ``asked`` is the name as the caller
+    gave it, and only createPage is sent it (``create_missing_page`` in
+    strictinsert): Logseq makes ``name`` of it, and would make another page
+    of ``name`` itself when that is not how Logseq names it already.
+    """
+    asked: str
+    name: str
+    page: dict | None
+
+
+def page_to_write(api, name: str) -> PageToWrite:
+    """The page getPage finds under ``name``, or else the name Logseq would
     create (``page_name_to_create``) and the page found under that, ``None``
     when there is none yet."""
     page = api.get_page(name)
     if page:
-        return name, page
+        return PageToWrite(name, name, page)
     created = page_name_to_create(api, name)
-    return created, (api.get_page(created) if created != name else page)
+    return PageToWrite(name, created, api.get_page(created) if created != name else page)

@@ -154,6 +154,11 @@ def without_foreign_block_ids(content: str, own: str) -> tuple:
         "moves a block with its uuid.")
 
 
+# Why a --keep-ids write is refused while a block is open.
+# Not "would discard": Logseq saves the open block before it inserts (measured).
+KEPT_IDS_MOVE_CURSOR = "a write with kept ids would move the cursor out of the block being edited"
+
+
 def check_block_ids(api, tree: list, keep_ids: bool):
     """Apply the ``id::`` contract to ``tree`` before any of it is written.
 
@@ -168,7 +173,16 @@ def check_block_ids(api, tree: list, keep_ids: bool):
     an id that cannot become a block id, and for one a block already has:
     that is the copy case, and insertBatchBlock would give the uuid to a second
     block without a word (measured), leaving two blocks one uuid.
+
+    With ``keep_ids`` the call's first write is refused while a block is
+    open: a kept id goes only through the batch (#31), which would move the
+    cursor out of the block being typed in, and a page or heading written
+    before it would be left behind by the refusal. Asked here, since every
+    --keep-ids command comes through before it writes, whether the text has
+    ids or not; a dry run writes nothing, so nothing asks.
     """
+    if keep_ids:
+        api.refuse_open_before_first_write(KEPT_IDS_MOVE_CURSOR)
     ids = collect_block_ids(tree)
     if not ids:
         return None

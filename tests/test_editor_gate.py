@@ -507,13 +507,45 @@ def test_keep_ids_refusal_names_the_cursor(monkeypatch):
     assert error["page"] == "Other Page"
 
 
-def test_keep_ids_refused_before_the_page_is_made(monkeypatch):
-    # page_end on a missing page creates it first; the refusal comes before.
+# A --keep-ids write whose first write is not the batch: a missing page, or a
+# missing heading on a page that exists, is written before it. 2099-01-05 is
+# a journal of _graph() with "## Log"; 2099-01-06 is none.
+_KEEP_IDS_FIRST_WRITES = {
+    "insert-block-page": ["insert-block", "--page", "Fresh Page", "--content", "x"],
+    "insert-block-tree-top-level": ["insert-block", "--page", "Fresh Page", "--top-level",
+                                    "--tree", "- x"],
+    "add-note-content-page": ["add-note-content", "--page", "Fresh Page", "--content", "x"],
+    "add-note-content-heading": ["add-note-content", "--page", "Probe Page", "--content", "x",
+                                 "--under-heading", "## Fresh"],
+    "add-journal-block-page": ["add-journal-block", "--date", "2099-01-06", "--top-level",
+                               "--content", "x"],
+    "add-journal-block-tree-page": ["add-journal-block", "--date", "2099-01-06", "--top-level",
+                                    "--content", "- x\n\t- y"],
+    "add-journal-block-several-page": ["add-journal-block", "--date", "2099-01-06",
+                                       "--top-level", "--content", "x", "--content", "y"],
+    "add-journal-block-heading": ["add-journal-block", "--date", "2099-01-05",
+                                  "--under-heading", "## Fresh", "--content", "x"],
+    "add-journal-block-tree-heading": ["add-journal-block", "--date", "2099-01-05",
+                                       "--under-heading", "## Fresh", "--content", "- x\n\t- y"],
+    "add-journal-block-several-heading": ["add-journal-block", "--date", "2099-01-05",
+                                          "--under-heading", "## Fresh",
+                                          "--content", "x", "--content", "y"],
+    "add-journal-content-page": ["add-journal-content", "--date", "2099-01-06", "--top-level",
+                                 "--content", "x"],
+    "add-journal-content-heading": ["add-journal-content", "--date", "2099-01-05",
+                                    "--under-heading", "## Fresh", "--content", "x"],
+}
+
+
+@pytest.mark.parametrize("args", list(_KEEP_IDS_FIRST_WRITES.values()),
+                         ids=list(_KEEP_IDS_FIRST_WRITES))
+def test_keep_ids_refused_before_the_page_or_heading_is_made(monkeypatch, args):
+    # The page or heading is the call's first write; the refusal comes before
+    # it, so nothing is left behind.
     graph = _graph().install(monkeypatch)
     graph.editing = graph.uuid_of("other block")
-    r = _invoke(graph, ["insert-block", "--page", "Fresh Page", "--content", "x",
-                        "--keep-ids"])
-    assert r.exit_code == 1
+    r = _invoke(graph, [*args, "--keep-ids"])
+    assert r.exit_code == 1, r.stdout + r.stderr
     assert _error_object(r)["reason"] == "open_in_editor"
     assert graph.writes() == []
 

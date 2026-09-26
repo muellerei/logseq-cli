@@ -192,12 +192,14 @@ def _invoke(double, args):
 
 
 # --- the name Logseq creates -------------------------------------------------
-# createPage runs the name through create! (handler/page.cljs:137-142, read in
+# createPage runs the name through create! (handler/page.cljs create!, read in
 # the code): trimmed, [[...]] unwrapped, a leading # dropped, a slash at either
 # end dropped. It answers the page under that name, and getPage under the name
-# as sent finds nothing. A journal title Logseq takes as one whatever the
-# graph's format (MMM do, yyyy; yyyy-MM-dd; yyyy_MM_dd, date_time_util.cljs:
-# 15-19) becomes the journal under the graph's name, answered with null (measured).
+# as sent finds nothing. The name goes as asked, since create! cleans it
+# itself, in one pass that is not idempotent (test_page_name_created_once.py).
+# A journal title Logseq takes as one whatever the graph's format (MMM do,
+# yyyy; yyyy-MM-dd; yyyy_MM_dd; date_time_util.cljs safe-journal-title-formatters)
+# becomes the journal under the graph's name, answered with null (measured).
 
 @pytest.mark.parametrize("sent", ["[[Fresh Page]]", "#Fresh Page", "  Fresh Page ",
                                   "/Fresh Page/"])
@@ -207,7 +209,7 @@ def test_create_page_method_creates_under_the_name_logseq_gives(monkeypatch, sen
     api = LogseqAPI(token="t")
     result = api.create_page(sent)
     assert result["originalName"] == "Fresh Page"
-    assert [a[0] for a in double.sent("createPage")] == ["Fresh Page"]
+    assert [a[0] for a in double.sent("createPage")] == [sent]
     assert api.writes_landed == 1
 
 
@@ -280,14 +282,17 @@ def test_a_date_logseq_does_not_take_for_a_journal_is_a_page(monkeypatch):
 
 
 def test_keep_ids_at_page_end_of_a_journal_named_in_another_format(monkeypatch):
-    # The function itself, not only through a command that named the
-    # journal first: it creates the page and then reads it back by name.
+    # The functions themselves, not only through a command: the page is
+    # created under the name as asked and written under the name it got.
     from logseq_cli.api import LogseqAPI
-    from logseq_cli.strictinsert import insert_tree_keeping_ids
+    from logseq_cli.pagenames import page_to_write
+    from logseq_cli.strictinsert import create_missing_page, insert_tree_keeping_ids
     double = _double(monkeypatch)
     api = LogseqAPI(token="t")
+    target = page_to_write(api, "Jan 1st, 2099")
+    create_missing_page(api, target)
     [uuid] = insert_tree_keeping_ids(api, [{"content": "x", "children": []}],
-                                     "page_end", "Jan 1st, 2099")
+                                     "page_end", target.name)
     assert double.tree("2099-01-01, Thursday") == [("x", [])]
     assert double.uuid_of("x") == uuid
 
@@ -305,3 +310,18 @@ def test_add_note_content_json_names_the_page_written(monkeypatch, extra, headin
     assert result["page"] == "Jan 1st, 2099"
     where = "'2099-01-01, thursday'"
     assert result["position"] == (f"under '## Log' on {where}" if heading else where)
+
+
+@pytest.mark.parametrize("heading", [(), ("--under-heading", "## Log")], ids=["page", "heading"])
+def test_add_note_content_text_names_the_page_as_its_preview_does(monkeypatch, heading):
+    double = _double(monkeypatch)
+    args = ["--token", "t", "add-note-content", "--page", "Jan 1st, 2099", "--content", "x",
+            *heading]
+    preview = split_runner().invoke(cli, [*args, "--dry-run"])
+    run = split_runner().invoke(cli, args)
+    assert run.exit_code == 0, run.stderr
+    where = "'2099-01-01, thursday'"
+    where = f"under '## Log' on {where}" if heading else where
+    assert f"Would add 1 block(s) to {where}\n" in preview.stdout
+    assert f"Added 1 block(s) to {where}\n" in run.stdout
+    assert double.tree("2099-01-01, Thursday")
