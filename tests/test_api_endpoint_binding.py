@@ -216,9 +216,8 @@ def test_ui_call_neither_caches_nor_clears(method):
 
 # The task that gives each write its proof completes its entry; the gate
 # rules come earlier (030-B3), so the proof decides when a case turns green.
+# A write missing here has its proof.
 _PROOF_TASK = {
-    "logseq.Editor.insertBlock": "030-C2",
-    "logseq.Editor.appendBlockInPage": "030-C2",
     "logseq.Editor.insertBatchBlock": "030-C3",
     "logseq.Editor.moveBlock": "030-C3",
     "logseq.Editor.updateBlock": "030-C4",
@@ -233,8 +232,8 @@ _PROOF_TASK = {
 
 
 @pytest.mark.parametrize("method", [
-    pytest.param(m, marks=pytest.mark.xfail(
-        strict=True, reason=f"spec 030: {_PROOF_TASK[m]}"))
+    pytest.param(m, marks=[pytest.mark.xfail(
+        strict=True, reason=f"spec 030: {_PROOF_TASK[m]}")] if m in _PROOF_TASK else [])
     for m in sorted(m for m, kind in _METHODS.items() if isinstance(kind, Write))
 ])
 def test_every_write_has_rule_and_proof(method):

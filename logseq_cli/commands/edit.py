@@ -49,7 +49,6 @@ from logseq_cli.strictinsert import (
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
     move_block_verified,
-    require_insert,
 )
 
 
@@ -326,8 +325,8 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # graph), so the write cannot be checked from its return value. Counting the
     # matches instead would report "Replaced N block(s)" for writes that never
     # landed, complete with a before/after diff computed locally. Read the
-    # blocks back and compare. See the note above require_insert() in strictinsert.py
-    # for when this read can be dropped.
+    # blocks back and compare. See the note "Why some writes are verified by
+    # reading them back" in strictinsert.py for when this read can be dropped.
     # Compared without id:: lines: a ref another replacement wrote may have
     # stored this block's id meanwhile, and Logseq keeps it through the update
     # (#95, measured). A replacement never changes an id:: line (masked above).
@@ -475,7 +474,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                     return insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
                 def do_insert():
-                    return insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
+                    return insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
         elif after:
             clean_id = after.strip().replace("((", "").replace("))", "")
             position = f"after {clean_id[:8]}..."
@@ -506,14 +505,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 click.echo(f"[DRY RUN] Would insert {planned} block(s) {position}")
             return
 
+        # The tree is not empty (checked above), and every insert is proven,
+        # so there is a first block.
         uuids = do_insert()
-        root_uuid = uuids[0] if uuids else None
-        applied = {}
-        if properties:
-            if root_uuid:
-                applied = apply_block_properties(api, root_uuid, properties)
-            else:
-                click.echo("Warning: no block created, --property ignored", err=True)
+        applied = apply_block_properties(api, uuids[0], properties) if properties else {}
 
         if as_json:
             output({
@@ -586,34 +581,34 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     if page:
         if hierarchical:
             uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"end of '{page}' ({len(uuids)} block(s))"
         else:
             result = append_in_page(api, page, content, keep_ids)
-            new_uuid = require_insert(result, f"a block in '{page}'")
+            new_uuid = result["uuid"]
             position = f"end of '{page}'"
     elif after:
         clean_id = after.strip().replace("((", "").replace("))", "")
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"after {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=True, before=False, keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a block after {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"after {clean_id[:8]}..."
     elif before:
         clean_id = before.strip().replace("((", "").replace("))", "")
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"before {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=True, before=True, keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a block before {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"before {clean_id[:8]}..."
     elif child_of:
         clean_id = child_of.strip().replace("((", "").replace("))", "")
@@ -622,33 +617,25 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             if as_first:
                 uuids = insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
-                uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+                uuids = insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=False, before=as_first,
                                      keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a {where} of {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"{where} of {clean_id[:8]}..."
 
-    if new_uuid is None and isinstance(result, dict):
-        new_uuid = result.get("uuid")
-
-    applied = {}
-    if properties:
-        if new_uuid:
-            applied = apply_block_properties(api, new_uuid, properties)
-        else:
-            click.echo("Warning: no block uuid returned, --property ignored", err=True)
+    # Every branch above set new_uuid from a proven insert.
+    applied = apply_block_properties(api, new_uuid, properties) if properties else {}
 
     if as_json:
-        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u]), **alias}, True)
+        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([new_uuid]), **alias}, True)
     else:
         click.echo(f"Inserted block {position}")
         # Before the preview: the content may itself contain "uuid: ...".
-        if new_uuid:
-            click.echo(f"  uuid: {new_uuid}")
+        click.echo(f"  uuid: {new_uuid}")
         preview = content[:80] + ("..." if len(content) > 80 else "")
         click.echo(f"  {preview}")
         for key, value in applied.items():
@@ -763,22 +750,17 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
                            f"{'' if heading_exists else ' (would be created)'}")
         return
 
+    # A ref that was never written is worse than a visible error: the TODO looks
+    # linked on the project page and silently is not, which is exactly what
+    # block-refs are relied on for. The API proves each insert and raises.
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
-        if heading_uuid:
-            result = api.insert_block(heading_uuid, ref_content, {"sibling": False})
-            position = f"under '{under_heading}' on '{page}'"
-        else:
-            result = api.append_block_in_page(page, ref_content)
-            position = f"top-level on '{page}' (heading not found)"
+        result = api.insert_block(heading_uuid, ref_content, {"sibling": False})
+        position = f"under '{under_heading}' on '{page}'"
     else:
         result = api.append_block_in_page(page, ref_content)
         position = f"top-level on '{page}'"
-
-    # A ref that was never written is worse than a visible error: the TODO looks
-    # linked on the project page and silently is not, which is exactly what
-    # block-refs are relied on for.
-    new_uuid = require_insert(result, f"the block-ref {position}")
+    new_uuid = result["uuid"]
 
     if as_json:
         output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}), "position": position, "uuid": new_uuid}, True)
@@ -852,12 +834,10 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
                 click.echo(f"  block refs into the source that would dangle: {len(refs)}")
         return
 
-    # Every insert is checked: Logseq answers a failed write with HTTP 200 +
-    # null, so an unchecked copy reports "Moved N block(s)" with exit 0 while
-    # nothing arrived. With --remove that unverified success would then delete
-    # the source, which destroys the block for good.
-    written = [0]
-
+    # Every insert is proven by the API: Logseq answers a failed write with
+    # HTTP 200 + null, so an unchecked copy reported "Moved N block(s)" with
+    # exit 0 while nothing arrived. With --remove that unverified success would
+    # then delete the source, which destroys the block for good.
     def _copy_tree(block, parent_uuid=None):
         # The copy gets uuids of its own, and refs stay with the original, so
         # the source's id:: lines go without a word; left in, the file would
@@ -865,13 +845,9 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         content = without_block_ids(block.get("content", ""))
         if parent_uuid:
             result = api.insert_block(parent_uuid, content, {"sibling": False})
-            new_uuid = require_insert(
-                result, "a copied block", written_so_far=written[0])
         else:
             result = api.append_block_in_page(to_page, content)
-            new_uuid = require_insert(
-                result, f"the copied block on '{to_page}'", written_so_far=written[0])
-        written[0] += 1
+        new_uuid = result["uuid"]
         copied = 1
         for child in block.get("children", []):
             copied += _copy_tree(child, new_uuid)
@@ -880,7 +856,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     count = _copy_tree(source)
 
     if remove:
-        # Only reached when every insert above returned a UUID, so the source is
+        # Only reached when every insert above was proven, so the source is
         # removed against a copy that is known to exist, never a claimed one.
         api.remove_block(block_id)
 

@@ -127,6 +127,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts the landed writes itself, one per write and a batch by its blocks,
   so no command has to keep its own count for the message. Exit status
   stays 1.
+- An insert Logseq answers without a block now fails with
+  `reason: "write_not_verified"`. `insertBlock` and `appendBlockInPage`
+  answer `null` for a write they did not do (an unknown anchor, a page not
+  loaded); each command checked for the uuid itself and failed with
+  "Logseq did not create …", which under `--json` carried no reason. The
+  check sits in the two API methods now, so no command can skip it, and the
+  error names `method`, `target`, `expected` and `got`. An insert counts in
+  `writes_landed` once proven, and a page created earlier in the same call
+  counts too: `create-page --content` whose text did not land says one
+  earlier write remains, not "Nothing was written."
+- `--under-heading` no longer falls back to the top of the page when the
+  heading could not be created. `add-journal-block`, `add-journal-content`
+  and `add-block-ref` then wrote the blocks at the top with a warning and
+  `position: "top-level (heading not found)"`; `add-note-content` exited 1.
+  A heading Logseq does not create now fails like any insert, before a
+  block of the text is written.
 
 ## [0.15.0] - 2026-09-25
 

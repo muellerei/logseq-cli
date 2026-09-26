@@ -2,8 +2,12 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
+from logseq_cli.api import LogseqAPI, WriteNotVerified
 from logseq_cli.headings import find_or_create_heading
 from logseq_cli.outlinetext import contains_hierarchical_content, parse_hierarchical_content
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 class TestContainsHierarchicalContent:
@@ -75,12 +79,16 @@ class TestFindOrCreateHeading:
         result = find_or_create_heading(api, "test-page", "## Log")
         assert result == "abc-123"
 
-    def test_returns_none_on_total_failure(self):
-        api = MagicMock()
-        api.get_page_blocks_tree.return_value = []
-        api.append_block_in_page.return_value = None
-        result = find_or_create_heading(api, "test-page", "## Log")
-        assert result is None
+    def test_a_heading_logseq_did_not_create_raises(self, monkeypatch):
+        """It answered None, and the callers wrote to the top of the page
+        instead; the API's proof raises now (spec 030)."""
+        double = LogseqHttpDouble()
+        double.add_page("test-page", ["body"])
+        double.set_mode("appendBlockInPage", "noop")
+        double.install(monkeypatch)
+        with pytest.raises(WriteNotVerified):
+            find_or_create_heading(LogseqAPI(token="t"), "test-page", "## Log")
+        assert double.tree("test-page") == [("body", [])]
 
 
 class TestParseHierarchicalContentIntegration:

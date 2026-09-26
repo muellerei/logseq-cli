@@ -60,7 +60,8 @@ def _contents(graph):
 class TestTheApiRefusesAnUndecidedIdLine:
     def _api(self):
         api = LogseqAPI(token="t")
-        api.call = MagicMock()
+        # A block, as an insert answers: its proof reads the uuid (spec 030).
+        api.call = MagicMock(return_value={"uuid": TARGET})
         return api
 
     @pytest.mark.parametrize("write", [

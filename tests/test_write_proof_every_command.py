@@ -27,9 +27,9 @@ from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
 
-# The task that proves each write method in LogseqAPI.
+# The task that proves each write method in LogseqAPI, for the methods not
+# proven yet; a method missing here proves its write.
 PROOF_TASK = {
-    "insertBlock": "030-C2", "appendBlockInPage": "030-C2",
     "insertBatchBlock": "030-C3", "moveBlock": "030-C3",
     "updateBlock": "030-C4", "upsertBlockProperty": "030-C4",
     "removeBlockProperty": "030-C4",
@@ -255,7 +255,7 @@ def _failure_params():
             if mode == "error" or args[0] in PROVEN_BY_THE_COMMAND:
                 task = None
             else:
-                task = PROOF_TASK[method]
+                task = PROOF_TASK.get(method)
             yield pytest.param(args, method, mode, id=f"{row_id}-{mode}",
                                marks=[_spec(task)] if task else [])
 

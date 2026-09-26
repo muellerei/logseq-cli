@@ -47,8 +47,14 @@ class Write:
     ``editor`` and ``proof`` name the ``LogseqAPI._gate_<editor>`` and
     ``_prove_<proof>`` methods the central write dispatches on (spec 030).
     Names rather than descriptions: a label nothing acts on can disagree
-    with the code. ``None`` until those methods exist: ``proof`` for every
-    write so far (030-C*).
+    with the code. ``proof`` is ``None`` for a write whose proof still sits
+    with its callers (030-C*).
+
+    ``proof`` says how the write is shown to have landed:
+
+    * ``uuid``: the answer carries the new block's uuid. insertBlock and
+      appendBlockInPage answer the block they wrote, and ``null`` for one
+      they did not (an unknown anchor, a page not loaded).
 
     ``editor`` says when a block open in Logseq's editor refuses the write,
     given the open block and the write's target:
@@ -99,8 +105,8 @@ _METHODS = {
     "logseq.Editor.createPage": Write(editor="never", proof=None),
     "logseq.Editor.deletePage": Write(editor="page", proof=None),
     "logseq.Editor.renamePage": Write(editor="page_or_link", proof=None),
-    "logseq.Editor.appendBlockInPage": Write(editor="never", proof=None),
-    "logseq.Editor.insertBlock": Write(editor="never", proof=None),
+    "logseq.Editor.appendBlockInPage": Write(editor="never", proof="uuid"),
+    "logseq.Editor.insertBlock": Write(editor="never", proof="uuid"),
     "logseq.Editor.updateBlock": Write(editor="target", proof=None),
     "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
     "logseq.Editor.upsertBlockProperty": Write(editor="target", proof=None),
@@ -237,6 +243,44 @@ _UNSET = object()
 
 # checkEditing's answer when a block is open: its uuid (M8).
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+
+
+def _block_uuid_from_result(result):
+    """The uuid in an answer of insertBlock or appendBlockInPage, or ``None``.
+
+    Logseq answers the block map ``{"uuid": ...}``, or ``null`` when it wrote
+    nothing (an unknown anchor, a page not loaded: HTTP 200 either way). A
+    bare uuid string is taken too; not seen from 0.10.15, but the check has
+    always allowed it, and dropping it would fail a write that landed.
+    """
+    if isinstance(result, dict):
+        return result.get("uuid")
+    if isinstance(result, str):
+        return result
+    return None
+
+
+def _target_text(target) -> str:
+    """A write's target as a message names it: a block by the start of its
+    uuid, a page by its name in quotes."""
+    if isinstance(target, str) and _UUID_TEXT.fullmatch(target):
+        return f"block {target[:8]}..."
+    return f"'{target}'"
+
+
+def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerified:
+    """The WriteNotVerified for a write that did not show in Logseq.
+
+    ``method`` is the full name or the short one; the error names the short.
+    Whether earlier writes of the call landed, the error handler adds.
+    """
+    short = method.rsplit(".", 1)[-1]
+    return WriteNotVerified(
+        f"{short} on {_target_text(target)} did not show in Logseq: "
+        f"expected {expected}, read {got}.",
+        method=short, target=target, expected=expected, got=got,
+    )
+
 
 # The reasons EditorOpen gives. A write into the open block loses what is
 # typed there; a batch beside it only moves the cursor, since Logseq saves
@@ -389,9 +433,12 @@ class LogseqAPI:
            protects;
         4. store the targets' ids with the answer from step 1, which refuses
            if one of them is the open block (setBlocksId writes into it);
-        5. the write; ``count`` more writes landed (a batch counts its
-           blocks);
-        6. prove it; a method with a proof counts only once it is proven.
+        5. the write;
+        6. prove it, through ``_prove_<proof>``, which answers the result the
+           method returns;
+        7. ``count`` more writes landed (a batch counts its blocks): after
+           the proof, so a write that fails it does not count. A write with
+           no proof yet counts on Logseq's answer.
 
         Asked before the ids are stored, not after: setBlocksId would
         otherwise write an id:: into a block for a write the gate then
@@ -400,17 +447,12 @@ class LogseqAPI:
         milliseconds in which someone can enter a block there stay (spec 030,
         named).
 
-        Step 6 dispatches on the entry's ``proof`` (030-C*). Until then every
-        entry names none, and the step is skipped because the entry says
-        None, not because a method is missing: a name with no step behind it
-        fails here instead of passing as a check nobody made.
+        Step 6 is skipped for an entry whose ``proof`` is None, because the
+        entry says so (030-C*), not because a method is missing: a name with
+        no ``_prove_`` method behind it fails at the lookup instead of passing
+        as a check nobody made (and test_api_endpoint_binding names it).
         """
         kind = _METHODS[method]
-        if kind.proof is not None:
-            raise NotImplementedError(
-                f"{method}: proof {kind.proof!r} named in _METHODS, "
-                "but _write has no step for it yet."
-            )
         can_refuse = kind.editor not in (None, "never")
         refs = [u for t in texts for u in block_ref_uuids(t)]
         if editing is _UNSET:
@@ -423,8 +465,21 @@ class LogseqAPI:
         if wanted:
             self.set_blocks_id(wanted, editing=editing)
         result = self.call(method, args)
+        if kind.proof is not None:
+            result = getattr(self, f"_prove_{kind.proof}")(method, target, result)
         self.writes_landed += count
         return result
+
+    # The proofs of _METHODS, one per ``Write.proof`` name. Each gets the
+    # method, the write's target and Logseq's answer, raises WriteNotVerified
+    # when the write does not show, and answers what the method returns.
+    def _prove_uuid(self, method, target, result):
+        """The block, from an answer that names it; a bare uuid becomes
+        ``{"uuid": ...}``, so every caller reads ``result["uuid"]``."""
+        uuid = _block_uuid_from_result(result)
+        if not uuid:
+            raise _not_verified(method, target, "a new block", "no block uuid in the answer")
+        return result if isinstance(result, dict) else {"uuid": uuid}
 
     def check_editing(self) -> str | None:
         """The uuid of the block open in Logseq's editor, lower case, or
@@ -574,6 +629,10 @@ class LogseqAPI:
         )
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
+        """Insert one block next to or under ``block_uuid``; answers the new
+        block as a dict with its ``uuid``, or raises WriteNotVerified when
+        Logseq's answer names none (``_prove_uuid``). The same holds for
+        :meth:`append_block_in_page`."""
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
         return self._write(

@@ -36,6 +36,7 @@ from unittest.mock import patch
 
 import pytest
 
+from logseq_cli.api import _not_verified
 from logseq_cli.cli import cli
 from tests.conftest import mock_api, split_runner
 
@@ -251,13 +252,18 @@ def test_every_path_passes_the_id_on(args):
 
 
 @pytest.mark.parametrize("args", HEADING_MISSING_CASES.values(), ids=HEADING_MISSING_CASES.keys())
-def test_the_heading_fallback_passes_the_id_on(args):
+def test_a_heading_not_created_writes_no_id(args):
+    # The heading's append raises in the API (spec 030). The writers once
+    # fell back to the top of the page, id and all; now nothing follows.
     api = _fake()
-    with patch("logseq_cli.commands.journal.find_or_create_heading", return_value=None):
+    refused = _not_verified("appendBlockInPage", "Page A", "a new block",
+                            "no block uuid in the answer")
+    with patch("logseq_cli.commands.journal.find_or_create_heading", side_effect=refused):
         r = _run(args + ["--keep-ids"], api)
-    assert r.exit_code == 0, r.stderr
-    assert _ids_asked_for(api) == [ID]
-    assert _kept(api)
+    assert r.exit_code == 1
+    assert "did not show in Logseq" in r.stderr
+    assert _ids_asked_for(api) == []
+    assert not _kept(api)
 
 
 class TestRefusedCombinations:

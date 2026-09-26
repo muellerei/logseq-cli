@@ -17,6 +17,8 @@ import pytest
 from click.testing import CliRunner
 
 from tests.conftest import split_runner, fake_api
+from tests.logseq_http_double import LogseqHttpDouble
+from logseq_cli.api import _not_verified
 from logseq_cli.cli import cli
 from logseq_cli.cliinput import read_content_file
 
@@ -306,6 +308,18 @@ class TestUpsertHeadingKeepsAllRoots:
         assert len(api.insert_block.call_args_list) == 4
 
 
+JOURNAL_DATE = "2099-01-05"
+JOURNAL_PAGE = "2099-01-05, Monday"
+
+
+def _journal_double(monkeypatch, blocks=("journal top",)):
+    """The journal of JOURNAL_DATE behind the HTTP double, so the real
+    LogseqAPI proves each write and counts what landed (spec 030)."""
+    double = LogseqHttpDouble()
+    double.add_page(JOURNAL_PAGE, list(blocks))
+    return double.install(monkeypatch)
+
+
 class TestPartialWriteIsNamed:
     """A partial write leaves earlier blocks in place. Claiming "Nothing was
     written" invites a retry and thus duplicates.
@@ -359,33 +373,33 @@ class TestPartialWriteIsNamed:
         assert real == 4
         assert "Added 4 block(s)" in result.output
 
-    def test_batch_page_top_counts_across_content_values(self, api):
+    def test_batch_page_top_counts_across_content_values(self, monkeypatch):
         """insert_block_tree_at_page_top started its counter at 0 per --content
         value, so a failure in the second value claimed "Nothing was written"
-        while the first value's blocks were already on the page."""
-        calls = {"n": 0}
-
-        def fail_on_third(*args, **kwargs):
-            calls["n"] += 1
-            return None if calls["n"] == 3 else {"uuid": f"u{calls['n']}"}
-
-        api.append_block_in_page.side_effect = fail_on_third
-        api.insert_block.side_effect = fail_on_third
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--top-level",
-            "--content", "A\n\t- a1", "--content", "B\n\t- b1"])
+        while the first value's blocks were already on the page. The count is
+        the API's now (writes_landed), so no caller can start it over."""
+        double = _journal_double(monkeypatch)
+        # A lands, a1 lands under it, B is answered null.
+        double.set_mode("appendBlockInPage", "noop", from_call=2)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE, "--top-level",
+            "--content", "A\n\t- a1", "--content", "B\n\t- b1", "--json"])
         assert result.exit_code == 1
-        assert "2 block(s) were already written" in result.output
-        assert "Nothing was written" not in result.output
+        error = _json.loads(result.stderr)
+        assert error["reason"] == "write_not_verified"
+        assert error["method"] == "appendBlockInPage"
+        assert error["writes_landed"] == 2
+        assert "2 earlier write(s) in this call landed" in error["error"]
+        assert "Nothing was written" not in error["error"]
 
     def test_page_top_append_failure_is_not_reported_as_success(self, api, tmp_path):
         """insert_tree_at_page_end (then insert_formatted_content_with_uuids)
         was the last inserter without a strict contract: a page Logseq has not
         loaded answers every append with HTTP 200 + null, the None UUIDs were
         counted, and the command printed "Added N block(s)" with exit 0 for an
-        entry that never existed."""
-        api.append_block_in_page.side_effect = None
-        api.append_block_in_page.return_value = None
+        entry that never existed. The mock raises as LogseqAPI does on null."""
+        api.append_block_in_page.side_effect = _not_verified(
+            "appendBlockInPage", "journal", "a new block", "no block uuid in the answer")
         f = tmp_path / "top.md"
         f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
         result = CliRunner().invoke(cli, [
@@ -394,18 +408,25 @@ class TestPartialWriteIsNamed:
         assert "Added" not in result.output
         assert "Nothing was written" in result.output
 
-    def test_heading_fallback_failure_is_not_reported_as_success(self, api, tmp_path):
-        """Same path, reached via the 'could not create heading' fallback."""
-        api.get_page_blocks_tree.return_value = []
-        api.append_block_in_page.side_effect = None
-        api.append_block_in_page.return_value = None
+    def test_heading_failure_is_not_reported_as_success(self, monkeypatch, tmp_path):
+        """A heading Logseq did not create fails the command. It once fell
+        back to writing the blocks at the top of the page, with a warning
+        (017 called that fallback a probe: "delete or test"; spec 030
+        deleted it)."""
+        double = _journal_double(monkeypatch, [])
+        double.set_mode("appendBlockInPage", "noop")
         f = tmp_path / "top.md"
         f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--under-heading", "## Log",
-            "--content-file", str(f)])
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE,
+            "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
-        assert "Added" not in result.output
+        assert "Added" not in result.stdout
+        # After the note on stderr that the content is hierarchical.
+        error = _json.loads(result.stderr[result.stderr.index("{"):])
+        assert (error["reason"], error["method"]) == ("write_not_verified", "appendBlockInPage")
+        assert error["writes_landed"] == 0
+        assert double.tree(JOURNAL_PAGE) == []
 
     def test_first_block_failure_still_says_nothing_written(self, api, tmp_path):
         """With zero blocks written, the original wording is the correct one."""

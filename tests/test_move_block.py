@@ -14,11 +14,14 @@ Two distinct problems:
 move (Logseq declines to move a block into its own subtree by doing nothing), so
 every move is verified by re-reading.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 SRC = "s-uuid"
@@ -130,30 +133,38 @@ class TestMoveBlock:
 class TestCopyBlockRemoveIsGuarded:
     """Regression: a failed copy must never take the source with it."""
 
-    def test_failed_copy_does_not_remove_source(self):
-        api = MagicMock()
-        api.get_block.return_value = {"uuid": SRC, "content": "WICHTIG", "children": []}
-        api.append_block_in_page.return_value = None  # silent write failure
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
+    # Failed copies run against the HTTP double: the real LogseqAPI proves
+    # each insert and raises on Logseq's null (spec 030), which a method mock
+    # would never do.
+    def _copy_failing(self, monkeypatch, method, source):
+        double = LogseqHttpDouble()
+        double.add_page("Source", [source])
+        double.add_page("Target", ["target block"])
+        double.set_mode(method, "noop")
+        double.install(monkeypatch)
+        uuid = double.uuid_of(source if isinstance(source, str) else source["content"])
+        r = split_runner().invoke(cli, [
+            "--token", "t", "copy-block", "--id", uuid, "--to-page", "Target",
+            "--remove", "--json"])
+        return double, r
+
+    def test_failed_copy_does_not_remove_source(self, monkeypatch):
+        double, r = self._copy_failing(monkeypatch, "appendBlockInPage", "WICHTIG")
         assert r.exit_code == 1
         assert "Moved" not in r.output
-        api.remove_block.assert_not_called()
+        assert json.loads(r.stderr)["reason"] == "write_not_verified"
+        assert double.sent("removeBlock") == []
+        assert double.tree("Source") == [("WICHTIG", [])]
 
-    def test_failed_child_copy_does_not_remove_source(self):
+    def test_failed_child_copy_does_not_remove_source(self, monkeypatch):
         """The root lands, a child does not: still no removal."""
-        api = MagicMock()
-        api.get_block.return_value = {
-            "uuid": SRC, "content": "Head",
-            "children": [{"content": "Child", "children": []}]}
-        api.append_block_in_page.return_value = {"uuid": "new-root"}
-        api.insert_block.return_value = None
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
+        double, r = self._copy_failing(monkeypatch, "insertBlock",
+                                       {"content": "Head", "children": ["Child"]})
         assert r.exit_code == 1
-        api.remove_block.assert_not_called()
+        error = json.loads(r.stderr)
+        assert (error["method"], error["writes_landed"]) == ("insertBlock", 1)
+        assert double.sent("removeBlock") == []
+        assert double.tree("Source") == [("Head", [("Child", [])])]
 
     def test_successful_copy_still_removes(self):
         api = MagicMock()
