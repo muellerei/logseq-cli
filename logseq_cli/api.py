@@ -170,6 +170,18 @@ def _validated_port(value: str, source: str = "LOGSEQ_PORT") -> str:
     return stripped
 
 
+def _without_focus(options: dict | None) -> dict:
+    """Insert options with ``focus: false``, whatever the caller passed.
+
+    Unset, Logseq takes focus as true and opens the new block in its editor
+    (api.cljs:603, editor.cljs:647); on the visible page the cursor of
+    whoever is typing jumps into it and the rest of their typing lands there
+    (M10, spec 030). No caller wants that, so a caller's own focus is
+    overridden.
+    """
+    return {**(options or {}), "focus": False}
+
+
 class LogseqAPI:
     def __init__(self, host=None, port=None, token=None):
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
@@ -294,13 +306,9 @@ class LogseqAPI:
         return result
 
     def create_page(self, page_name: str, properties: dict = None, options: dict = None):
-        args = [page_name]
-        if properties:
-            args.append(properties)
-        if options:
-            if len(args) == 1:
-                args.append({})
-            args.append(options)
+        # Without redirect: false, Logseq turns its view to the new page (M13,
+        # spec 030) -- every page and journal the CLI created moved the view.
+        args = [page_name, properties or {}, {**(options or {}), "redirect": False}]
         return self.call("logseq.Editor.createPage", args)
 
     def append_block_in_page(self, page_name: str, content: str, options: dict = None):
@@ -311,17 +319,17 @@ class LogseqAPI:
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
         self._store_ref_target_ids([content])
-        args = [page_name, content]
-        if options:
-            args.append(options)
-        return self.call("logseq.Editor.appendBlockInPage", args)
+        return self.call(
+            "logseq.Editor.appendBlockInPage",
+            [page_name, content, _without_focus(options)],
+        )
 
     def insert_block(self, block_uuid: str, content: str, options: dict = None):
         refuse_split_block(content, command="logseq-cli", where="The text")
         refuse_id_lines(content)
         self._store_ref_target_ids([content])
         return self.call(
-            "logseq.Editor.insertBlock", [block_uuid, content, options or {}]
+            "logseq.Editor.insertBlock", [block_uuid, content, _without_focus(options)]
         )
 
     def insert_batch_block(self, block_uuid: str, batch: list, options: dict = None):
