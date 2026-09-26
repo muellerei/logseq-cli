@@ -33,6 +33,7 @@ relied on `--under-heading` falling back to the top of the page, need
 adjusting (see Changed). The price is one read per write and one editor
 check per write that can be refused, about a millisecond each, and a window
 of about 0.1 s after a multi-block insert.
+See [#99](https://github.com/muellerei/logseq-cli/issues/99).
 
 ### Fixed
 
