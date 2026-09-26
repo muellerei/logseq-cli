@@ -136,7 +136,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
         api = self._api()
         sent = []
 
-        def call(method, args=None):
+        def call(method, args=None, *, cached=True):
             if method == "logseq.Editor.insertBatchBlock":
                 sent.append(args[1])
                 return None

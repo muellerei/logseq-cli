@@ -474,11 +474,13 @@ class LogseqAPI:
         resp.raise_for_status()
         return resp
 
-    def call(self, method: str, args: list = None):
+    def call(self, method: str, args: list = None, *, cached: bool = True):
+        """Send ``method``; a cacheable read may come from the cache unless
+        ``cached`` is false, as for the editor gate's reads."""
         args = args or []
         # None for an unregistered method, which _post refuses before sending.
         kind = _METHODS.get(method)
-        cacheable = self.cache_enabled and isinstance(kind, Read) and kind.cache
+        cacheable = cached and self.cache_enabled and isinstance(kind, Read) and kind.cache
         if cacheable:
             key = self._cache_key(method, args)
             cached = self._cache_get(key)
@@ -544,10 +546,11 @@ class LogseqAPI:
 
         Asked before the ids are stored, not after: setBlocksId would
         otherwise write an id:: into a block for a write the gate then
-        refuses. Between the question and the write lie only reads (the ref
-        targets, and the open block's place when one is open); the
-        milliseconds in which someone can enter a block there stay (spec 030,
-        named).
+        refuses. The gate reads what it compares when it asks, past the
+        cache. What stays open is the time from those reads to the write: the
+        ref targets are read, their ids may be stored, and the write is sent;
+        a block someone enters or makes in those milliseconds is not seen
+        (spec 030, named).
 
         A proof name with no ``_prove_`` method behind it fails at the lookup
         instead of passing as a check nobody made (and
@@ -852,7 +855,9 @@ class LogseqAPI:
     # The editor rules of _METHODS, one per ``Write.editor`` name. Each gets
     # the open block's uuid (lower case) and the write's target, and refuses
     # through refuse_open. Only called when a block is open, so the reads
-    # that place it cost nothing while nobody types.
+    # that place it cost nothing while nobody types. Those reads go past the
+    # cache: a subtree read earlier in the call lacks a child made since, and
+    # the block typed in there went with its parent.
     def _gate_never(self, editing, target):
         """Inserts; _write does not call it (``never`` asks nothing)."""
 
@@ -866,7 +871,7 @@ class LogseqAPI:
     def _gate_subtree(self, editing, uuid):
         if editing == uuid.lower():
             self.refuse_open(editing)
-        block = self.get_block(uuid, include_children=True)
+        block = self.get_block(uuid, include_children=True, cached=False)
         if block and editing in {u.lower() for u in subtree_uuids(block)}:
             self.refuse_open(editing)
 
@@ -884,8 +889,8 @@ class LogseqAPI:
         # A link is found through the open block's refs, which list every
         # page it refers to, as [[Page]], #Page or a property value alike
         # (M15): no parsing of the text here.
-        open_block = self.get_block(editing, include_children=False)
-        page = self.get_page(page_name)
+        open_block = self.get_block(editing, include_children=False, cached=False)
+        page = self.get_page(page_name, cached=False)
         if not (open_block and isinstance(page, dict) and page.get("id") is not None):
             return
         ids = {(open_block.get("page") or {}).get("id")}
@@ -917,10 +922,10 @@ class LogseqAPI:
     def get_page_blocks_tree(self, page_name: str):
         return self.call("logseq.Editor.getPageBlocksTree", [page_name])
 
-    def get_page(self, page_name: str):
-        return self.call("logseq.Editor.getPage", [page_name])
+    def get_page(self, page_name: str, *, cached: bool = True):
+        return self.call("logseq.Editor.getPage", [page_name], cached=cached)
 
-    def get_block(self, block_id: str, include_children: bool = True):
+    def get_block(self, block_id: str, include_children: bool = True, *, cached: bool = True):
         """The block, or ``None`` when Logseq has none under ``block_id``.
 
         An unknown uuid comes back as ``null``, a malformed one as HTTP 200 with
@@ -929,7 +934,8 @@ class LogseqAPI:
         like one to every ``if not block`` guard.
         """
         result = self.call(
-            "logseq.Editor.getBlock", [block_id, {"includeChildren": include_children}]
+            "logseq.Editor.getBlock", [block_id, {"includeChildren": include_children}],
+            cached=cached,
         )
         if isinstance(result, dict) and "error" in result and "uuid" not in result:
             return None
