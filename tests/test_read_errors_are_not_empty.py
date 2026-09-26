@@ -13,7 +13,7 @@ skip. It now reaches the caller.
 """
 import datetime
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -21,7 +21,7 @@ import requests
 from logseq_cli.api import BadResponseError
 from logseq_cli.cli import cli
 from logseq_cli.lookup import find_backlinks
-from tests.conftest import split_runner
+from tests.conftest import mock_api, split_runner
 
 
 TODAY = datetime.date.today()
@@ -34,7 +34,7 @@ def _api(fail_on):
              {"name": "beta", "originalName": "Beta"},
              {"name": JOURNAL, "originalName": JOURNAL, "journal?": True,
               "journalDay": int(TODAY.strftime("%Y%m%d"))}]
-    api = MagicMock()
+    api = mock_api()
     api.get_all_pages.return_value = pages
     api.get_page.side_effect = lambda n: next(
         (p for p in pages if p["originalName"].lower() == str(n).lower()), None)
@@ -157,8 +157,9 @@ def _resolved(name):
 def test_note_content_does_not_create_a_page_it_failed_to_look_up():
     api = _api("Beta")
     api.get_page.side_effect = requests.ConnectionError("connection dropped")
-    with _resolved("pages"):
-        result = _run(api, "add-note-content", "--page", "Alpha", "--content", "x", "--create")
+    # The read under test is the first: the page is looked up before any
+    # alias is resolved (pagenames.resolve_page_to_write).
+    result = _run(api, "add-note-content", "--page", "Alpha", "--content", "x", "--create")
     assert result.exit_code != 0
     api.create_page.assert_not_called()
 

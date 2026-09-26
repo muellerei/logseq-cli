@@ -32,21 +32,21 @@ class TestAddNoteContentProperties:
                 "--page", "Foo",
                 "--under-heading", "## Collection",
                 "--content", "[Name](https://example.com): desc",
-                "--property", "added=2026-06-04",
+                "--property", "added=2020-01-02",
                 "--property", "tags=alpha, beta",
                 "--json",
             ])
         assert result.exit_code == 0, result.output
         # both properties upserted onto the inserted root block
         calls = {(c.args[1], c.args[2]) for c in api.upsert_block_property.call_args_list}
-        assert ("added", "2026-06-04") in calls
+        assert ("added", "2020-01-02") in calls
         assert ("tags", "alpha, beta") in calls  # comma survives split-on-first-'='
         for c in api.upsert_block_property.call_args_list:
             assert c.args[0] == "inserted-uuid"
         payload = json.loads(result.output)
         assert payload["uuid"] == "inserted-uuid"
         assert payload["uuids"] == ["inserted-uuid"]
-        assert payload["properties"] == {"added": "2026-06-04", "tags": "alpha, beta"}
+        assert payload["properties"] == {"added": "2020-01-02", "tags": "alpha, beta"}
 
     def test_property_append_path_uses_appended_uuid(self):
         api = _build_api()
@@ -199,15 +199,20 @@ class TestUpdateBlockKeepsProperties:
         assert "ticket::" in r.output
         api.update_block.assert_not_called()
 
-    def test_api_omits_the_option_when_there_is_nothing_to_keep(self):
-        """No properties -> plain two-arg call, same as before."""
+    def test_api_omits_the_option_when_there_is_nothing_to_keep(self, monkeypatch):
+        """No properties -> plain two-arg call, same as before. Against the
+        HTTP double: update_block reads its write back."""
         from logseq_cli.api import LogseqAPI
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble()
+        double.add_page("P", ["old"])
+        double.install(monkeypatch)
+        uuid = double.uuid_of("old")
         api = LogseqAPI(token="t")
-        with patch.object(api, "call") as call:
-            api.update_block("00000000-0000-4000-8000-0000000000a2", "text")
-            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text"]
-            api.update_block("00000000-0000-4000-8000-0000000000a2", "text", properties={"a": 1})
-            assert call.call_args.args[1] == ["00000000-0000-4000-8000-0000000000a2", "text", {"properties": {"a": 1}}]
+        api.update_block(uuid, "text")
+        api.update_block(uuid, "text", properties={"a": 1})
+        assert double.sent("updateBlock") == [[uuid, "text"],
+                                              [uuid, "text", {"properties": {"a": 1}}]]
 
 
 class TestRemovePropertyById:

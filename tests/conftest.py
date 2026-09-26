@@ -4,6 +4,8 @@ import re
 import pytest
 from click.testing import CliRunner
 
+from logseq_cli.api import _not_verified
+
 
 @pytest.fixture(autouse=True)
 def isolate_environment(monkeypatch):
@@ -16,6 +18,101 @@ def isolate_environment(monkeypatch):
     for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING"):
         monkeypatch.delenv(var, raising=False)
     yield
+
+
+class _TextResponse:
+    """What ``requests.post`` hands back, reduced to what the client reads."""
+
+    def __init__(self, text, status_code=200):
+        self.text = text
+        self.status_code = status_code
+
+    def json(self):
+        import json
+        return json.loads(self.text)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
+
+
+@pytest.fixture(autouse=True)
+def no_batch_editor_wait(monkeypatch):
+    """Ask checkEditing once after a batch, without waiting.
+
+    LogseqAPI waits up to 100 ms after each insertBatchBlock for the block
+    Logseq opens in its editor (measured: 16–34 ms). The doubles open it at
+    once, so the wait would only slow the suite. Tests of the wait set it
+    themselves.
+    """
+    from logseq_cli.api import LogseqAPI
+    monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0)
+
+
+@pytest.fixture
+def real_host_calls():
+    """Requests ``block_real_hosts`` refused in this test.
+
+    The fixture fails the test in teardown while this holds anything. A test
+    that reaches for a real host on purpose checks the list and clears it.
+    """
+    return []
+
+
+@pytest.fixture(autouse=True)
+def block_real_hosts(monkeypatch, real_host_calls):
+    """Keep every test away from the Logseq running on the developer's machine.
+
+    ``requests.post`` is replaced for the whole run. ``checkEditing`` answers
+    with the raw text ``false``, as Logseq does when nobody edits, so a test
+    that mocks ``call`` still passes the editor gate. Any other request is
+    recorded and refused. The refusal alone is not enough: broad ``except``
+    blocks in the commands can swallow it, so teardown fails on the record.
+    A test that patches ``requests.post`` itself, or installs the HTTP
+    double, overrides this for its own duration.
+
+    doctor opens a socket to the API port before it asks anything, and with
+    Logseq running it would then go on to query it; that probe answers "no
+    listener" here. tests/test_doctor_probes.py imports the function under
+    its own name at load time and keeps testing it against a local socket.
+    """
+    import logseq_cli.api
+    import logseq_cli.commands.meta
+
+    def post(url, json=None, **kwargs):
+        method = (json or {}).get("method")
+        if method == "logseq.Editor.checkEditing":
+            return _TextResponse("false")
+        real_host_calls.append({"url": url, "method": method, "json": json})
+        raise RuntimeError("test reached a real host")
+
+    monkeypatch.setattr(logseq_cli.api.requests, "post", post)
+    monkeypatch.setattr(logseq_cli.commands.meta, "_port_has_listener",
+                        lambda *args, **kwargs: False)
+    yield
+    if real_host_calls:
+        pytest.fail(f"test reached a real host: {real_host_calls}", pytrace=False)
+
+
+def mock_api(**overrides):
+    """MagicMock standing in for LogseqAPI, with safe answers for the gate.
+
+    On a bare MagicMock every call answers truthy: ``check_editing()`` would
+    read as "a block is open", ``rename_refusal()`` as a refusal, and
+    ``writes_landed`` and ``write_unproven`` would be Mocks, which the error
+    handler would print as writes that landed. ``overrides`` set further
+    attributes on the mock.
+    """
+    from unittest.mock import MagicMock
+    api = MagicMock()
+    api.check_editing.return_value = None
+    api.rename_refusal.return_value = None
+    api.writes_landed = 0
+    api.write_unproven = None
+    for name, value in overrides.items():
+        setattr(api, name, value)
+    return api
 
 
 def split_runner():
@@ -34,21 +131,23 @@ def split_runner():
 class FakeGraph:
     """Minimal in-memory stand-in for the block graph.
 
-    ``insertBatchBlock`` answers ``null`` whether it wrote or not, so
-    :func:`strictinsert.insert_block_tree_batched` proves the write by reading the
-    parent's children back. A MagicMock returns a MagicMock for that read, which
-    reads as "nothing arrived" and would make every success test fail for the
-    wrong reason. This models just enough of the real API to tell a genuine
-    write apart from a silent failure.
+    Stands in for LogseqAPI's block writes and reads, and answers the way the
+    methods do after their proofs: ``insert_batch_block`` the new
+    uuids in DFS pre-order, counted in the owning mock's ``writes_landed``. A
+    MagicMock answers every read with a MagicMock, which reads as "nothing
+    arrived" and would make every success test fail for the wrong reason.
 
     ``fail_after`` writes only that many blocks and then stops silently, which
-    is the partial-write shape the graph itself has to expose.
+    is the partial-write shape the graph itself has to expose; ``insert_block``
+    then raises WriteNotVerified, and ``insert_batch_block`` too once the
+    blocks that did land are counted, as the real methods do.
     """
 
     def __init__(self, uuids, *, fail_after=None):
         self._uuids = list(uuids)
         self._fail_after = fail_after
         self._written = 0
+        self.api = None             # the mock whose writes_landed is counted
         self.children = {}          # parent uuid -> list of child dicts
         self.batch_calls = []       # (anchor, tree, options)
         self.insert_calls = []      # (parent, content, options)
@@ -100,23 +199,31 @@ class FakeGraph:
         return made
 
     # --- API surface -----------------------------------------------------
+    def check_editing(self):
+        # Nobody types in a fake: its batches go through.
+        return None
+
     def insert_batch_block(self, anchor, batch, options=None):
         self.batch_calls.append((anchor, batch, options))
         opts = options or {}
+        made = None
         if opts.get("sibling"):
             # anchored on a sibling: the batch lands after it, under its parent
             for parent, kids in self.children.items():
                 if any(k["uuid"] == anchor for k in kids):
-                    self._add_tree(parent, batch)
-                    return None
-        self._add_tree(anchor, batch, prepend=True)
-        return None
+                    made = self._add_tree(parent, batch)
+                    break
+        if made is None:
+            made = self._add_tree(anchor, batch, prepend=True)
+        return _batch_proven(self.api, anchor, batch, [b["uuid"] for b in made])
 
     def insert_block(self, parent, content, options=None):
         self.insert_calls.append((parent, content, options))
         uuid = self._next_uuid()
         if uuid is None:
-            return None
+            # As LogseqAPI.insert_block does on Logseq's null (_prove_uuid).
+            raise _not_verified("insertBlock", parent, "a new block",
+                                "no block uuid in the answer")
         block = {"uuid": uuid, "content": content, "children": []}
         opts = options or {}
         bucket = self.children.setdefault(parent, [])
@@ -155,11 +262,24 @@ class FakeGraph:
         }
 
 
+def _batch_proven(api, anchor, batch, new):
+    """What LogseqAPI.insert_batch_block does with the ``new`` uuids a fake
+    wrote: counts them in ``api.writes_landed`` and answers them, or raises
+    WriteNotVerified when fewer than ``batch`` holds landed."""
+    from logseq_cli.outlinetext import count_blocks
+    if api is not None:
+        api.writes_landed += len(new)
+    expected = count_blocks(batch)
+    if len(new) != expected:
+        raise _not_verified("insertBatchBlock", anchor, f"{expected} blocks", str(len(new)))
+    return new
+
+
 def fake_api(uuids, *, fail_after=None):
     """MagicMock whose block-write/read methods are backed by FakeGraph."""
-    from unittest.mock import MagicMock
     graph = FakeGraph(uuids, fail_after=fail_after)
-    api = MagicMock()
+    api = mock_api()
+    graph.api = api
     api.insert_batch_block.side_effect = graph.insert_batch_block
     api.insert_block.side_effect = graph.insert_block
     api.get_block.side_effect = graph.get_block
@@ -245,7 +365,9 @@ class PageGraph:
     * ``insertBatchBlock`` answers ``null``. ``sibling: false`` puts the batch
       at the head of the anchor's children, ``sibling: true`` right after the
       anchor, ``+ before: true`` right before it. A page uuid as anchor with
-      ``sibling: false`` puts it at the head of the page.
+      ``sibling: false`` puts it at the head of the page. As a method here it
+      answers as LogseqAPI's does after its proof: the new uuids in DFS
+      pre-order, or WriteNotVerified for a batch that wrote nothing.
     * With ``keepUUID`` a node keeps the uuid of its ``id::`` line, a
       placeholder's included, and also one a real block already has: the
       batch does not check (the CLI must). Only a line Logseq reads as a
@@ -269,7 +391,7 @@ class PageGraph:
     * ``getBlock`` answers ``null`` for an unknown uuid and for a page, and the
       placeholder for a ``((ref))`` without a block as ``id:: <uuid>`` with no
       page.
-    * An alias (``aliases={"al": ["Ziel"]}``: pages whose own ``alias::``
+    * An alias (``aliases={"al": ["Target"]}``: pages whose own ``alias::``
       names it) is a page of its own to the API: ``getPage`` answers its stub,
       ``getPageBlocksTree`` its blocks, none unless given, and
       ``appendBlockInPage`` writes onto it. Only the query on ``:block/alias``
@@ -289,6 +411,7 @@ class PageGraph:
 
     def __init__(self, pages=None, *, placeholders=(), blockless=(), aliases=None):
         self._ids = 0
+        self.api = None                 # the mock whose writes_landed is counted
         self.pages = []                 # {"id", "uuid", "name", "blocks"}
         self.placeholders = set(placeholders)
         self.alias_sources = {a.lower(): list(s) for a, s in (aliases or {}).items()}
@@ -390,8 +513,9 @@ class PageGraph:
             return {"uuid": uuid, "content": f"id:: {uuid}", "children": []}
         return None
 
-    def create_page(self, name, properties=None, options=None):
-        page = self._page(name, [{"uuid": self._fresh(), "content": "", "children": []}])
+    def create_page(self, name, properties=None, *, first_block=True):
+        blocks = [{"uuid": self._fresh(), "content": "", "children": []}] if first_block else []
+        page = self._page(name, blocks)
         return self.get_page(page["name"])
 
     def with_property_block(self, name, content, *rest):
@@ -432,13 +556,17 @@ class PageGraph:
             siblings[i]["content"] = "\n".join([*filter(None, lines), f"{key}:: {value}"])
         return None
 
+    def check_editing(self):
+        # Nobody types in a fake: its batches go through.
+        return None
+
     def insert_batch_block(self, anchor, batch, options=None):
         opts = options or {}
         keep = bool(opts.get("keepUUID"))
         page = next((p for p in self.pages if p["uuid"] == anchor), None)
         if page is not None:
             if opts.get("sibling"):
-                return None
+                return _batch_proven(self.api, anchor, batch, [])
             # Measured: clean on a page holding a block (even an empty one),
             # prefixed on a page with none.
             target, at = page["blocks"], 0
@@ -446,7 +574,7 @@ class PageGraph:
         else:
             found = self.locate(anchor)
             if not found:
-                return None
+                return _batch_proven(self.api, anchor, batch, [])
             page, siblings, i, parent = found
             if not opts.get("sibling"):
                 target, at, headless = siblings[i]["children"], 0, False
@@ -456,9 +584,14 @@ class PageGraph:
             else:
                 target, at, headless = siblings, i + 1, False
         prefix = "* " if headless else ""
-        target[at:at] = [self._node(n, keep=keep, strip_ids=not keep, prefix=prefix)
-                         for n in batch]
-        return None
+        nodes = [self._node(n, keep=keep, strip_ids=not keep, prefix=prefix) for n in batch]
+        target[at:at] = nodes
+
+        def walk(blocks):
+            for b in blocks:
+                yield b["uuid"]
+                yield from walk(b["children"])
+        return _batch_proven(self.api, anchor, batch, list(walk(nodes)))
 
     def update_block(self, uuid, content, properties=None, *, replacing=None):
         found = self.locate(uuid)
@@ -506,7 +639,9 @@ class PageGraph:
         page["blocks"].append(block)
         return self._out(block, page, None)
 
-    def remove_block(self, uuid):
+    def remove_block(self, uuid, *, written_here=False):
+        # Single writes are not counted here (only batches are), so
+        # ``written_here`` has nothing to take back.
         found = self.locate(uuid)
         if found:
             page, siblings, i, _ = found
@@ -575,8 +710,7 @@ class PageGraph:
 
 def page_graph_api(graph):
     """MagicMock whose page and block calls are answered by ``graph``."""
-    from unittest.mock import MagicMock
-    api = MagicMock()
+    api = mock_api()
     for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
                  "remove_block", "move_block", "datascript_query", "update_block",
@@ -585,4 +719,5 @@ def page_graph_api(graph):
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []
     api.graph = graph
+    graph.api = api
     return api

@@ -32,12 +32,13 @@ reading the page back, so they run against ``PageGraph`` rather than a mock
 that answers every read.
 """
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+from logseq_cli.api import _not_verified
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import mock_api, split_runner
 
 ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 ANCHOR = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
@@ -47,7 +48,7 @@ NESTED = f"- parent\n\t- child\n\t  id:: {ID}"
 
 
 def _api(*, existing_ids=()):
-    api = MagicMock()
+    api = mock_api()
     api.get_page.return_value = {"name": "page a", "originalName": "Page A"}
     api.get_page_blocks_tree.return_value = [{"uuid": ANCHOR, "content": "## Log", "children": []}]
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
@@ -251,13 +252,18 @@ def test_every_path_passes_the_id_on(args):
 
 
 @pytest.mark.parametrize("args", HEADING_MISSING_CASES.values(), ids=HEADING_MISSING_CASES.keys())
-def test_the_heading_fallback_passes_the_id_on(args):
+def test_a_heading_not_created_writes_no_id(args):
+    # The heading's append raises in the API. The writers once
+    # fell back to the top of the page, id and all; now nothing follows.
     api = _fake()
-    with patch("logseq_cli.commands.journal.find_or_create_heading", return_value=None):
+    refused = _not_verified("appendBlockInPage", "Page A", "a new block",
+                            "no block uuid in the answer")
+    with patch("logseq_cli.commands.journal.find_or_create_heading", side_effect=refused):
         r = _run(args + ["--keep-ids"], api)
-    assert r.exit_code == 0, r.stderr
-    assert _ids_asked_for(api) == [ID]
-    assert _kept(api)
+    assert r.exit_code == 1
+    assert "did not show in Logseq" in r.stderr
+    assert _ids_asked_for(api) == []
+    assert not _kept(api)
 
 
 class TestRefusedCombinations:

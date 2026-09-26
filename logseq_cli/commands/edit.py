@@ -10,6 +10,7 @@ from logseq_cli.blocktext import (
     refuse_split_block,
     refuse_split_heading,
     refuse_split_tree,
+    unwrap_block_id,
     without_block_ids,
 )
 from logseq_cli.cliinput import (
@@ -19,7 +20,7 @@ from logseq_cli.cliinput import (
     require_content,
 )
 from logseq_cli.config import load_config, resolve_heading
-from logseq_cli.dates import format_journal_date, parse_date_keyword
+from logseq_cli.dates import parse_date_keyword
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading
 from logseq_cli.ids import (
@@ -30,17 +31,28 @@ from logseq_cli.ids import (
     without_foreign_block_ids,
 )
 from logseq_cli.lookup import incoming_block_refs, refs_refusal, resolve_single_block
+from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
     contains_hierarchical_content,
     count_blocks,
     note_quote_breaks,
     outline_text,
     parse_hierarchical_content,
+    subtree_uuids,
 )
-from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
+from logseq_cli.output import (
+    fail,
+    follow_page,
+    follow_page_to_write,
+    handle_connection_error,
+    output,
+    uuid_fields,
+)
+from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
     append_in_page,
     check_move,
+    create_missing_page,
     insert_block_at,
     insert_block_tree_as_first_children,
     insert_block_tree_as_siblings,
@@ -48,9 +60,8 @@ from logseq_cli.strictinsert import (
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
     move_block_verified,
-    require_insert,
-    subtree_uuids,
 )
+from logseq_cli.writerefused import WriteRefused, partial_state
 
 
 @cli.command("update-block", epilog="""\b
@@ -109,7 +120,7 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
             page = ref.page
         clean_id = resolve_single_block(api, where_content, page=page, use_regex=use_regex)
     else:
-        clean_id = block_id.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(block_id)
 
     # Verify block exists
     block = api.get_block(clean_id, include_children=False)
@@ -129,10 +140,10 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     # honest; kept_properties says which go back, and as what (#30, #66).
     kept_values, kept_texts = kept_properties(api, block.get("uuid") or clean_id, content)
 
-    # After every check that can refuse: a note ahead of an error would sit in
-    # front of the JSON on stderr, and speak of text that is never written.
+    # After every check that can refuse: a note ahead of an error would speak
+    # of text that is never written.
     if id_note:
-        click.echo(id_note, err=True)
+        print_note(id_note)
     note_quote_breaks([{"content": content}])
     if dry_run:
         if as_json:
@@ -181,7 +192,7 @@ Note:
 def remove_block_cmd(ctx, block_id, ignore_refs, dry_run, as_json):
     """Remove a block by UUID."""
     api = ctx.obj["api"]
-    clean_id = block_id.strip().replace("((", "").replace("))", "")
+    clean_id = unwrap_block_id(block_id)
 
     # Fetch WITH children: removal cascades, so the descendant count is the
     # decisive fact for --dry-run (and for the confirmation the caller may want).
@@ -318,31 +329,25 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
         # A text line turned into an id:: line would give the block another
         # uuid (#56); the property lines it had are masked above and stay.
         refuse_id_lines(r["new"], own=r["id"], replacing=r["old"], where=where)
+    # update_block proves each write itself and raises if it cannot. The one
+    # caller that catches: its contract is a report of every block, so a
+    # block open in the editor, one Logseq threw on or one it did not write
+    # fails alone, and the others are still written.
+    reasons = {}
     if not dry_run:
         for r in replacements:
-            api.update_block(r["id"], r["new"], replacing=r["old"])
-
-    # updateBlock answers null whether it wrote or not (verified against a live
-    # graph), so the write cannot be checked from its return value. Counting the
-    # matches instead would report "Replaced N block(s)" for writes that never
-    # landed, complete with a before/after diff computed locally. Read the
-    # blocks back and compare. See the note above require_insert() in strictinsert.py
-    # for when this read can be dropped.
-    # Compared without id:: lines: a ref another replacement wrote may have
-    # stored this block's id meanwhile, and Logseq keeps it through the update
-    # (#95, measured). A replacement never changes an id:: line (masked above).
-    failed = []
-    if replacements and not dry_run:
-        for r in replacements:
-            after = api.get_block(r["id"], include_children=False) or {}
-            if without_block_ids(after.get("content") or "") != without_block_ids(r["new"]):
-                failed.append(r["id"])
+            try:
+                api.update_block(r["id"], r["new"], replacing=r["old"])
+            except WriteRefused as refused:
+                reasons[r["id"]] = refused.reason
+    failed = list(reasons)
 
     if as_json:
         payload = {**ref.fields(), "replacements": len(replacements) - len(failed),
                    "dry_run": dry_run, "matches": replacements}
         if failed:
             payload["failed"] = failed
+            payload["failed_reasons"] = reasons
         output(payload, True)
     else:
         if not replacements:
@@ -353,16 +358,20 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
             for r in replacements:
                 old_preview = r["old"][:60] + ("..." if len(r["old"]) > 60 else "")
                 new_preview = r["new"][:60] + ("..." if len(r["new"]) > 60 else "")
-                mark = "  !! not written" if r["id"] in failed else ""
+                mark = f"  !! not written ({reasons[r['id']]})" if r["id"] in reasons else ""
                 click.echo(f"  {r['id'][:8]}..  {old_preview}{mark}")
                 click.echo(f"         →  {new_preview}")
     # After the report, in both modes: the payload says which blocks changed,
     # and a caller who stops at the exit status must not read 0 as done.
     if failed:
-        fail(f"{len(failed)} of {len(replacements)} replacement(s) did not "
-             "reach the graph. Logseq reports no error for this, so the "
-             "blocks were read back to check.", as_json=as_json,
-             reason="write_not_verified", failed=failed)
+        # One reason when every block failed for the same one, else the
+        # general one; each block's own is in failed_reasons.
+        common = set(reasons.values())
+        fail(f"{len(failed)} of {len(replacements)} replacement(s) were not "
+             f"written or did not show in Logseq. {partial_state(api.writes_landed)}",
+             as_json=as_json,
+             reason=common.pop() if len(common) == 1 else "write_not_verified",
+             failed=failed, failed_reasons=reasons, writes_landed=api.writes_landed)
 
 @cli.command("insert-block", epilog="""\b
 Examples:
@@ -424,10 +433,13 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     # --child-of it is refused or, in tree mode, not used, and must not be
     # resolved into an alias_of for a page nothing is written to.
     alias = {}
+    target = None
     if page and not (after or before or child_of):
-        ref = follow_page(api, page, as_json)
-        page = ref.page
-        alias = {"alias_of": page} if ref.redirected else {}
+        # A missing page is written under the name Logseq creates it with: a
+        # journal title in another format is the journal (measured).
+        ref, target = follow_page_to_write(api, page, as_json)
+        alias = {"alias_of": ref.page} if ref.redirected else {}
+        page = target.name
 
     # --tree-file is --tree from a file; resolve it before any other validation
     # so the rest of the command sees a single tree_input.
@@ -462,27 +474,27 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         except BlockIdError as e:
             fail(str(e), as_json=as_json, **{e.field: e.ids})
         if note:
-            click.echo(note, err=True)
+            print_note(note)
             tree = tree_without_block_ids(tree)
 
         # Resolve target + position first (no writes), so --dry-run can report
         # the plan and bail before touching the graph.
         if child_of:
-            clean_id = child_of.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(child_of)
             position = f"{'first child' if as_first else 'child'} of {clean_id[:8]}..."
             if as_first:
                 def do_insert():
                     return insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
                 def do_insert():
-                    return insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
+                    return insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
         elif after:
-            clean_id = after.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(after)
             position = f"after {clean_id[:8]}..."
             def do_insert():
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
         elif before:
-            clean_id = before.strip().replace("((", "").replace("))", "")
+            clean_id = unwrap_block_id(before)
             position = f"before {clean_id[:8]}..."
             def do_insert():
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
@@ -499,6 +511,8 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
 
         note_quote_breaks(tree)
         if dry_run:
+            if child_of or after or before:
+                refuse_missing_anchor(api, clean_id, as_json)
             planned = count_blocks(tree)
             if as_json:
                 output({"position": position, "blocks": planned, "dry_run": True, **alias}, True)
@@ -506,14 +520,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 click.echo(f"[DRY RUN] Would insert {planned} block(s) {position}")
             return
 
+        if page and top_level:
+            create_missing_page(api, target)
+        # The tree is not empty (checked above), and every insert is proven,
+        # so there is a first block.
         uuids = do_insert()
-        root_uuid = uuids[0] if uuids else None
-        applied = {}
-        if properties:
-            if root_uuid:
-                applied = apply_block_properties(api, root_uuid, properties)
-            else:
-                click.echo("Warning: no block created, --property ignored", err=True)
+        applied = apply_block_properties(api, uuids[0], properties) if properties else {}
 
         if as_json:
             output({
@@ -565,18 +577,20 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
+        print_note(note)
         tree = tree_without_block_ids(tree)
         # What the flat writes below send, and what the preview shows.
         content = outline_text(tree) if hierarchical else tree[0]["content"]
 
     note_quote_breaks(tree)
     if dry_run:
+        if not page:
+            refuse_missing_anchor(api, after or before or child_of, as_json)
         planned = count_blocks(tree)
-        target = page or (f"after {after[:8]}..." if after else
-                          f"before {before[:8]}..." if before else
-                          f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
-        target_desc = f"end of '{page}'" if page else target
+        target_desc = (f"end of '{page}'" if page else
+                       f"after {after[:8]}..." if after else
+                       f"before {before[:8]}..." if before else
+                       f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
         if as_json:
             output({"position": target_desc, "blocks": planned, "dry_run": True, **alias}, True)
         else:
@@ -584,75 +598,84 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         return
 
     if page:
+        create_missing_page(api, target)
         if hierarchical:
             uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"end of '{page}' ({len(uuids)} block(s))"
         else:
             result = append_in_page(api, page, content, keep_ids)
-            new_uuid = require_insert(result, f"a block in '{page}'")
+            new_uuid = result["uuid"]
             position = f"end of '{page}'"
     elif after:
-        clean_id = after.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(after)
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=False, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"after {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=True, before=False, keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a block after {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"after {clean_id[:8]}..."
     elif before:
-        clean_id = before.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(before)
         if hierarchical:
             uuids = insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"before {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=True, before=True, keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a block before {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"before {clean_id[:8]}..."
     elif child_of:
-        clean_id = child_of.strip().replace("((", "").replace("))", "")
+        clean_id = unwrap_block_id(child_of)
         where = "first child" if as_first else "child"
         if hierarchical:
             if as_first:
                 uuids = insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
-                uuids = insert_block_tree_with_uuids(api, tree, clean_id, strict=True, keep_ids=keep_ids)
-            new_uuid = uuids[0] if uuids else None
+                uuids = insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
+            new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
             result = insert_block_at(api, clean_id, content, sibling=False, before=as_first,
                                      keep_ids=keep_ids)
-            new_uuid = require_insert(result, f"a {where} of {clean_id[:8]}...")
+            new_uuid = result["uuid"]
             position = f"{where} of {clean_id[:8]}..."
 
-    if new_uuid is None and isinstance(result, dict):
-        new_uuid = result.get("uuid")
-
-    applied = {}
-    if properties:
-        if new_uuid:
-            applied = apply_block_properties(api, new_uuid, properties)
-        else:
-            click.echo("Warning: no block uuid returned, --property ignored", err=True)
+    # Every branch above set new_uuid from a proven insert.
+    applied = apply_block_properties(api, new_uuid, properties) if properties else {}
 
     if as_json:
-        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([u for u in [new_uuid] if u]), **alias}, True)
+        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([new_uuid]), **alias}, True)
     else:
         click.echo(f"Inserted block {position}")
         # Before the preview: the content may itself contain "uuid: ...".
-        if new_uuid:
-            click.echo(f"  uuid: {new_uuid}")
+        click.echo(f"  uuid: {new_uuid}")
         preview = content[:80] + ("..." if len(content) > 80 else "")
         click.echo(f"  {preview}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
+
+def refuse_missing_anchor(api, anchor, as_json):
+    """Refuse an insert-block preview whose anchor no block has.
+
+    The run finds out by writing: Logseq answers an insert at an unknown
+    uuid with null (write_not_verified), and a tree or a --keep-ids write
+    reads the anchor first. The preview writes nothing, so it asks here, and
+    does not promise an insert the run refuses (move-block's preview shares
+    check_move for the same reason). getBlock finds a uuid in capitals too.
+    """
+    uuid = unwrap_block_id(anchor).lower()
+    if not api.get_block(uuid, include_children=False):
+        fail(f"Cannot insert: block {uuid[:8]}... not found (the uuid does not "
+             "exist, or its page is not loaded). Nothing was written.",
+             as_json=as_json, reason="block_not_found", id=uuid)
+
 
 @cli.command("add-block-ref", epilog="""\b
 Examples:
@@ -708,27 +731,26 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     # journal named by its date has no alias to follow.
     names = {}
     if page:
-        ref = follow_page(api, page, as_json)
-        page = ref.page
+        # A missing page under the name Logseq creates it with, as for
+        # insert-block --page.
+        ref, target = follow_page_to_write(api, page, as_json)
         names = ref.fields()
-
-    would_create_page = False
-    if journal_date and not page:
+    else:
         d = parse_date_keyword(journal_date)
-        configs = api.get_user_configs()
-        date_fmt = configs.get("preferredDateFormat") if configs else None
-        page = format_journal_date(d, date_fmt)
+        name = journal_page_name(api, d)
         # Ensure journal page exists
         try:
-            existing = api.get_page(page)
+            existing = api.get_page(name)
         except Exception:
             existing = None
-        if not existing:
-            would_create_page = True
-            # Creating the journal page is itself a write, so under --dry-run it
-            # is only reported, never done.
-            if not dry_run:
-                api.create_page(page, {"journal?": True})
+        target = PageToWrite(name, name, existing)
+    page = target.name
+
+    # Creating the page is itself a write, so under --dry-run it is only
+    # reported, never done.
+    would_create_page = not target.page
+    if not dry_run:
+        create_missing_page(api, target)
 
 
     if dry_run:
@@ -763,22 +785,17 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
                            f"{'' if heading_exists else ' (would be created)'}")
         return
 
+    # A ref that was never written is worse than a visible error: the TODO looks
+    # linked on the project page and silently is not, which is exactly what
+    # block-refs are relied on for. The API proves each insert and raises.
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
-        if heading_uuid:
-            result = api.insert_block(heading_uuid, ref_content, {"sibling": False})
-            position = f"under '{under_heading}' on '{page}'"
-        else:
-            result = api.append_block_in_page(page, ref_content)
-            position = f"top-level on '{page}' (heading not found)"
+        result = api.insert_block(heading_uuid, ref_content, {"sibling": False})
+        position = f"under '{under_heading}' on '{page}'"
     else:
         result = api.append_block_in_page(page, ref_content)
         position = f"top-level on '{page}'"
-
-    # A ref that was never written is worse than a visible error: the TODO looks
-    # linked on the project page and silently is not, which is exactly what
-    # block-refs are relied on for.
-    new_uuid = require_insert(result, f"the block-ref {position}")
+    new_uuid = result["uuid"]
 
     if as_json:
         output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}), "position": position, "uuid": new_uuid}, True)
@@ -811,9 +828,11 @@ Note:
 def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
-    ref = follow_page(api, to_page, as_json)
-    to_page = ref.page
+    # A missing page under the name Logseq creates it with, as for
+    # insert-block --page.
+    ref, target = follow_page_to_write(api, to_page, as_json)
     names = ref.fields("to_page")
+    to_page = target.name
     block_id = block_id.strip("()")
     source = api.get_block(block_id, include_children=True)
     if not source:
@@ -852,12 +871,10 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
                 click.echo(f"  block refs into the source that would dangle: {len(refs)}")
         return
 
-    # Every insert is checked: Logseq answers a failed write with HTTP 200 +
-    # null, so an unchecked copy reports "Moved N block(s)" with exit 0 while
-    # nothing arrived. With --remove that unverified success would then delete
-    # the source, which destroys the block for good.
-    written = [0]
-
+    # Every insert is proven by the API: Logseq answers a failed write with
+    # HTTP 200 + null, so an unchecked copy reported "Moved N block(s)" with
+    # exit 0 while nothing arrived. With --remove that unverified success would
+    # then delete the source, which destroys the block for good.
     def _copy_tree(block, parent_uuid=None):
         # The copy gets uuids of its own, and refs stay with the original, so
         # the source's id:: lines go without a word; left in, the file would
@@ -865,22 +882,19 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         content = without_block_ids(block.get("content", ""))
         if parent_uuid:
             result = api.insert_block(parent_uuid, content, {"sibling": False})
-            new_uuid = require_insert(
-                result, "a copied block", written_so_far=written[0])
         else:
             result = api.append_block_in_page(to_page, content)
-            new_uuid = require_insert(
-                result, f"the copied block on '{to_page}'", written_so_far=written[0])
-        written[0] += 1
+        new_uuid = result["uuid"]
         copied = 1
         for child in block.get("children", []):
             copied += _copy_tree(child, new_uuid)
         return copied
 
+    create_missing_page(api, target)
     count = _copy_tree(source)
 
     if remove:
-        # Only reached when every insert above returned a UUID, so the source is
+        # Only reached when every insert above was proven, so the source is
         # removed against a copy that is known to exist, never a claimed one.
         api.remove_block(block_id)
 

@@ -39,7 +39,7 @@ class TestReplaceTextSparesProperties:
     def test_id_line_is_not_touched_when_find_matches_the_uuid(self):
         # --find hits a hex fragment that occurs in the id:: uuid.
         uuid = "abcdef12-3456-7890-abcd-ef1234567890"
-        content = f"DONE Service updaten 6e10 fixen\nid:: {uuid}"
+        content = f"DONE update Service 6e10 fix\nid:: {uuid}"
         api = _api(content)
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
@@ -48,10 +48,10 @@ class TestReplaceTextSparesProperties:
         written = api._written["content"]
         # The id line must survive verbatim; the visible text is replaced.
         assert f"id:: {uuid}" in written
-        assert "Service updaten XXXX fixen" in written
+        assert "update Service XXXX fix" in written
 
     def test_property_line_survives_even_with_text_after_it(self):
-        content = ("DONE neuer Service anlegen\n"
+        content = ("DONE create new Service\n"
                    "id:: abcdef12-3456-7890-abcd-ef1234567890\n"
                    "=> Service via alt route")
         api = _api(content)
@@ -62,7 +62,7 @@ class TestReplaceTextSparesProperties:
         written = api._written["content"]
         assert "id:: abcdef12-3456-7890-abcd-ef1234567890" in written
         # Both text lines are replaced, the property line is not.
-        assert "DONE neuer Host anlegen" in written
+        assert "DONE create new Host" in written
         assert "=> Host via alt route" in written
 
     def test_soft_property_line_is_not_replaced(self):

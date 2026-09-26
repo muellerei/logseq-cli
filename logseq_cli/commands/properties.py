@@ -2,7 +2,7 @@ import re
 
 import click
 
-from logseq_cli.blocktext import refuse_split_property, with_property_line
+from logseq_cli.blocktext import refuse_split_property, unwrap_block_id, with_property_line
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.blockprops import (
@@ -11,7 +11,6 @@ from logseq_cli.blockprops import (
     note_renamed_property_key,
     stored_properties,
 )
-from logseq_cli.strictinsert import require_insert
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.render import is_properties_block
 
@@ -210,7 +209,7 @@ def _write_property_block(api, blocks, block, content):
     """
     if block is None:
         result = api.insert_block(blocks[0]["uuid"], "", {"before": True, "sibling": True})
-        uuid, old = require_insert(result, "the page's property block"), ""
+        uuid, old = result["uuid"], ""
     else:
         uuid, old = block["uuid"], block.get("content") or ""
     if not content and block is not None and not block.get("children") and len(blocks) > 1:
@@ -241,7 +240,8 @@ def _check_page_took(api, page, page_uuid, key, value, as_json):
         return
     what = f"'{key}' removed" if value is None else f"'{key}:: {value}'"
     fail(f"Logseq did not show {what} on page '{page}' after the write; "
-         f"check the page before retrying.", as_json=as_json, page=page, property=key)
+         f"check the page before retrying.", as_json=as_json,
+         reason="write_not_verified", page=page, property=key)
 
 
 @cli.command("set-property", epilog="""\b
@@ -379,7 +379,7 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
     key = stored
 
     if block_id:
-        block_uuid = block_id.strip().replace("((", "").replace("))", "")
+        block_uuid = unwrap_block_id(block_id)
         block = api.get_block(block_uuid, include_children=False)
         if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)

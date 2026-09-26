@@ -112,3 +112,44 @@ class TestTemplateWithRegex:
         api = _api("zzz")
         r = _run(api, "--regex", "--find", r"a(\d)", "--replace", r"\2")
         _assert_refused(r, api, "--replace")
+
+
+class TestEveryFailedBlockIsReported:
+    """replace-text writes every replacement it can and names each block that
+    failed with its reason: a block open in the editor refuses
+    its own write, not the others."""
+
+    def _run(self, monkeypatch, *, noop_from_call=None):
+        from tests.conftest import split_runner
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble()
+        double.add_page("P", ["alpha one", "alpha two", "alpha three"])
+        double.install(monkeypatch)
+        double.editing = double.uuid_of("alpha one")
+        if noop_from_call:
+            double.set_mode("updateBlock", "noop", from_call=noop_from_call)
+        ids = [double.uuid_of(f"alpha {n}") for n in ("one", "two", "three")]
+        r = split_runner().invoke(cli, ["--token", "t", "replace-text", "--page", "P",
+                                        "--find", "alpha", "--replace", "gamma", "--json"])
+        return double, ids, r, json.loads(r.stderr) if r.stderr else None
+
+    def test_replace_text_reports_every_failed_block(self, monkeypatch):
+        # One open, one written, one Logseq did not do: two reasons, so the
+        # common one is write_not_verified.
+        double, (one, two, three), r, error = self._run(monkeypatch, noop_from_call=2)
+        assert r.exit_code == 1
+        assert [c for c, _ in double.tree("P")] == ["alpha one", "gamma two", "alpha three"]
+        assert error["failed"] == [one, three]
+        assert error["failed_reasons"] == {one: "open_in_editor", three: "write_not_verified"}
+        assert error["reason"] == "write_not_verified"
+        assert error["writes_landed"] == 1
+        report = json.loads(r.stdout)
+        assert (report["replacements"], report["failed"]) == (1, [one, three])
+        assert report["failed_reasons"] == error["failed_reasons"]
+
+    def test_one_reason_for_all_is_the_reason(self, monkeypatch):
+        double, (one, _, _), r, error = self._run(monkeypatch)
+        assert r.exit_code == 1
+        assert [c for c, _ in double.tree("P")] == ["alpha one", "gamma two", "gamma three"]
+        assert (error["reason"], error["failed"]) == ("open_in_editor", [one])
+        assert error["failed_reasons"] == {one: "open_in_editor"}

@@ -20,7 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import answer_property_pulls, split_runner
+from tests.conftest import answer_property_pulls, mock_api, split_runner
 
 
 MUTATING = ("update_block", "remove_block", "delete_page", "rename_page",
@@ -37,7 +37,7 @@ def _assert_no_mutation(api):
 @pytest.fixture
 def api():
     """A MagicMock LogseqAPI injected into the CLI context."""
-    mock = answer_property_pulls(MagicMock())
+    mock = answer_property_pulls(mock_api())
     with patch("logseq_cli.group.LogseqAPI", return_value=mock):
         yield mock
 
@@ -489,7 +489,7 @@ class TestDryRunNeverCreatesTheJournalPage:
     """
 
     def _api(self):
-        api = MagicMock()
+        api = mock_api()
         api.get_page.return_value = None          # journal page does not exist
         api.get_user_configs.return_value = {}
         api.get_page_blocks_tree.return_value = []
@@ -623,8 +623,8 @@ class TestEveryWriteHasADryRun:
         decorator lines of the next function at the end of the previous one --
         73 bodies carry foreign trailing text that way. Today that changes
         nothing (both scans find the same 18 writers), but it only holds while
-        the neighbours stay put. Spec 001 moves every command into one of nine
-        modules, which reorders all of them.
+        the neighbours stay put. The split of cli.py into nine command
+        modules moved every command, which reordered all of them.
 
         ``func.__module__`` after unwrapping names the file that defines the
         command, which is why this survives the move -- and why
@@ -718,7 +718,7 @@ class TestEveryWriteHasADryRun:
         unnoticed — and a name dropped from the set here is how the scan would
         be taught to miss a command later. Equality also makes a genuinely new
         write command fail here, deliberately: it costs one line in this set,
-        next to the README row spec 007 already asks for.
+        next to the README row CONTRIBUTING.md already asks for.
         """
         found = set(self._writing_commands())
         assert found == self._KNOWN_WRITERS, (

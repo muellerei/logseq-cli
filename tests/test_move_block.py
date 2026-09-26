@@ -14,11 +14,15 @@ Two distinct problems:
 move (Logseq declines to move a block into its own subtree by doing nothing), so
 every move is verified by re-reading.
 """
+import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 SRC = "s-uuid"
@@ -34,7 +38,7 @@ def _api(*, children_after=None, target_parent=1, src_parent_after=None,
     """
     api = MagicMock()
     blocks = {
-        SRC: {"uuid": SRC, "content": "QUELLE", "children": [],
+        SRC: {"uuid": SRC, "content": "SOURCE", "children": [],
               "parent": {"id": src_parent_after if src_parent_after is not None else 9}},
         TGT: {"uuid": TGT, "content": "TARGET", "parent": {"id": target_parent},
               "children": children_after if children_after is not None else []},
@@ -67,24 +71,6 @@ class TestMoveBlock:
         assert r.exit_code == 0, r.output
         assert "Moved 1 block(s) before" in r.output
         api.move_block.assert_called_once_with(SRC, TGT, {"before": True})
-
-    def test_before_requires_source_directly_in_front(self):
-        """Same parent is not enough: a move that did nothing must not pass."""
-        api = _api(sibling_order=[TGT, SRC])  # source lands AFTER the target
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "move-block", "--id", SRC, "--before", TGT])
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
-
-    def test_silent_no_op_is_reported(self):
-        """Logseq answers null whether or not it moved; the re-read decides."""
-        api = _api(children_after=[])  # source never shows up under the target
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "move-block", "--id", SRC, "--under", TGT])
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
 
     def test_missing_target_aborts_before_moving(self):
         api = _api()
@@ -130,30 +116,35 @@ class TestMoveBlock:
 class TestCopyBlockRemoveIsGuarded:
     """Regression: a failed copy must never take the source with it."""
 
-    def test_failed_copy_does_not_remove_source(self):
-        api = MagicMock()
-        api.get_block.return_value = {"uuid": SRC, "content": "WICHTIG", "children": []}
-        api.append_block_in_page.return_value = None  # silent write failure
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
+    # Failed copies run against the HTTP double: the real LogseqAPI proves
+    # each insert and raises on Logseq's null, which a method mock
+    # would never do.
+    def _copy_failing(self, monkeypatch, method, source):
+        double = LogseqHttpDouble.installed(
+            monkeypatch, {"Source": [source], "Target": ["target block"]}, modes={method: "noop"})
+        uuid = double.uuid_of(source if isinstance(source, str) else source["content"])
+        r = split_runner().invoke(cli, [
+            "--token", "t", "copy-block", "--id", uuid, "--to-page", "Target",
+            "--remove", "--json"])
+        return double, r
+
+    def test_failed_copy_does_not_remove_source(self, monkeypatch):
+        double, r = self._copy_failing(monkeypatch, "appendBlockInPage", "IMPORTANT")
         assert r.exit_code == 1
         assert "Moved" not in r.output
-        api.remove_block.assert_not_called()
+        assert json.loads(r.stderr)["reason"] == "write_not_verified"
+        assert double.sent("removeBlock") == []
+        assert double.tree("Source") == [("IMPORTANT", [])]
 
-    def test_failed_child_copy_does_not_remove_source(self):
+    def test_failed_child_copy_does_not_remove_source(self, monkeypatch):
         """The root lands, a child does not: still no removal."""
-        api = MagicMock()
-        api.get_block.return_value = {
-            "uuid": SRC, "content": "Head",
-            "children": [{"content": "Child", "children": []}]}
-        api.append_block_in_page.return_value = {"uuid": "new-root"}
-        api.insert_block.return_value = None
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            r = CliRunner().invoke(cli, [
-                "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
+        double, r = self._copy_failing(monkeypatch, "insertBlock",
+                                       {"content": "Head", "children": ["Child"]})
         assert r.exit_code == 1
-        api.remove_block.assert_not_called()
+        error = json.loads(r.stderr)
+        assert (error["method"], error["writes_landed"]) == ("insertBlock", 1)
+        assert double.sent("removeBlock") == []
+        assert double.tree("Source") == [("Head", [("Child", [])])]
 
     def test_successful_copy_still_removes(self):
         api = MagicMock()
@@ -279,35 +270,89 @@ def _run(graph, *args):
         return CliRunner().invoke(cli, ["move-block", *args])
 
 
+def _double(pages, *, noop=False, monkeypatch):
+    """The real LogseqAPI against the HTTP double, which reads a page the way
+    Logseq does (getBlock answers null for a page's id, getPageBlocksTree
+    wants the name): the move's proof sits in LogseqAPI.move_block,
+    which the stand-ins above replace."""
+    # noop: Logseq's null, nothing moved.
+    return LogseqHttpDouble.installed(monkeypatch, pages,
+                                      modes={"moveBlock": "noop"} if noop else None)
+
+
+def _move(double, src, flag, target):
+    return split_runner().invoke(cli, [
+        "--token", "t", "move-block", "--id", double.uuid_of(src), flag,
+        double.uuid_of(target), "--json"])
+
+
+def _not_moved(r):
+    assert r.exit_code == 1
+    error = json.loads(r.stderr)
+    assert (error["reason"], error["method"]) == ("write_not_verified", "moveBlock")
+    assert error["writes_landed"] == 0
+    return error
+
+
+class TestTheMoveProvesItself:
+    """moveBlock answers null whether it moved or not; the method reads the
+    target back."""
+
+    def test_silent_no_op_under_is_reported(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--under", "tgt"))
+        assert "under block" in error["error"]
+
+    def test_before_requires_source_directly_in_front(self, monkeypatch):
+        """Same parent is not enough: a move that did nothing must not pass."""
+        double = _double({"page a": ["tgt", "src"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--before", "tgt"))
+        assert "directly before block" in error["error"]
+
+    def test_before_that_did_nothing_across_parents_is_reported(self, monkeypatch):
+        """The source sits under another parent than the target: after a
+        move that did nothing it is not among the target's siblings at all,
+        which fails the proof as a wrong place does."""
+        double = _double({"page a": [{"content": "p1", "children": ["src"]},
+                                     {"content": "p2", "children": ["tgt"]}]},
+                         noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--before", "tgt"))
+        assert "directly before block" in error["error"]
+
+    def test_under_counts_the_move(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, monkeypatch=monkeypatch)
+        r = _move(double, "src", "--under", "tgt")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("tgt", [("src", [])])]
+
+
 class TestMoveBeforeTopLevel:
     """#23: a top-level target's parent is its page, which getBlock cannot read."""
 
-    def test_top_level_before_top_level(self):
-        g = _Graph({"page a": [(A, []), (B, []), (C, [])]})
-        r = _run(g, "--id", C, "--before", A)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [C, A, B]
+    def test_top_level_before_top_level(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c"]}, monkeypatch=monkeypatch)
+        r = _move(double, "c", "--before", "a")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("c", []), ("a", []), ("b", [])]
 
-    def test_nested_block_before_top_level(self):
-        g = _Graph({"page a": [(A, [(A1, [])]), (B, [])]})
-        r = _run(g, "--id", A1, "--before", B)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [A, A1, B]
+    def test_nested_block_before_top_level(self, monkeypatch):
+        double = _double({"page a": [{"content": "a", "children": ["a1"]}, "b"]},
+                         monkeypatch=monkeypatch)
+        r = _move(double, "a1", "--before", "b")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("a", []), ("a1", []), ("b", [])]
 
-    def test_across_pages_before_top_level(self):
-        g = _Graph({"page a": [(A, []), (B, [])], "page b": [(X, [])]})
-        r = _run(g, "--id", X, "--before", B)
-        assert r.exit_code == 0, r.output
-        assert g.order("page a") == [A, X, B]
-        assert g.order("page b") == []
+    def test_across_pages_before_top_level(self, monkeypatch):
+        double = _double({"page a": ["a", "b"], "page b": ["x"]}, monkeypatch=monkeypatch)
+        r = _move(double, "x", "--before", "b")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("a", []), ("x", []), ("b", [])]
+        assert double.tree("page b") == []
 
-    def test_top_level_move_that_did_nothing_still_fails(self):
+    def test_top_level_move_that_did_nothing_still_fails(self, monkeypatch):
         """The fix must read the real order, not wave every top-level move through."""
-        g = _Graph({"page a": [(A, []), (B, [])]})
-        g.move_block = lambda *a, **k: None  # Logseq did nothing
-        r = _run(g, "--id", B, "--before", A)
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
+        double = _double({"page a": ["a", "b"]}, noop=True, monkeypatch=monkeypatch)
+        _not_moved(_move(double, "b", "--before", "a"))
 
 
 class TestSubtreeTargetIsRefusedUpFront:
@@ -331,13 +376,10 @@ class TestSubtreeTargetIsRefusedUpFront:
         assert "own subtree" in r.output
         assert g.moves == []
 
-    def test_failure_after_the_move_does_not_name_the_subtree(self):
-        g = _Graph({"page a": [(A, []), (B, [])]})
-        g.move_block = lambda *a, **k: None
-        r = _run(g, "--id", A, "--under", B)
-        assert r.exit_code == 1
-        assert "did not take effect" in r.output
-        assert "subtree" not in r.output
+    def test_failure_after_the_move_does_not_name_the_subtree(self, monkeypatch):
+        double = _double({"page a": ["a", "b"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "a", "--under", "b"))
+        assert "subtree" not in error["error"]
 
 
 class TestDryRunPredictsTheRefusal:
@@ -363,3 +405,56 @@ class TestDryRunPredictsTheRefusal:
         assert r.exit_code == 0, r.output
         assert "Would move 1 block(s)" in r.output
         assert g.moves == []
+
+
+class TestUuidsInCapitals:
+    """Logseq's uuids are lower case; one typed in capitals is the same block.
+
+    Logseq moved the block, and the proof, comparing as typed, did not find
+    it where it was sent; a target in the block's own subtree, typed in
+    capitals, went past the refusal. Uuids with letters: the double's own are
+    digits, the same in either case."""
+
+    SRC = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1"
+    DST = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee2"
+    KID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee3"
+
+    def _graph(self, monkeypatch):
+        return _double({"Hex Page": [
+            {"content": "src block", "uuid": self.SRC,
+             "children": [{"content": "kid block", "uuid": self.KID}]},
+            {"content": "dst block", "uuid": self.DST},
+        ]}, monkeypatch=monkeypatch)
+
+    def _move(self, flag, src, target):
+        return split_runner().invoke(cli, ["--token", "t", "move-block", "--id", src,
+                                           flag, target, "--json"])
+
+    def test_before(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--before", self.DST.upper(), self.SRC.upper())
+        assert r.exit_code == 0, r.stderr
+        assert [b[0] for b in double.tree("Hex Page")] == ["dst block", "src block"]
+
+    def test_under(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--under", self.DST.upper(), self.SRC.upper())
+        assert r.exit_code == 0, r.stderr
+        assert ("dst block", []) in double.tree("Hex Page")[0][1]
+
+    def test_target_in_own_subtree(self, monkeypatch):
+        double = self._graph(monkeypatch)
+        r = self._move("--under", self.SRC, self.KID.upper())
+        assert r.exit_code == 1
+        assert "own subtree" in r.stderr
+        assert double.sent("moveBlock") == []
+
+    @pytest.mark.parametrize("flag", ["--under", "--before"])
+    def test_same_block_in_two_cases(self, monkeypatch, flag):
+        # The source in capitals, the target in lower case: one block, refused
+        # by name before anything is sent.
+        double = self._graph(monkeypatch)
+        r = self._move(flag, self.SRC.upper(), self.SRC)
+        assert r.exit_code == 1
+        assert "same block" in r.stderr
+        assert double.sent("moveBlock") == []

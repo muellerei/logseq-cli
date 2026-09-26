@@ -15,6 +15,33 @@ def _mock_response(payload):
     return resp
 
 
+def _answering_writes(payload):
+    """``requests.post`` for a test that updates a block: each method answers
+    as Logseq does. checkEditing, which the editor gate sends before a write,
+    with raw text (measured): ``false``, nobody is editing. updateBlock
+    with ``null``, and getBlock with the block as last written, for the
+    read that proves the update. Everything else answers ``payload``."""
+    idle = MagicMock(status_code=200, text="false")
+    block = {"uuid": "uuid-x", "content": ""}
+
+    def post(url, json=None, **kwargs):
+        method, args = json["method"], json["args"]
+        if method == "logseq.Editor.checkEditing":
+            return idle
+        if method == "logseq.Editor.updateBlock":
+            block["content"] = args[1]
+            return _mock_response(None)
+        if method == "logseq.Editor.getBlock":
+            return _mock_response(dict(block))
+        return _mock_response(payload)
+    return post
+
+
+def _requests_to(mock_post, method):
+    return [c for c in mock_post.call_args_list
+            if c.kwargs["json"]["method"] == f"logseq.Editor.{method}"]
+
+
 @pytest.fixture(autouse=True)
 def _ensure_cache_default(monkeypatch):
     """Default TTL=60s for tests, unless test overrides."""
@@ -62,20 +89,21 @@ class TestCacheBasic:
 
     def test_mutation_invalidates_cache(self):
         api = LogseqAPI(token="x")
-        with patch("logseq_cli.api.requests.post", return_value=_mock_response({"ok": 1})) as mock_post:
+        with patch("logseq_cli.api.requests.post", side_effect=_answering_writes({"ok": 1})) as mock_post:
             api.get_page("Foo")
             api.update_block("uuid-x", "new content")
             api.get_page("Foo")
-        # 1 read + 1 update + 1 fresh read after invalidation
-        assert mock_post.call_count == 3
+        # the read after the update is sent again, not served from the cache
+        assert len(_requests_to(mock_post, "getPage")) == 2
 
     def test_non_cacheable_method_passthrough(self):
         api = LogseqAPI(token="x")
-        with patch("logseq_cli.api.requests.post", return_value=_mock_response({"ok": 1})) as mock_post:
+        with patch("logseq_cli.api.requests.post", side_effect=_answering_writes({"ok": 1})) as mock_post:
             api.update_block("uuid-x", "first")
             api.update_block("uuid-x", "second")
-        # mutations are never cached
-        assert mock_post.call_count == 2
+        # mutations are never cached, and neither is the read proving each
+        assert len(_requests_to(mock_post, "updateBlock")) == 2
+        assert len(_requests_to(mock_post, "getBlock")) == 2
 
     def test_datalog_query_cacheable(self):
         api = LogseqAPI(token="x")
@@ -109,7 +137,7 @@ class TestErrorsAreNotCached:
         with patch("logseq_cli.api.requests.post", return_value=error) as mock_post:
             for _ in range(2):
                 with pytest.raises(DatalogQueryError):
-                    api.datascript_query("[:find ?x :where KAPUTT]")
+                    api.datascript_query("[:find ?x :where BROKEN]")
         assert mock_post.call_count == 2
 
     def test_successful_query_is_still_cached(self):
@@ -127,21 +155,12 @@ class TestCacheableSetMatchesReality:
     never called once: the method is declared in Logseq's plugin API but the
     HTTP server answers `MethodNotExist` for it. An entry for a call that does
     not happen misleads anyone reading the set to learn what the tool does.
+
+    That every entry is called is held in test_api_endpoint_binding.py
+    (test_every_cacheable_method_has_a_wrapper), bound to a wrapper. The text
+    check that stood here asked whether the name appears in api.py, which the
+    registry there now guarantees: it could no longer fail.
     """
-
-    def test_every_cacheable_method_is_actually_called_somewhere(self):
-        from pathlib import Path
-        from logseq_cli.api import _CACHEABLE_METHODS
-
-        src = Path(__file__).resolve().parent.parent / "logseq_cli"
-        api_src = (src / "api.py").read_text(encoding="utf-8")
-
-        for method in _CACHEABLE_METHODS:
-            # api.py names the method in the call() that wraps it; the rest of
-            # the package reaches it through that wrapper.
-            assert f'"{method}"' in api_src, (
-                f"{method} is cacheable but api.py never calls it"
-            )
 
     def test_get_page_properties_stays_out(self):
         from logseq_cli.api import _CACHEABLE_METHODS

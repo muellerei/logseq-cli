@@ -2,15 +2,19 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
+from logseq_cli.api import LogseqAPI, WriteNotVerified
 from logseq_cli.headings import find_or_create_heading
 from logseq_cli.outlinetext import contains_hierarchical_content, parse_hierarchical_content
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 class TestContainsHierarchicalContent:
     """Tests for the auto-detection of hierarchical content."""
 
     def test_simple_text_returns_false(self):
-        assert contains_hierarchical_content("einfacher text") is False
+        assert contains_hierarchical_content("plain text") is False
 
     def test_empty_string_returns_false(self):
         assert contains_hierarchical_content("") is False
@@ -75,12 +79,16 @@ class TestFindOrCreateHeading:
         result = find_or_create_heading(api, "test-page", "## Log")
         assert result == "abc-123"
 
-    def test_returns_none_on_total_failure(self):
-        api = MagicMock()
-        api.get_page_blocks_tree.return_value = []
-        api.append_block_in_page.return_value = None
-        result = find_or_create_heading(api, "test-page", "## Log")
-        assert result is None
+    def test_a_heading_logseq_did_not_create_raises(self, monkeypatch):
+        """It answered None, and the callers wrote to the top of the page
+        instead; the API's proof raises now."""
+        double = LogseqHttpDouble()
+        double.add_page("test-page", ["body"])
+        double.set_mode("appendBlockInPage", "noop")
+        double.install(monkeypatch)
+        with pytest.raises(WriteNotVerified):
+            find_or_create_heading(LogseqAPI(token="t"), "test-page", "## Log")
+        assert double.tree("test-page") == [("body", [])]
 
 
 class TestParseHierarchicalContentIntegration:
@@ -138,13 +146,13 @@ class TestParseHierarchicalPropertyLines:
 
     def test_leading_property_line_stays_a_block(self):
         """No preceding block to merge into: keep old behavior."""
-        tree = parse_hierarchical_content("type:: Person\n- ## Kontakt")
+        tree = parse_hierarchical_content("type:: Person\n- ## Contact")
         assert tree[0]["content"] == "type:: Person"
-        assert tree[1]["content"] == "## Kontakt"
+        assert tree[1]["content"] == "## Contact"
 
     def test_normal_content_with_double_colon_midline_not_merged(self):
         """Only lines *starting* with key:: are property lines."""
-        tree = parse_hierarchical_content("- A\n- Siehe key:: value Doku")
+        tree = parse_hierarchical_content("- A\n- See key:: value docs")
         assert len(tree) == 2
 
     def test_timestamp_entry_unaffected(self):

@@ -17,6 +17,8 @@ import pytest
 from click.testing import CliRunner
 
 from tests.conftest import split_runner, fake_api
+from tests.logseq_http_double import LogseqHttpDouble
+from logseq_cli.api import _not_verified
 from logseq_cli.cli import cli
 from logseq_cli.cliinput import read_content_file
 
@@ -28,8 +30,8 @@ import click
 class TestReadContentFile:
     def test_reads_utf8_verbatim(self, tmp_path):
         f = tmp_path / "entry.md"
-        f.write_text("**09:00** Größe geprüft\n\t- Alice' Hinweis", encoding="utf-8")
-        assert read_content_file(str(f)) == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
+        f.write_text("**09:00** Café menu checked\n\t- Alice's note", encoding="utf-8")
+        assert read_content_file(str(f)) == "**09:00** Café menu checked\n\t- Alice's note"
 
     def test_strips_only_trailing_newlines(self, tmp_path):
         f = tmp_path / "entry.md"
@@ -55,7 +57,7 @@ class TestReadContentFile:
 
     def test_non_utf8_is_bad_parameter(self, tmp_path):
         f = tmp_path / "latin.md"
-        f.write_bytes(b"Gr\xf6\xdfe")  # latin-1, invalid UTF-8
+        f.write_bytes(b"Caf\xe9")  # latin-1, invalid UTF-8
         with pytest.raises(click.BadParameter) as exc:
             read_content_file(str(f))
         assert "UTF-8" in str(exc.value)
@@ -156,15 +158,15 @@ class TestAddJournalBlockContentFile:
         assert "Added 3 block(s)" in result.output
 
     def test_special_characters_survive(self, api, tmp_path):
-        """Apostrophes, quotes and umlauts reach the API unmangled."""
-        f = tmp_path / "umlaut.md"
-        f.write_text("**14:30** Alice' \"Größe\" geprüft: Straße, Übergabe", encoding="utf-8")
+        """Apostrophes, quotes and accented letters reach the API unmangled."""
+        f = tmp_path / "accents.md"
+        f.write_text("**14:30** Alice's \"Café\" checked: naïve façade, jalapeño", encoding="utf-8")
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 0, result.output
         written = api.insert_block.call_args_list[0].args[1]
-        assert written == "**14:30** Alice' \"Größe\" geprüft: Straße, Übergabe"
+        assert written == "**14:30** Alice's \"Café\" checked: naïve façade, jalapeño"
 
     def test_top_level_without_heading(self, api, tmp_path):
         f = tmp_path / "top.md"
@@ -201,7 +203,7 @@ class TestAddJournalBlockContentFile:
 
     def test_date_flag_still_applies(self, api, tmp_path):
         f = tmp_path / "d.md"
-        f.write_text("- Nachtrag", encoding="utf-8")
+        f.write_text("- Addendum", encoding="utf-8")
         result = split_runner().invoke(cli, [
             "add-journal-block", "--date", "2026-08-03",
             "--content-file", str(f), "--json"])
@@ -258,9 +260,9 @@ class TestAddJournalBlockFlagValidation:
         """The rejection is specific to --content-file, not a global ban."""
         result = CliRunner().invoke(cli, [
             "add-journal-block", "--under-heading", "## Log",
-            "--content", "ein  langer   Satz", "--no-preserve"])
+            "--content", "a  long   sentence", "--no-preserve"])
         assert result.exit_code == 0, result.output
-        assert api.insert_block.call_args_list[0].args[1] == "ein langer Satz"
+        assert api.insert_block.call_args_list[0].args[1] == "a long sentence"
 
 
 class TestUpsertHeadingKeepsAllRoots:
@@ -306,6 +308,18 @@ class TestUpsertHeadingKeepsAllRoots:
         assert len(api.insert_block.call_args_list) == 4
 
 
+JOURNAL_DATE = "2099-01-05"
+JOURNAL_PAGE = "2099-01-05, Monday"
+
+
+def _journal_double(monkeypatch, blocks=("journal top",)):
+    """The journal of JOURNAL_DATE behind the HTTP double, so the real
+    LogseqAPI proves each write and counts what landed."""
+    double = LogseqHttpDouble()
+    double.add_page(JOURNAL_PAGE, list(blocks))
+    return double.install(monkeypatch)
+
+
 class TestPartialWriteIsNamed:
     """A partial write leaves earlier blocks in place. Claiming "Nothing was
     written" invites a retry and thus duplicates.
@@ -313,22 +327,28 @@ class TestPartialWriteIsNamed:
     Tree writes go through ``insertBatchBlock``, which answers ``null`` whether
     it wrote or not AND can still write only part of a batch (verified against a
     live graph: a malformed node is skipped silently while its siblings land).
-    So the failure is detected by re-reading the parent's children and comparing
-    the count, and the message has to name that partial state just as the
-    per-block path did.
+    So LogseqAPI.insert_batch_block re-reads the place and compares the count,
+    and the message has to name that partial state just as the per-block path
+    did.
     """
 
-    def test_message_names_the_partial_state(self, api, tmp_path):
-        api.graph.set_fail_after(3)  # 3 of 5 land, then the batch stops silently
+    def test_message_names_the_partial_state(self, monkeypatch, tmp_path):
+        double = _journal_double(monkeypatch, [{"content": "## Log", "children": []}])
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        # A with its two children lands (3 of 5), then the batch stops silently.
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock",
+                            lambda args: real([args[0], args[1][:1], *args[2:]]))
         f = tmp_path / "u.md"
         f.write_text("- ### A\n\t- a1\n\t- a2\n- ### B\n\t- b1", encoding="utf-8")
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--under-heading", "## Log",
-            "--content-file", str(f)])
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE,
+            "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
-        assert "wrote 3 of 5 block(s)" in result.output
-        assert "Added" not in result.output
-        assert "duplicate" in result.output
+        assert "Added" not in result.stdout
+        error = _json.loads(result.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        assert (error["expected"], error["got"], error["writes_landed"]) == ("5 blocks", "3", 3)
+        assert "3 earlier write(s) in this call landed and remain" in error["error"]
 
     def test_upsert_aborts_instead_of_reporting_phantom_blocks(self, api, tmp_path):
         """The upsert path used insert_block_tree (non-strict, int-returning)
@@ -343,7 +363,8 @@ class TestPartialWriteIsNamed:
             "--upsert-heading", "### [[Carol]]", "--content-file", str(f)])
         assert result.exit_code == 1
         assert "Added" not in result.output
-        assert "wrote 0 of 3 block(s)" in result.output
+        # Not "Nothing was written": the mocked update_block counts nothing.
+        assert "expected 3 blocks, read 0." in result.output
 
     def test_upsert_success_count_matches_real_writes(self, api, tmp_path):
         f = tmp_path / "u.md"
@@ -359,33 +380,33 @@ class TestPartialWriteIsNamed:
         assert real == 4
         assert "Added 4 block(s)" in result.output
 
-    def test_batch_page_top_counts_across_content_values(self, api):
+    def test_batch_page_top_counts_across_content_values(self, monkeypatch):
         """insert_block_tree_at_page_top started its counter at 0 per --content
         value, so a failure in the second value claimed "Nothing was written"
-        while the first value's blocks were already on the page."""
-        calls = {"n": 0}
-
-        def fail_on_third(*args, **kwargs):
-            calls["n"] += 1
-            return None if calls["n"] == 3 else {"uuid": f"u{calls['n']}"}
-
-        api.append_block_in_page.side_effect = fail_on_third
-        api.insert_block.side_effect = fail_on_third
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--top-level",
-            "--content", "A\n\t- a1", "--content", "B\n\t- b1"])
+        while the first value's blocks were already on the page. The count is
+        the API's now (writes_landed), so no caller can start it over."""
+        double = _journal_double(monkeypatch)
+        # A lands, a1 lands under it, B is answered null.
+        double.set_mode("appendBlockInPage", "noop", from_call=2)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE, "--top-level",
+            "--content", "A\n\t- a1", "--content", "B\n\t- b1", "--json"])
         assert result.exit_code == 1
-        assert "2 block(s) were already written" in result.output
-        assert "Nothing was written" not in result.output
+        error = _json.loads(result.stderr)
+        assert error["reason"] == "write_not_verified"
+        assert error["method"] == "appendBlockInPage"
+        assert error["writes_landed"] == 2
+        assert "2 earlier write(s) in this call landed" in error["error"]
+        assert "Nothing was written" not in error["error"]
 
     def test_page_top_append_failure_is_not_reported_as_success(self, api, tmp_path):
         """insert_tree_at_page_end (then insert_formatted_content_with_uuids)
         was the last inserter without a strict contract: a page Logseq has not
         loaded answers every append with HTTP 200 + null, the None UUIDs were
         counted, and the command printed "Added N block(s)" with exit 0 for an
-        entry that never existed."""
-        api.append_block_in_page.side_effect = None
-        api.append_block_in_page.return_value = None
+        entry that never existed. The mock raises as LogseqAPI does on null."""
+        api.append_block_in_page.side_effect = _not_verified(
+            "appendBlockInPage", "journal", "a new block", "no block uuid in the answer")
         f = tmp_path / "top.md"
         f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
         result = CliRunner().invoke(cli, [
@@ -394,18 +415,25 @@ class TestPartialWriteIsNamed:
         assert "Added" not in result.output
         assert "Nothing was written" in result.output
 
-    def test_heading_fallback_failure_is_not_reported_as_success(self, api, tmp_path):
-        """Same path, reached via the 'could not create heading' fallback."""
-        api.get_page_blocks_tree.return_value = []
-        api.append_block_in_page.side_effect = None
-        api.append_block_in_page.return_value = None
+    def test_heading_failure_is_not_reported_as_success(self, monkeypatch, tmp_path):
+        """A heading Logseq did not create fails the command. It once fell
+        back to writing the blocks at the top of the page, with a warning
+        (an earlier review called that fallback a probe: "delete or test";
+        it was deleted once every write was proven)."""
+        double = _journal_double(monkeypatch, [])
+        double.set_mode("appendBlockInPage", "noop")
         f = tmp_path / "top.md"
         f.write_text("- ### Head\n\t- Item A", encoding="utf-8")
-        result = CliRunner().invoke(cli, [
-            "add-journal-block", "--under-heading", "## Log",
-            "--content-file", str(f)])
+        result = split_runner().invoke(cli, [
+            "--token", "t", "add-journal-block", "--date", JOURNAL_DATE,
+            "--under-heading", "## Log", "--content-file", str(f), "--json"])
         assert result.exit_code == 1
-        assert "Added" not in result.output
+        assert "Added" not in result.stdout
+        # The note that the content is hierarchical is in the object.
+        error = _json.loads(result.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "appendBlockInPage")
+        assert error["writes_landed"] == 0
+        assert double.tree(JOURNAL_PAGE) == []
 
     def test_first_block_failure_still_says_nothing_written(self, api, tmp_path):
         """With zero blocks written, the original wording is the correct one."""
@@ -416,7 +444,7 @@ class TestPartialWriteIsNamed:
             "add-journal-block", "--under-heading", "## Log",
             "--content-file", str(f)])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output
 
 
@@ -504,8 +532,8 @@ class TestContentFromStdin:
 
     def test_stdin_keeps_utf8_and_indentation(self, monkeypatch):
         monkeypatch.setattr(
-            "sys.stdin", _stdin("**09:00** Größe geprüft\n\t- Alice' Hinweis\n"))
-        assert read_content_file("-") == "**09:00** Größe geprüft\n\t- Alice' Hinweis"
+            "sys.stdin", _stdin("**09:00** Café menu checked\n\t- Alice's note\n"))
+        assert read_content_file("-") == "**09:00** Café menu checked\n\t- Alice's note"
 
     def test_empty_stdin_is_rejected(self, monkeypatch):
         """Same guard as an empty file: fail before any write, not after."""
@@ -561,11 +589,11 @@ class TestStdinReadLikeAFile:
         monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data), encoding="latin-1", newline="\n"))
 
     def test_stdin_is_utf8_whatever_the_locale(self, monkeypatch):
-        self._stdin(monkeypatch, "Größe\n".encode("utf-8"))
-        assert read_content_file("-") == "Größe"
+        self._stdin(monkeypatch, "Café\n".encode("utf-8"))
+        assert read_content_file("-") == "Café"
 
     def test_invalid_utf8_on_stdin_is_refused(self, monkeypatch):
-        self._stdin(monkeypatch, b"Gr\xf6\xdfe")
+        self._stdin(monkeypatch, b"Caf\xe9")
         with pytest.raises(click.BadParameter) as exc:
             read_content_file("-")
         assert "UTF-8" in str(exc.value)

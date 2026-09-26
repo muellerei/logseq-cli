@@ -4,15 +4,17 @@ parse_hierarchical_content reads the text a caller passes as an outline;
 outline_text is its inverse, so what a write echoes reads back as the same
 tree. The rules that decide where a block ends live here with them: tabs
 against spaces, code blocks a bullet must not split, and quotes a blank line
-stops. Nothing here talks to Logseq, so all of it is tested without a mock;
-the layering tests keep it that way (ADR 0003).
+stops. subtree_uuids and the preorder walks read a block tree as getBlock or
+getPageBlocksTree hands it back; they sit here, not in strictinsert, because
+api needs them for the editor gate and the batch proof and must not import
+the insert helpers. Nothing here talks to Logseq, so all of it
+is tested without a mock; the layering tests keep it that way (ADR 0003).
 """
 
 import re
 
-import click
-
 from logseq_cli.blocktext import PROPERTY_LINE_RE, code_block_lines, is_fence
+from logseq_cli.notes import print_note
 
 
 def count_blocks(tree: list) -> int:
@@ -23,6 +25,41 @@ def count_blocks(tree: list) -> int:
         if node.get("children"):
             total += count_blocks(node["children"])
     return total
+
+
+def collect_child_uuids(node) -> list:
+    """UUIDs below a getBlock(includeChildren=True) block, DFS pre-order; a
+    child given as a bare uuid ref carries no content and is skipped."""
+    return [b["uuid"] for b in preorder_blocks(node.get("children")) if b.get("uuid")]
+
+
+def subtree_uuids(block: dict) -> list:
+    """The block's own UUID and those of all its descendants."""
+    return [block["uuid"], *collect_child_uuids(block)] if block.get("uuid") else []
+
+
+def preorder_blocks(blocks) -> list:
+    """``blocks`` and all their descendants, DFS pre-order, as getBlock's
+    ``children`` or getPageBlocksTree hand them back. A child given as a bare
+    uuid ref carries no content and is skipped."""
+    out = []
+    for block in blocks or []:
+        if isinstance(block, dict):
+            out.append(block)
+            out.extend(preorder_blocks(block.get("children")))
+    return out
+
+
+def page_blocks_by_uuid(tree: list) -> dict:
+    """``uuid -> (siblings, index, parent block or None)`` over a page tree."""
+    found = {}
+
+    def walk(blocks, parent):
+        for i, block in enumerate(blocks):
+            found[block["uuid"]] = (blocks, i, parent)
+            walk(block.get("children") or [], block)
+    walk(tree, None)
+    return found
 
 
 def bullet_lines(content: str, prefix: str) -> list:
@@ -184,7 +221,7 @@ def parse_hierarchical_content(content: str) -> list:
         # ("- ## Plan" / "\t- collapsed:: true", a 22-block plan insert on
         # 2026-08-10). At the same level or above, Logseq reads "- k:: v" as a
         # block of its own (measured, 0.10.15), and merging it would move it
-        # into whatever block came last, e.g. "- Priorität:: hoch" after a
+        # into whatever block came last, e.g. "- Priority:: high" after a
         # nested detail (#39).
         if (PROPERTY_LINE_RE.match(stripped) and last_node is not None
                 and (not bulleted or indent > last_indent)):
@@ -315,4 +352,4 @@ def note_quote_breaks(tree: list) -> None:
     """Print :func:`quote_break_note` for ``tree`` on stderr, if there is one."""
     note = quote_break_note(tree)
     if note:
-        click.echo(note, err=True)
+        print_note(note)

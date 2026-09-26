@@ -15,6 +15,8 @@ import pytest
 from click.testing import CliRunner
 
 from tests.conftest import fake_api
+from tests.logseq_http_double import LogseqHttpDouble
+from logseq_cli.api import LogseqAPI, WriteNotVerified
 from logseq_cli.cli import cli
 from logseq_cli.strictinsert import insert_block_tree_at_page_top, insert_block_tree_with_uuids
 
@@ -22,48 +24,62 @@ from logseq_cli.strictinsert import insert_block_tree_at_page_top, insert_block_
 TREE = [{"content": "Head", "children": [{"content": "Detail"}]}]
 
 
+def _null_answering(monkeypatch, method):
+    """The real LogseqAPI against a Logseq that answers ``method`` with null
+    and writes nothing: the proof sits in the API method, which a
+    method mock would replace."""
+    double = LogseqHttpDouble.installed(monkeypatch, {"Page One": ["parent block"]},
+                                        modes={method: "noop"})
+    return LogseqAPI(token="t"), double
+
+
 class TestHelperDefaults:
-    def test_strict_is_the_default(self):
-        """The unsafe mode must be opt-in, never the default."""
-        api = fake_api([], fail_after=0)  # writes nothing, reports nothing
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, TREE, "parent")
-        assert "wrote 0 of 2 block(s)" in str(exc.value)
+    def test_a_batch_that_wrote_nothing_fails(self, monkeypatch):
+        """Once the unsafe mode was the default; there is none now."""
+        api, double = _null_answering(monkeypatch, "insertBatchBlock")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, TREE, double.uuid_of("parent block"))
+        assert exc.value.fields["method"] == "insertBatchBlock"
+        assert (exc.value.fields["expected"], exc.value.fields["got"]) == ("2 blocks", "0")
+        assert api.writes_landed == 0
 
-    def test_single_block_failure_uses_the_per_block_path(self):
+    def test_single_block_failure_uses_the_per_block_path(self, monkeypatch):
         """One block needs no batch call, so the UUID check still applies."""
-        api = MagicMock()
-        api.insert_block.return_value = None
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, [{"content": "solo"}], "parent")
-        assert "did not create" in str(exc.value)
+        api, double = _null_answering(monkeypatch, "insertBlock")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, [{"content": "solo"}],
+                                         double.uuid_of("parent block"))
+        assert exc.value.fields["method"] == "insertBlock"
+        assert api.writes_landed == 0
 
-    def test_batch_partial_write_is_detected_and_named(self):
-        """A batch can write part of its nodes; the count check must catch it."""
-        api = fake_api(["u1", "u2"], fail_after=1)
-        with pytest.raises(Exception) as exc:
-            insert_block_tree_with_uuids(api, TREE, "parent")
-        msg = str(exc.value)
-        assert "wrote 1 of 2 block(s)" in msg
-        assert "duplicate" in msg
-
-    def test_strict_false_still_tolerates_partial_writes(self):
-        """Opt-out stays available for callers that deliberately want it."""
-        api = MagicMock()
-        api.insert_block.return_value = None
-        uuids = insert_block_tree_with_uuids(api, TREE, "parent", strict=False)
-        assert uuids == [None]
+    def test_batch_partial_write_is_detected_and_named(self, monkeypatch):
+        """A batch can write part of its nodes; the method's count catches it,
+        and counts what landed for the message."""
+        double = LogseqHttpDouble()
+        double.add_page("Page One", ["parent block"])
+        real = double._handlers["logseq.Editor.insertBatchBlock"]
+        # The roots land, their children are skipped.
+        monkeypatch.setitem(double._handlers, "logseq.Editor.insertBatchBlock", lambda args: real(
+            [args[0], [{**n, "children": []} for n in args[1]], *args[2:]]))
+        double.install(monkeypatch)
+        api = LogseqAPI(token="t")
+        with pytest.raises(WriteNotVerified) as exc:
+            insert_block_tree_with_uuids(api, TREE, double.uuid_of("parent block"))
+        assert (exc.value.fields["expected"], exc.value.fields["got"]) == ("2 blocks", "1")
+        assert api.writes_landed == 1
 
     def test_successful_write_returns_uuids_in_dfs_order(self):
         api = fake_api(["u-head", "u-detail"])
         assert insert_block_tree_with_uuids(api, TREE, "parent") == ["u-head", "u-detail"]
 
-    def test_page_top_insert_aborts_on_failed_append(self):
-        api = MagicMock()
-        api.append_block_in_page.return_value = None
-        with pytest.raises(Exception) as exc:
+    def test_page_top_insert_aborts_on_failed_append(self, monkeypatch):
+        api, double = _null_answering(monkeypatch, "appendBlockInPage")
+        with pytest.raises(WriteNotVerified) as exc:
             insert_block_tree_at_page_top(api, TREE, "Page One")
-        assert "did not create" in str(exc.value)
+        assert exc.value.fields["method"] == "appendBlockInPage"
+        # The child was never sent: its parent did not land.
+        assert double.sent("insertBlock") == []
+        assert double.tree("Page One") == [("parent block", [])]
 
     def test_page_top_insert_succeeds_normally(self):
         api = MagicMock()
@@ -95,7 +111,7 @@ class TestCommandsSurfaceTheFailure:
             "add-journal-block", "--under-heading", "## Log",
             "--content", "**09:00** Head\n\t- Detail"])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output
 
     def test_add_journal_block_succeeds_when_writes_land(self, api):
@@ -114,5 +130,5 @@ class TestCommandsSurfaceTheFailure:
             "add-note-content", "--page", "Page One",
             "--under-heading", "## Log", "--content", "Head\n\t- Detail"])
         assert result.exit_code == 1
-        assert "wrote 0 of 2 block(s)" in result.output
+        assert "expected 2 blocks, read 0. Nothing was written." in result.output
         assert "Added" not in result.output

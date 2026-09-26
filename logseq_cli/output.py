@@ -13,8 +13,36 @@ import requests
 from logseq_cli.api import BadResponseError, DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
+from logseq_cli.headings import TitleHeadingOnly
 from logseq_cli.blocktext import IdLineError, SplitBlockError
-from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
+from logseq_cli.notes import hold_notes, release_notes, take_notes
+from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page, resolve_page_to_write
+from logseq_cli.writerefused import WriteRefused, partial_state
+
+
+def _after_writes(message: str) -> tuple:
+    """``message`` and the fields for a failure of the connection, which can
+    come after writes of the same call landed, and between a write and its
+    proof: say both, as a refusal says the first. Nothing is added before
+    the first write, so a read or a first contact reads as it always did.
+
+    The counts come from the call's LogseqAPI, when the command has one."""
+    ctx = click.get_current_context(silent=True)
+    obj = ctx.obj if ctx is not None and isinstance(ctx.obj, dict) else {}
+    api = obj.get("api")
+    landed = getattr(api, "writes_landed", 0)
+    unproven = getattr(api, "write_unproven", None)
+    fields = {}
+    if unproven:
+        message = f"{message} Whether {unproven} landed is not known."
+        fields["unproven_write"] = unproven
+    if landed:
+        message = f"{message} {partial_state(landed)}"
+    elif unproven:
+        message = f"{message} No earlier write of this call landed."
+    if landed or unproven:
+        fields["writes_landed"] = landed
+    return message, fields
 
 
 def handle_connection_error(func):
@@ -34,44 +62,47 @@ def handle_connection_error(func):
     built by hand reports the module that defines *this* decorator instead, so
     once the commands live elsewhere the scan would look in the wrong file and
     find no writing command at all.
+
+    Under ``--json`` it also holds the command's notes (``notes.print_note``) until
+    the command ends: :func:`fail` puts them in the error object, and
+    otherwise they are printed at the end, after the result.
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         as_json = bool(kwargs.get("as_json"))
+        if as_json:
+            hold_notes()
         try:
             return func(*args, **kwargs)
+        # The four failures of the connection can come after writes of the
+        # call landed, or with one sent and not proven: _after_writes adds
+        # what a retry would meet.
         except requests.ConnectionError:
-            fail(
+            message, fields = _after_writes(
                 "Cannot connect to Logseq API. "
-                "Is Logseq running with the HTTP API enabled?",
-                as_json=as_json,
-                reason="connection_refused",
-            )
+                "Is Logseq running with the HTTP API enabled?")
+            fail(message, as_json=as_json, reason="connection_refused", **fields)
         except requests.Timeout:
             # A read that took longer than the request timeout. It used to be
             # a traceback, and a rare one, while scans swallowed read errors;
             # they reach the caller now (#93), so it gets a reason like the rest.
-            fail(
-                "Logseq did not answer in time.",
-                as_json=as_json,
-                reason="timeout",
-            )
+            message, fields = _after_writes("Logseq did not answer in time.")
+            fail(message, as_json=as_json, reason="timeout", **fields)
         except BadResponseError as e:
-            fail(
-                str(e),
-                as_json=as_json,
-                reason="bad_response",
-            )
+            message, fields = _after_writes(str(e))
+            fail(message, as_json=as_json, reason="bad_response", **fields)
         except requests.HTTPError as e:
             status = e.response.status_code
             hint = ("Check --token: Logseq rejected it." if status in (401, 403)
                     else None)
+            message, fields = _after_writes(f"HTTP {status} - {e.response.text}")
             fail(
-                f"HTTP {status} - {e.response.text}",
+                message,
                 as_json=as_json,
                 reason="http_error",
                 status_code=status,
                 **({"hint": hint} if hint else {}),
+                **fields,
             )
         except DatalogQueryError as e:
             # Not a transport error: the connection is healthy, Logseq rejected
@@ -105,6 +136,20 @@ def handle_connection_error(func):
                 line=e.line,
                 kind=e.kind,
             )
+        except WriteRefused as e:
+            # A write refused or not proven. The partial state
+            # comes from the API's count, not from the type: a refusal that
+            # falls after writes of the same call landed (copy-block --remove
+            # with its source open) must say so, and one raised outside the
+            # central write says it too. Exit 1 for all of them.
+            landed = click.get_current_context().obj["api"].writes_landed
+            fail(
+                f"{e} {partial_state(landed)}",
+                as_json=as_json,
+                reason=e.reason,
+                writes_landed=landed,
+                **e.fields,
+            )
         except IdLineError as e:
             # Refused before the write, like a line that splits the block: the
             # text would give the block another uuid (#56).
@@ -115,6 +160,10 @@ def handle_connection_error(func):
                 reason="id_line",
                 line=e.line,
             )
+        except TitleHeadingOnly as e:
+            # Refused before the write: the text is empty once the heading
+            # the page shows anyway is dropped.
+            fail(str(e), as_json=as_json, reason="empty_content", page=e.page)
         except AmbiguousAliasError as e:
             # Logseq would take the first of the pages; the CLI names them all
             # and lets the caller choose, so no read or write guesses.
@@ -142,14 +191,17 @@ def handle_connection_error(func):
                 as_json=as_json,
                 reason="invalid_property_key",
             )
+        finally:
+            # A failure through fail() took them; any other end prints them.
+            release_notes()
     return wrapper
 
 
 def note_alias(ref, as_json: bool) -> None:
     """Say on stderr that a name was an alias, in text mode only.
 
-    Under --json a result that names the page carries ``alias_of`` instead: a
-    note there could stand in front of a later error object and break its JSON.
+    Under --json a result that names the page carries ``alias_of`` instead,
+    and a note would say it twice.
     """
     if ref.redirected and not as_json:
         click.echo(f"Note: '{ref.requested}' is an alias of '{ref.page}'.", err=True)
@@ -163,6 +215,14 @@ def follow_page(api, name: str, as_json: bool):
     ref = resolve_page(api, name)
     note_alias(ref, as_json)
     return ref
+
+
+def follow_page_to_write(api, name: str, as_json: bool):
+    """:func:`follow_page` for a write: ``(PageRef, PageToWrite)`` from
+    pagenames.resolve_page_to_write, the alias said on stderr."""
+    ref, target = resolve_page_to_write(api, name)
+    note_alias(ref, as_json)
+    return ref, target
 
 
 def follow_pages(api, names, as_json: bool):
@@ -215,10 +275,13 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
     object (``{"error": ..., ...fields}``) so agents can parse it structurally
     instead of scraping prose; without it, a plain ``Error: ...`` line.
 
-    ``fields`` adds context keys (e.g. ``id=...``, ``page=...``) to the JSON form.
+    ``fields`` adds context keys (e.g. ``id=...``, ``page=...``) to the JSON form,
+    and ``notes`` the notes held until then (``notes.print_note``), since a line of
+    its own in front of the object would make stderr no JSON.
     """
     if as_json:
-        payload = {"error": message, **fields}
+        notes = take_notes()
+        payload = {"error": message, **fields, **({"notes": notes} if notes else {})}
         click.echo(json.dumps(payload, indent=2, default=str), err=True)
     else:
         click.echo(f"Error: {message}", err=True)

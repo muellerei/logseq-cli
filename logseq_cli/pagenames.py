@@ -12,10 +12,13 @@ This module makes the same decision, so one name never means two pages. Where
 it differs, it says so: two pages claiming one alias is refused here, where
 Logseq silently takes the first.
 """
+import datetime
+import re
 import unicodedata
 from typing import NamedTuple
 
 from logseq_cli.datalog import page_name_literal
+from logseq_cli.dates import format_journal_date, parse_journal_name
 
 
 class PageRef(NamedTuple):
@@ -136,3 +139,113 @@ def refuse_alias(ref: PageRef, command: str) -> None:
     """For delete-page and rename-page: an alias is refused, naming the page."""
     if ref.redirected:
         raise AliasError(ref, command)
+
+
+# What Logseq's ``clojure.string/trim`` takes off both ends of a page name:
+# JavaScript's String.prototype.trim, whose set is WhiteSpace and
+# LineTerminator in the ECMAScript spec. It holds U+FEFF, which str.strip()
+# keeps, and not \x1c-\x1f or \x85, which str.strip() takes. Read in the
+# source and the spec, not measured; the \s of JavaScript that
+# strictinsert's _BATCH_DROPS_RE mirrors is the same set.
+_JS_TRIMMED = ("\t\n\v\f\r \u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200b)))
+               + "\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
+def js_trim(name: str) -> str:
+    """``name`` trimmed as ``create!`` and ``rename!`` trim a page name
+    (handler/page.cljs, 0.10.15). With str.strip(), a name behind a byte
+    order mark passed as a new one: a rename onto it merged two pages, and a
+    page created under it was looked for under the name with the mark."""
+    return name.strip(_JS_TRIMMED)
+
+
+def title_as_created(name: str) -> str:
+    """The title Logseq's ``create!`` makes of ``name`` (handler/page.cljs
+    ``create!``, 0.10.15): trimmed (``js_trim``), a whole ``[[...]]`` unwrapped, leading
+    ``#`` dropped, then one ``/`` at either end dropped.
+
+    createPage and appendBlockInPage create a missing page under this title,
+    while getPage looks the name up as given, so ``[[X]]`` finds nothing and
+    creates X (measured, 0.10.15: createPage on ``[[X]]``, ``#X`` and
+    `` X `` answered the page X, getPage under the name sent null; ``/X/``
+    getPage finds, as it drops the slashes itself). Not mirrored: a Markdown
+    or Org link to a file as the name.
+
+    One pass, as ``create!`` makes it, and not idempotent: ``#[[X]]`` becomes
+    ``[[X]]``, since the brackets are unwrapped only around the whole name,
+    and ``[[X]]`` again becomes ``X`` (measured, 0.10.15). So it is applied
+    to a name as asked, never to its own result, and createPage is sent the
+    name as asked (``LogseqAPI.create_page``).
+    """
+    title = js_trim(name)
+    linked = re.fullmatch(r"\[\[(.*)\]\]", title)
+    title = re.sub(r"^#+", "", linked.group(1) if linked else title)
+    title = title[1:] if title.startswith("/") else title
+    return title[:-1] if title.endswith("/") else title
+
+
+def journal_page_name(api, day: datetime.date) -> str:
+    """The title of ``day``'s journal in the graph's date format."""
+    configs = api.get_user_configs()
+    return format_journal_date(day, configs.get("preferredDateFormat") if configs else None)
+
+
+def page_name_to_create(api, name: str) -> str:
+    """The name Logseq creates a page under when asked for ``name``: its
+    ``title_as_created``, and for a journal title in a format Logseq takes
+    whatever the graph's (dates.parse_journal_name), the journal's title in
+    the graph's format.
+
+    Sent as given, such a name is created all the same, and createPage
+    answers null for the journal (measured) while getPage finds nothing under the
+    name sent: a page that was made read as one that was not. Shared by
+    LogseqAPI.create_page and the commands that name the page they write to
+    or report, so the check for a page that exists, the write and the output
+    use one name. ``name`` is the name as asked: see ``title_as_created``.
+    """
+    title = title_as_created(name)
+    day = parse_journal_name(title)
+    return journal_page_name(api, day) if day else title
+
+
+class PageToWrite(NamedTuple):
+    """Where a write to a page name goes, from :func:`page_to_write`.
+
+    ``name`` is the page's name for every step after: the check, the
+    preview, the write and the output. ``asked`` is the name as the caller
+    gave it, and only createPage is sent it (``create_missing_page`` in
+    strictinsert): Logseq makes ``name`` of it, and would make another page
+    of ``name`` itself when that is not how Logseq names it already.
+    """
+    asked: str
+    name: str
+    page: dict | None
+
+
+def page_to_write(api, name: str) -> PageToWrite:
+    """The page getPage finds under ``name``, or else the name Logseq would
+    create (``page_name_to_create``) and the page found under that, ``None``
+    when there is none yet."""
+    page = api.get_page(name)
+    if page:
+        return PageToWrite(name, name, page)
+    created = page_name_to_create(api, name)
+    return PageToWrite(name, created, api.get_page(created) if created != name else page)
+
+
+def resolve_page_to_write(api, name: str) -> tuple:
+    """``(PageRef, PageToWrite)`` for a write to the page ``name`` means.
+
+    In this order: first the page Logseq takes ``name`` for
+    (:func:`page_to_write`), then the alias that page may be. The other way
+    round, ``[[X]]``, ``#X`` or `` X `` for an alias X was looked up as a
+    page of its own, found none, and was cleaned to X only when the write
+    came: the text landed on the alias's stub, which Logseq does not show
+    under X, and every step called it written. The ref keeps ``name`` as
+    asked, for the output.
+    """
+    target = page_to_write(api, name)
+    ref = resolve_page(api, target.name)
+    if not ref.redirected:
+        return PageRef(name, target.name), target
+    return PageRef(name, ref.page, redirected=True), page_to_write(api, ref.page)

@@ -4,6 +4,7 @@ import sys
 import click
 import requests
 
+from logseq_cli.api import rename_refused
 from logseq_cli.blockprops import (
     apply_block_properties,
     check_property_pairs,
@@ -11,7 +12,6 @@ from logseq_cli.blockprops import (
 )
 from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.cliinput import content_or_file
-from logseq_cli.dates import is_journal_date
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
 from logseq_cli.ids import (
@@ -22,18 +22,26 @@ from logseq_cli.ids import (
     without_block_ids_noted,
 )
 from logseq_cli.lookup import find_backlinks, incoming_block_refs, refs_refusal
+from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import count_blocks, note_quote_breaks, parse_hierarchical_content
 from logseq_cli.output import (
     ambiguous_message,
     fail,
     follow_page,
+    follow_page_to_write,
     follow_pages,
     handle_connection_error,
     json_text,
     output,
     uuid_fields,
 )
-from logseq_cli.pagenames import AmbiguousAliasError, refuse_alias, resolve_page
+from logseq_cli.pagenames import (
+    AmbiguousAliasError,
+    js_trim,
+    page_name_to_create,
+    refuse_alias,
+    resolve_page,
+)
 from logseq_cli.render import (
     blocks_to_markdown,
     blocks_with_ids,
@@ -50,9 +58,9 @@ from logseq_cli.render import (
     resolve_refs_in_blocks,
 )
 from logseq_cli.strictinsert import (
+    create_missing_page,
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
-    require_insert,
 )
 
 
@@ -298,16 +306,15 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
     except LookupError as exc:
         fail(str(exc), as_json)
     if note:
-        click.echo(note, err=True)
+        print_note(note)
 
     # The notices below speak about what is printed, so they come after the cap.
     if not resolve_refs:
         total_refs = sum(count_unresolved_refs(r.get("blocks") or []) for r in results)
         if total_refs > 0:
-            click.echo(
+            print_note(
                 f"⚠️  {total_refs} unresolved block-ref(s) in output — "
                 f"re-run with --resolve-refs to inline them.",
-                err=True,
             )
     elif dead_refs:
         # Only sayable with --resolve-refs: without it nothing is looked up, so
@@ -319,8 +326,8 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
             results_with = [r["page"] for r in results if uuid in _dead_in(r)]
             if not results_with:
                 continue
-            click.echo(f"⚠️  block-ref (({uuid})) points at a block that no "
-                       f"longer exists (on {', '.join(results_with)})", err=True)
+            print_note(f"⚠️  block-ref (({uuid})) points at a block that no "
+                       f"longer exists (on {', '.join(results_with)})")
 
     click.echo(_render(results), nl=False)
 
@@ -438,19 +445,13 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
 
     unreadable = {}
 
-    def _note(message):
-        # Not under --json: a line in front of a later error object would
-        # break the one JSON document stderr is meant to hold.
-        if not as_json:
-            click.echo(message, err=True)
-
     def _extract(refs):
         if with_context:
             return _extract_backlink_context(refs, limit)
         return extract_backlink_names(refs)
 
     def _fetch_one(ref):
-        backlinks, error = _backlinks(api, ref.page, _extract, note=_note)
+        backlinks, error = _backlinks(api, ref.page, _extract, note=print_note)
         if error:
             # Keyed by the name asked for, which is what results carry.
             unreadable[ref.requested] = error
@@ -530,6 +531,12 @@ def create_page(ctx, page, content, as_json, dry_run):
     """Create a new page, optionally with initial content."""
     api = ctx.obj["api"]
 
+    # The name Logseq creates the page under: [[X]] makes X, a journal title
+    # in another format the journal under the graph's name (measured, 0.10.15).
+    # The same name serves the check below, the preview, the write,
+    # --content and the output; createPage alone is sent the name as asked.
+    asked, page = page, page_name_to_create(api, page)
+
     # Logseq answers createPage for an existing page with that page, so the
     # call alone cannot tell "created" from "was already there" — the command
     # reported success either way, and --content went on to append to the page
@@ -558,10 +565,10 @@ def create_page(ctx, page, content, as_json, dry_run):
             require_text_besides_ids(content)
 
     # Only for a write that would happen: a live run on a page that exists is
-    # refused below, and a note in front of that error would break its JSON;
-    # a preview of that run says it would not write.
+    # refused below, and the note would speak of text it never writes; a
+    # preview of that run says it would not write.
     if id_note and not exists:
-        click.echo(id_note, err=True)
+        print_note(id_note)
     if content and not exists:
         note_quote_breaks([{"content": content}])
     if dry_run:
@@ -587,16 +594,18 @@ def create_page(ctx, page, content, as_json, dry_run):
              **ref.fields())
     if exists:
         fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
-             "or delete-page first.", as_json=as_json, page=page, exists=True)
+             "or delete-page first.", as_json=as_json, reason="page_exists",
+             page=page, exists=True)
 
-    properties = {"journal?": True} if is_journal_date(page) else None
-    result = api.create_page(page, properties)
+    # Logseq tells a journal by its name (measured). Without text, the first block
+    # stays: a page with neither gets no file and is lost on a re-index.
+    result = api.create_page(asked, first_block=content is None)
 
     if content:
-        # Unchecked, this appended to a page that create_page may have failed to
-        # create, and both failures stayed invisible behind "Created page: ...".
-        require_insert(api.append_block_in_page(page, content),
-                       f"the initial content on '{page}'")
+        # Proven by the API: unchecked, this appended to a page that
+        # create_page may have failed to create, and both failures stayed
+        # invisible behind "Created page: ...".
+        api.append_block_in_page(page, content)
 
     if as_json:
         output({"created": page, "page": result, "has_content": content is not None}, True)
@@ -649,13 +658,13 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         fail(str(e), as_json=as_json)
     refuse_split_heading(under_heading, command="add-note-content")
 
-    ref = follow_page(api, page, as_json)
-    page = ref.page
-
     # Check if page exists. Not caught: Logseq answers null for a page that
     # does not exist, so an exception is a failed read, and taking it for
-    # absence would create a page that may be there (#93).
-    existing = api.get_page(page)
+    # absence would create a page that may be there (#93). A missing page is
+    # written under the name Logseq creates it with: a journal title in
+    # another format is the journal, which may exist.
+    ref, target = follow_page_to_write(api, page, as_json)
+    page, existing = target.name, target.page
 
     if not existing and not create:
         fail(f"Page '{page}' not found. Use --create to create it.",
@@ -673,8 +682,13 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
+        print_note(note)
         tree = tree_without_block_ids(tree)
+
+    # "page" in the JSON is the name asked for (ref.fields), and this names
+    # the page written, which differs for a name Logseq creates otherwise;
+    # the run and its preview say it alike, in the text and in the JSON.
+    where = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
 
     if dry_run:
         # Everything below this point writes — the page, possibly the heading,
@@ -684,17 +698,16 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         planned = count_blocks(tree)
         heading_exists = (find_heading(api, page, under_heading) is not None
                           if under_heading and existing else False)
-        position = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
         parsed_properties = dict(parse_property_pairs(properties))
 
         if as_json:
             output({**ref.fields(), "would_create_page": existing is None,
                     "blocks_added": planned, "under_heading": under_heading,
                     "would_create_heading": bool(under_heading) and not heading_exists,
-                    "properties": parsed_properties, "position": position,
+                    "properties": parsed_properties, "position": where,
                     "dry_run": True}, True)
         else:
-            click.echo(f"[DRY RUN] Would add {planned} block(s) to {position}")
+            click.echo(f"[DRY RUN] Would add {planned} block(s) to {where}")
             if existing is None:
                 click.echo(f"  page: {page} (would be created)")
             if under_heading and not heading_exists:
@@ -703,29 +716,19 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
                 click.echo(f"  {key}:: {value}")
         return
 
-    if not existing and create:
-        api.create_page(page)
+    create_missing_page(api, target)
 
     if under_heading:
         heading_uuid = find_or_create_heading(api, page, under_heading)
-        if not heading_uuid:
-            click.echo(f"Failed to find or create heading '{under_heading}' on '{page}'", err=True)
-            sys.exit(1)
         uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
-        position = f"under '{under_heading}' on '{page}'"
     else:
         uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
-        position = page
 
+    # The tree is not empty (text only of the title heading or of id:: lines
+    # is refused above), and every insert is proven, so there is a first block.
     n = len(uuids)
-    root_uuid = uuids[0] if uuids else None
-
-    applied = {}
-    if properties:
-        if root_uuid:
-            applied = apply_block_properties(api, root_uuid, properties)
-        else:
-            click.echo("Warning: no block created, --property ignored", err=True)
+    root_uuid = uuids[0]
+    applied = apply_block_properties(api, root_uuid, properties) if properties else {}
 
     if as_json:
         output({
@@ -736,13 +739,13 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
             "under_heading": under_heading,
             **uuid_fields(uuids),
             "properties": applied,
+            "position": where,
         }, True)
     else:
         if existing is None:
             click.echo(f"Created page: {page}")
-        click.echo(f"Added {n} block(s) to {position}")
-        if root_uuid:
-            click.echo(f"  uuid: {root_uuid}")
+        click.echo(f"Added {n} block(s) to {where}")
+        click.echo(f"  uuid: {root_uuid}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
 
@@ -768,8 +771,16 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
     if not page_data:
         fail(f"Page '{page}' not found", as_json=as_json, page=page)
     refuse_alias(resolve_page(api, page), "rename-page")
+    # What the page is called afterwards: the name goes to Logseq trimmed
+    # (LogseqAPI.rename_page). A refusal quotes the name as given instead.
+    sent = js_trim(new_name)
 
     if dry_run:
+        # The run refuses in LogseqAPI.rename_page; the same check, so the
+        # preview does not promise a rename that would merge or do nothing.
+        why = api.rename_refusal(page, new_name)
+        if why:
+            raise rename_refused(page, new_name, why)
         # A rename reaches past the page itself: Logseq rewrites every [[Old]]
         # in the graph. The blast radius is the point of the preview, so it is
         # worth the extra read here — the write path never needs it. Backlinks
@@ -780,10 +791,10 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
             refs = api.get_page_linked_references(page)
             referencing = extract_backlink_names(refs) if refs else []
         except Exception as e:
-            click.echo(f"Warning: could not read backlinks ({e}); "
-                       f"reference count unknown", err=True)
+            print_note(f"Warning: could not read backlinks ({e}); "
+                       f"reference count unknown")
 
-        payload = {"old_name": page, "new_name": new_name, "dry_run": True}
+        payload = {"old_name": page, "new_name": sent, "dry_run": True}
         if referencing is None:
             payload["referencing_pages"] = None
             payload["referencing_page_count"] = None
@@ -796,7 +807,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
         else:
             click.echo("[DRY RUN] Would rename page")
             click.echo(f"  from: {page}")
-            click.echo(f"  to:   {new_name}")
+            click.echo(f"  to:   {sent}")
             if referencing is None:
                 click.echo("  pages with references that would be rewritten: unknown")
             else:
@@ -809,11 +820,11 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
 
     api.rename_page(page, new_name)
 
-    result = {"old_name": page, "new_name": new_name, "status": "renamed"}
+    result = {"old_name": page, "new_name": sent, "status": "renamed"}
     if as_json:
         output(result, True)
     else:
-        click.echo(f"Renamed '{page}' -> '{new_name}'")
+        click.echo(f"Renamed '{page}' -> '{sent}'")
 
 @cli.command("delete-page", epilog="""\b
 Examples:

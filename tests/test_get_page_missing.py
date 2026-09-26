@@ -36,9 +36,9 @@ class TestGetPageMissing:
 
     def test_existing_but_empty_page_exits_0(self, api):
         """An empty page is a legitimate result, not an error."""
-        api.get_page.return_value = {"name": "leer", "originalName": "Leer"}
+        api.get_page.return_value = {"name": "blank", "originalName": "Blank"}
         api.get_page_blocks_tree.return_value = []
-        result = CliRunner().invoke(cli, ["get-page", "--name", "Leer"])
+        result = CliRunner().invoke(cli, ["get-page", "--name", "Blank"])
         assert result.exit_code == 0
         assert "(empty page)" in result.output
         assert "(page does not exist)" not in result.output
@@ -178,7 +178,7 @@ class TestGetPropertiesFallback:
     def test_genuinely_empty_page_reports_none(self, api):
         api.get_page.return_value = {"uuid": PAGE_UUID, "name": "x", "originalName": "X", "properties": {}}
         api.get_page_blocks_tree.return_value = [
-            {"uuid": BODY_UUID, "content": "nur Text", "properties": {}}]
+            {"uuid": BODY_UUID, "content": "just text", "properties": {}}]
         result = CliRunner().invoke(cli, ["get-properties", "--name", "X"])
         assert result.exit_code == 0
         assert "No properties" in result.output

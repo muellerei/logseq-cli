@@ -43,19 +43,19 @@ BECOMES_ID = ["custom-id", "custom_id", "Custom_ID", "id", "ID", "Id"]
 
 # Undecodable argv bytes arrive as lone surrogates (PEP 383). Measured on the
 # Python side: the upsert went out, then printing the confirmation raised.
-UNDECODABLE = ["Gr\udcf6\udcdfe"]
+UNDECODABLE = ["Caf\udce9"]
 
 # Keys the parser keeps, but under another name.
 RENAMED = [
     ("Mixed", "mixed"),
     ("a_b", "a-b"),
     ("Ab_C", "ab-c"),
-    ("ÄB", "äb"),
+    ("ÉB", "éb"),
     ("a-_b", "a--b"),
 ]
 
 # Keys the parser keeps exactly as written.
-KEPT = ["type", "a-b", "a.b", "a.b.c", "ümlaut", "1abc", "a1", "a#b", "a?b",
+KEPT = ["type", "a-b", "a.b", "a.b.c", "crème", "1abc", "a1", "a#b", "a?b",
         "a!b", "a*b", "a+b", "a'b", "a%b", "a&b", "a=b", "a<b", "a$b",
         "-ab", ".ab", "a.", "ab-"]
 
@@ -210,10 +210,10 @@ class TestRemoveProperty:
     reported success while removing nothing."""
 
     def test_removes_the_key_set_property_stored_from_the_page(self):
-        api = _api(first="due-date:: 2026-10-01\ntyp:: a")
+        api = _api(first="due-date:: 2026-10-01\nkind:: a")
         r = _run(["remove-property", "--name", "Page A", "--key", "Due_Date"], api)
         assert r.exit_code == 0, r.stderr
-        assert api.graph.tree("Page A")[0] == ("typ:: a", [])
+        assert api.graph.tree("Page A")[0] == ("kind:: a", [])
         assert "'Due_Date'" in r.stderr and "'due-date'" in r.stderr
 
     def test_removes_the_key_set_property_stored_from_a_block(self):
@@ -246,3 +246,37 @@ class TestEmptyValue:
         r = _run(path("type", ""), api)
         assert r.exit_code == 0, r.stderr
         assert _written(api) == [("type", "")]
+
+
+class TestAKeyKeptAsGivenIsProvenGone:
+    """The removal of such a key is proven under the key as sent. Looked up
+    only as Logseq's parser would store it ("type project", "custom-id"), a
+    key the database holds as given was never found, and a removal Logseq
+    did not do passed as done."""
+
+    @pytest.mark.parametrize("key", ["type Project", "Custom_ID"])
+    @pytest.mark.parametrize("mode,exit_code", [("noop", 1), ("execute", 0)])
+    def test_removal_is_read_back_under_the_key_sent(self, monkeypatch, key, mode, exit_code):
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble.installed(monkeypatch, {"Page A": ["block one"]},
+                                            modes={"removeBlockProperty": mode})
+        uuid = double.uuid_of("block one")
+        # What the database holds: the key as an earlier version stored it,
+        # until Logseq did its removal.
+        held = {key: "a"}
+        real = double._handlers["logseq.Editor.removeBlockProperty"]
+
+        def remove(args):
+            if mode == "execute" and args[1] == key:
+                held.clear()
+            return real(args)
+        monkeypatch.setitem(double._handlers, "logseq.Editor.removeBlockProperty", remove)
+        monkeypatch.setattr("logseq_cli.api.stored_properties",
+                            lambda api, u: (dict(held), dict(held)))
+        r = split_runner().invoke(cli, ["--token", "t", "remove-property", "--id", uuid,
+                                        "--key", key, "--json"])
+        assert r.exit_code == exit_code, r.stderr
+        if exit_code:
+            error = json.loads(r.stderr)
+            assert (error["reason"], error["method"]) == \
+                ("write_not_verified", "removeBlockProperty")

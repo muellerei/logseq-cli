@@ -7,8 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Every write is now proven, and none overwrites a block you are editing.
+Logseq's HTTP API answers `null` to a write whether it happened or not, and
+reports a thrown error as HTTP 200; measured on 0.10.15, a write to the
+block someone is typing in replaced the editor content at once and dropped
+what had not been saved, and `renamePage` onto an existing name merged two
+pages without asking. Until now the CLI checked some write paths and took
+Logseq's word on the rest. From this release the checks sit in one place,
+the API client, where no command can go around them:
+
+- before a write that changes a block, the CLI asks Logseq which block is
+  open in the editor and refuses to touch it; inserts no longer take your
+  cursor, and created pages no longer turn Logseq's view;
+- after each write, it shows that Logseq holds the result, from the answer
+  where it carries one and by reading back otherwise;
+- a write that is refused or not shown to land fails with exit 1 and a
+  `reason` (under `--json` as an error object), and says how many writes of
+  the same call landed before it;
+- the client refuses an API method it does not know, so a new write cannot
+  slip past these checks.
+
+For a caller, exit 0 after a write now means the write is in Logseq's
+database. Scripts that matched the old `Error:` text of a failed insert, or
+relied on `--under-heading` falling back to the top of the page, need
+adjusting (see Changed). The price is one read per write and one editor
+check per write that can be refused, about a millisecond each, and a window
+of about 0.1 s after a multi-block insert.
+See [#99](https://github.com/muellerei/logseq-cli/issues/99).
+
 ### Fixed
 
+- A write to the block you are typing in no longer throws away what you
+  typed. Logseq replaces the editor's text at once, and everything typed and
+  not yet saved was gone; it answered `null`, and the CLI reported success
+  (measured by hand, 0.10.15: typing without pause, an `update-block` five
+  seconds in, and after Esc only the written text and what was typed after
+  it remained). A read right after the write still showed the old text for
+  about three seconds, so no check afterwards could have caught it. The CLI
+  now asks Logseq which block is open (`checkEditing`) before a write that
+  changes a block and refuses with `reason: "open_in_editor"`, naming the
+  block and its page: `update-block`, `set-todo-status`, `set-property`,
+  `set-block-property`, `remove-property`, `move-block` (the moved block or
+  one below it; the anchor is free), `remove-block` (the block or one below
+  it),
+  `delete-page` (a block of the page) and `rename-page` (a block of the page
+  or one that links to it, since Logseq rewrites the link and the open
+  editor would save the old text back). An insert does not ask: Logseq
+  saves the open block before it inserts. One insert is refused all the
+  same: a text with `((X))` while `X` is open and has no `id::` yet, because
+  storing the id writes into `X`. The ids are stored only after the
+  question, so a refused write leaves no `id::` behind. A block id in
+  capitals is compared in lower case, as Logseq answers; compared as typed,
+  `update-block --id` in capitals would have gone past the check. An answer
+  to `checkEditing` that is neither a uuid nor `false` refuses the write
+  with `reason: "editor_state_unknown"`. A block entered in the milliseconds
+  between the question and the write is not covered.
+- A block the CLI inserts no longer opens in Logseq's editor. Logseq takes an
+  unset `focus` as true and edits the new block (`api.cljs` `insert_block`,
+  `editor.cljs` `api-insert-new-block!`, 0.10.15); on the page you were
+  looking at, your cursor jumped
+  into the agent's block and whatever you typed next landed there (measured,
+  0.10.15). Every `insertBlock` and `appendBlockInPage` now goes with
+  `focus: false`, and the cursor stays where it was.
+- A write of several blocks at once no longer leaves the last of them open
+  in Logseq's editor, and no longer pulls your cursor out of the block you
+  are typing in. `insertBatchBlock` opens its last block once the page is on
+  screen, with no option against it (`editor.cljs`
+  `edit-last-block-after-inserted!`; measured, 0.10.15:
+  16–34 ms after it answered). With nobody typing, the agent locked itself
+  out: its next write to its own block ended in `open_in_editor`. The CLI
+  now watches for that block after each batch, ten pauses of 10 ms with a
+  question before, between and after them, and closes the editor once it
+  shows. On a page that is not on screen nothing opens and the window runs
+  full: about 115 ms for each multi-block write (a question takes 1.2 ms,
+  measured). While a block
+  is open, a tree goes block by block with `focus: false` instead, and a
+  write with `--keep-ids`, which only the batch can do (#31), is refused
+  with `reason: "open_in_editor"` before anything is written. Only a block
+  of the batch is closed: one someone else enters within that window stays
+  open, since Logseq does not save a block left while its last editor
+  operation is the batch (`lifecycle.cljs` `will-unmount`, `editor.cljs`
+  `paste-blocks`; read in the code, not measured). Should `checkEditing` give no usable answer
+  after the batch, the write fails with `reason: "editor_state_unknown"`,
+  and the blocks that landed count in `writes_landed`.
+- A page or journal the CLI creates no longer turns Logseq's view to it.
+  `createPage` without options redirects the view to the new page (measured,
+  0.10.15); the CLI now sends `redirect: false`.
+- A journal the CLI created began with a line `journal?:: true`. The CLI sent
+  `journal?` as a page property, and Logseq writes a page property into the
+  file; the property was never needed, since Logseq tells a journal by its
+  name in the graph's date format (measured, 0.10.15: `journal?` true,
+  `journalDay` set, the file under `journals/`, with no property). No write
+  sends it now. Journals created that way before keep their line.
+- A page the CLI creates before writing to it no longer starts with an empty
+  block, the place the property line had taken. Those writes now create the
+  page with `createFirstBlock: false`, and the file holds only what was
+  written.
+  `create-page` without `--content` keeps the empty block: without it Logseq
+  writes no file for the page (measured), and a re-index would lose it.
+- A write Logseq threw on no longer counts as done. Logseq answers such a
+  write with HTTP 200 and `{"error": …}` instead of an error status
+  (measured, 0.10.15: a malformed block id on `updateBlock`, `removeBlock`,
+  `upsertBlockProperty` and `removeBlockProperty`, `renamePage` from a page
+  that does not exist, a method Logseq does not know), and the CLI handed
+  the object on as the write's answer. Every write now ends there with exit
+  1 and `reason: "logseq_error"`, naming the `method` and Logseq's own text
+  as `logseq_message`. An answer that carries a `uuid` is a block, as
+  `get-block` already told them apart, and passes. Reads are unchanged.
+  `replace-text` goes on with the other blocks, as before, and lists the
+  refused one as `failed`, now with `logseq_error` as its reason in
+  `failed_reasons` (see below) instead of `write_not_verified`.
+- `rename-page` onto the name of another page no longer merges the two.
+  Logseq answers `null` and moves the renamed page's blocks to the other
+  page, the renamed page gone; to an empty name it answers `null` too and
+  does nothing (measured, 0.10.15). Both times `rename-page` reported
+  "Renamed". It now asks for the new name first and refuses with
+  `reason: "rename_refused"`, `why: "exists"` or `why: "empty"`, before
+  anything is sent; a name of spaces only counts as empty. A change of case
+  is the same page and still renames. `--dry-run` runs the same check and
+  refuses alike, at the cost of one more read. The new name is sent
+  trimmed as Logseq trims it, the form the check looked up, and the run and
+  its preview report it in that form, as the page is then called. Logseq
+  trims with JavaScript's `trim` (`handler/page.cljs` `rename!`, 0.10.15,
+  read in the source), which also takes off a byte order mark (U+FEFF);
+  trimmed with Python's rules, a name behind one passed the check, the two
+  pages merged, and the run said nothing was written.
 - A `((uuid))` written by any command now gives the block it points at an
   `id::` line, as Logseq's editor does when a ref is copied (#95). Left to
   Logseq, the target got the line in column 0 and not in its database
@@ -27,6 +150,214 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --follow-refs` read a ref in capitals, `((8F2A…))`, as the ref it is to
   Logseq (measured, 0.10.15); they took lower case only and left it as a
   hole. One pattern now defines a Block Ref for every reader and writer.
+- `update-block`, `set-todo-status`, `set-block-property`,
+  `remove-property --id`, `add-journal-block --upsert-heading` and the
+  `--property` option of `insert-block` and `add-note-content` reported
+  success for a write Logseq had not done.
+  `updateBlock`, `upsertBlockProperty` and `removeBlockProperty` answer
+  `null` whether they wrote or not, for a uuid no block has too (measured,
+  0.10.15). The three API methods now read the block back right after the
+  write and fail with `reason: "write_not_verified"`, naming `method`,
+  `expected` and `got`. An update is compared by its text, without the
+  whitespace Logseq trims at either end, a ref to the block itself, which
+  Logseq drops from its text (both measured, 0.10.15), `id::` lines and
+  `:LOGBOOK:` drawers, and
+  the properties it carries along by their stored values; a property by
+  its stored value, without surrounding spaces, which Logseq's parser
+  trims; a removed property by its absence, under the key as Logseq's
+  parser stores it and as sent (a key the parser would drop is removed as
+  given, and the database may hold it so), and under any spelling of it:
+  a key an earlier version or another client stored as given, `Status`
+  say, stays when `status` is removed (Logseq removes the keyword it is
+  sent; `editor/property.cljs` `remove-block-property!`, 0.10.15, read in
+  the code), and `remove-property --key Status` reported it removed. A block that does not exist
+  fails the check: it holds no key, which would otherwise read as removed.
+  `set-property`, which checks that the page shows the value, now fails
+  with `reason: "write_not_verified"` too.
+- `replace-text` counted a replacement that changed a task marker as not
+  written when Logseq's time tracking is on, its default: Logseq then
+  appends a `:LOGBOOK:` drawer or rewrites its last `CLOCK:` line
+  (upstream `editor.cljs` `with-marker-time`, `util/clock.cljs` `clock-in`
+  and `clock-out`, 0.10.15; read in the code, not measured, since time tracking is off in the measured graph),
+  and the text read back no longer equalled the text sent. The drawer is
+  now left out of the comparison on both sides.
+- `remove-block`, `delete-block`, `copy-block --remove`, `delete-page`,
+  `rename-page` and `create-page` reported success for a write Logseq had
+  not done, as did every command that creates a page or journal before
+  writing to it, and the removal of a page's emptied property block. `removeBlock`, `deletePage` and `renamePage` answer `null`
+  whether they wrote or not (measured, 0.10.15). The API methods now read
+  back: a removed block and a deleted page must be gone, a renamed page must
+  answer under its new name with its own uuid and the new spelling (a change
+  of case included), and a created page must be the one its name finds.
+  Otherwise they fail with `reason: "write_not_verified"`. A deleted page
+  that other pages name as their namespace (`Project` beside
+  `Project/Alpha`) stays without blocks, as Logseq keeps it (measured,
+  0.10.15), and counts as deleted. A page a block of another page links to
+  is removed whole (`page.cljs` `delete!`; measured, 0.10.15).
+- Storing the id of a ref's target (#95, above) is read back too: each
+  target must then hold `id` among its properties, or the write fails with
+  `reason: "write_not_verified"`. Each stored id counts in `writes_landed`.
+  A ref to a page's property block no longer asks for an id: Logseq skips
+  that block (measured, 0.10.15).
+- `createPage` on a page that exists answers that page and drops the
+  properties sent (measured, 0.10.15). The API method now refuses such a
+  page with `reason: "page_exists"` before anything is sent. The commands
+  check first, as before, and no command sends page properties now; the
+  refusal holds for any caller that would.
+- `create-page` on a page that exists now fails with
+  `reason: "page_exists"` under `--json`; the error had no reason.
+- A page or journal the CLI created under a name Logseq changes no longer
+  reads as not created, and no longer lands beside the page meant. Logseq
+  creates a page under a cleaned title: trimmed (by JavaScript's rules,
+  which take a byte order mark too), `[[…]]` unwrapped, a
+  leading `#` and a slash at either end dropped (`handler/page.cljs`
+  `create!`, 0.10.15; measured for each). The cleaning is one pass and not
+  idempotent: `#[[X]]` becomes `[[X]]`, which cleaned again would be `X`
+  (measured, 0.10.15). A journal title it takes as one in any graph
+  (`Jan 1st, 2099`, `2099-01-01`, `2099_01_01`; `date_time_util.cljs`
+  `safe-journal-title-formatters`) becomes the journal under the graph's own name, and `createPage` answers
+  it with `null` (measured, 0.10.15, for `Jan 1st, 2099` in a
+  `yyyy-MM-dd, EEEE` graph; the other forms not measured). Asked for under
+  the name as sent, neither page is found: `create-page --name "[[X]]"`
+  failed with `write_not_verified` after creating X, and did not see an X
+  that existed; `add-note-content --page "Jan 1st, 2099"` and
+  `insert-block --page` with such a name created the journal and then
+  failed to write to it. `create-page`, `add-note-content`,
+  `insert-block --page`, `add-block-ref --page`, `copy-block --to-page`
+  and every `--keep-ids` write to the end of a page now use the name
+  Logseq creates, worked out once from the name given, for the check for a
+  page that exists, `--dry-run`, the write and the output, and write into
+  a journal of that name that exists. An alias is followed from that name,
+  not from the one given: `--page "[[X]]"`, `#X` or ` X ` for an alias X
+  writes to X's page, as `--page X` does. `createPage` itself is sent the name
+  as given, which Logseq cleans into that name; a journal title goes in
+  the graph's format. Under `--json`, `add-note-content` names that page in
+  `position`, in the run as in its preview; `page` stays the name asked
+  for, as in every result. Its text output names the page the same way in
+  the run as in the preview, in quotes, where the run left them out. The weekday goes in lower case
+  (`2099-01-01, thursday`); Logseq keeps its own spelling of the title
+  (measured). A date in a format Logseq takes for a journal only in a
+  graph of that format, such as `01.01.2099`, stays a page of that name, as
+  Logseq creates it.
+- `move-block` with a block id in capitals reported that the move did not
+  take effect after Logseq had made it, and let a target inside the block's
+  own subtree past the refusal that names it. Logseq's uuids are lower
+  case, and both checks compared the ids as typed. They are now taken in
+  lower case, the move sent that way too.
+- A tree whose parent block Logseq did not find ended with "Nothing was
+  written." even when writes of the same call had landed before the
+  check: the page or journal created first, the heading, or the parent
+  block of a tree whose children then go as one batch. The message now
+  names the writes that landed, from the same count as every refusal.
+- Under `--json` a command that printed a note on stderr and then failed
+  left stderr no JSON: the note stood in front of the error object. Every
+  write can be refused after its notes, so this was reachable from each
+  note a writing command prints first, such as the deprecation note of
+  `add-journal-entry`, a dropped `id::` line or "Hierarchical content
+  detected"; `get-journal-range` printed "showing N of M" before a
+  `partial_read` error. Under `--json` notes are now held until the
+  command ends: a failure carries them in its error object as `notes`,
+  and otherwise they are printed after the result. `get-backlinks`, which
+  dropped its fallback warning under `--json` for that reason, reports it
+  the same way now. Without `--json` nothing changes.
+- Content that is nothing but the page's title heading (`# <page name>`)
+  is refused before anything is written. The heading is dropped since the
+  page shows its name, and the check for empty content ran before that:
+  `add-journal-block` wrote an empty block with exit 0, and
+  `add-note-content` and `add-journal-content` reported "Added 0 block(s)"
+  with exit 0, `--property` dropped with a warning. The check now sits
+  where the heading is removed, for every writer that removes it, including
+  `add-journal-entry`, in the run and under `--dry-run`: exit 1, under
+  `--json` an error object with `reason: "empty_content"` and the `page`.
+- `insert-block --page`, `add-block-ref --page` and `copy-block --to-page`
+  on a page that does not exist no longer leave an empty block at its top.
+  `appendBlockInPage` created the page itself, with an empty block before
+  the one written (measured). They now create the page first with
+  `createFirstBlock: false`, as `add-note-content` does, under the name
+  Logseq creates it with, so a journal title in another format writes to
+  the journal. `add-block-ref --page --dry-run` now reports
+  `would_create_page: true` for such a page. A `--keep-ids` write creates
+  the page as before, after the check for a block open in the editor.
+- `insert-block --dry-run` with `--after`, `--before` or `--child-of` and a
+  uuid no block has no longer previews an insert the run then refuses. The
+  preview ended before reading anything, with exit 0. It now reads the
+  anchor, as `move-block --dry-run` does, and fails with exit 1, under
+  `--json` with `reason: "block_not_found"` and the `id`. One read more per
+  preview.
+- Indented lines below a `# <page name>` title in the content now keep
+  their levels. The writers drop that title, since the page shows its
+  name, and then stripped the text, which took the indentation off the
+  first line only: `- first` and `- second`, indented alike, were written
+  as parent and child. The lines now lose the indentation they share. A
+  `# <page name>` line anywhere else, further down or in a code block, was
+  dropped too; only the first line with text is taken for the title now.
+
+### Changed
+
+- A write the CLI refuses, or cannot show Logseq did, now fails like every
+  other error: under `--json` as one error object on stderr with a `reason`
+  (`open_in_editor`, `editor_state_unknown`, `logseq_error`, `page_exists`,
+  `rename_refused`, `write_not_verified`), the fields that go with it and
+  `writes_landed`, the writes of the same call that landed before it. The
+  message ends with the same count in words, or "Nothing was written.":
+  there is no rollback, and a retry would write those again. These failures
+  were `click.ClickException`s, which under `--json` print neither JSON nor
+  a reason (measured: stdout empty, stderr `Error: …`), so an agent could
+  not tell a block open in the editor from a write Logseq ignored. The CLI
+  counts the landed writes itself, one per write and a batch by its blocks,
+  so no command has to keep its own count for the message. A failure of the
+  connection after writes of the call landed (`connection_refused`,
+  `timeout`, `bad_response`, `http_error`) names them the same way, and a
+  write sent and not yet proven when it came as `unproven_write`: it may
+  have landed. A write in doubt stays named when the call writes on after
+  it, as `--keep-ids` does to remove the empty block it wrote to anchor a
+  batch on an empty page. Before the first write these errors read as they did. Exit
+  status stays 1. Checks of the input before the first write are unchanged: an
+  anchor that does not exist for `--tree` or `--keep-ids` still fails with
+  an `Error:` line, and `update-block` on an id no block has with an error
+  object without `reason`.
+- An insert Logseq answers without a block now fails with
+  `reason: "write_not_verified"`. `insertBlock` and `appendBlockInPage`
+  answer `null` for a write they did not do (an unknown anchor, a page not
+  loaded); each command checked for the uuid itself and failed with
+  "Logseq did not create …", which under `--json` carried no reason. The
+  check sits in the two API methods now, so no command can skip it, and the
+  error names `method`, `target`, `expected` and `got`. An insert counts in
+  `writes_landed` once proven, and a page created earlier in the same call
+  counts too: `create-page --content` whose text did not land says one
+  earlier write remains, not "Nothing was written."
+- `--under-heading` no longer falls back to the top of the page when the
+  heading could not be created. `add-journal-block`, `add-journal-content`
+  and `add-block-ref` then wrote the blocks at the top with a warning and
+  `position: "top-level (heading not found)"`; `add-note-content` exited 1.
+  A heading Logseq does not create now fails like any insert, before a
+  block of the text is written.
+- A write of several blocks at once, and every `--keep-ids` write, now fails
+  with `reason: "write_not_verified"` when Logseq did not write all of it,
+  and names what landed and what is missing: `method: "insertBatchBlock"`,
+  `expected: "5 blocks"`, `got: "3"`, and the three that landed in
+  `writes_landed`. `insertBatchBlock` answers `null` whatever it did, so the
+  CLI reads the place it wrote to before and after; that check sat with the
+  callers and failed with "Batch insert wrote 3 of 5 block(s)", which under
+  `--json` carried no reason. It sits in the API method now, and also
+  compares each new block's text with what was sent. A `--keep-ids` write
+  whose blocks came out under other ids or in another place fails the same
+  way. On a page with no blocks such a write goes after a stand-in block
+  that is removed again; a stand-in that cannot be removed is now named in
+  the error of a batch that failed, instead of that error being lost, and
+  counts in `writes_landed`, while one that was removed does not.
+- `move-block` that Logseq did not carry out fails with
+  `reason: "write_not_verified"` and `method: "moveBlock"`, where it failed
+  with "Move of … did not take effect" and no reason under `--json`. The
+  check reads the block back where it was sent, as before, now in the API
+  method.
+- `replace-text` names the reason of each block it did not write in
+  `failed_reasons` (`{id: reason}`), in its report and in the error object,
+  beside `failed`, which stays the list of ids, and `writes_landed`. The
+  error's `reason` is the blocks' common one, or `write_not_verified` when
+  they differ. A block open in Logseq's editor fails alone, and the other
+  replacements are written. The text report names the reason after "not
+  written".
 
 ## [0.15.0] - 2026-09-25
 

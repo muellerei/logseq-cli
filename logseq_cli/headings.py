@@ -3,18 +3,54 @@
 A heading is found by its text, not by a uuid, so two spellings of one heading
 have to compare equal, and normalize_heading decides when they do. The
 renderer asks the same question when it cuts out a section, which is why this
-stands apart from the commands. find_or_create_heading writes, but not by
-Strict Insert: it appends, and reads the page back when Logseq's answer names
-no uuid.
+stands apart from the commands. find_or_create_heading writes: it appends,
+and the API proves the append.
 """
 
 import re
+import textwrap
+
+
+class TitleHeadingOnly(Exception):
+    """Content that was nothing but the page's title heading. Not a
+    ValueError, like blocktext.SplitBlockError: it has to reach
+    handle_connection_error, which reports it through fail() with
+    ``reason: "empty_content"`` and the ``page``."""
+
+    def __init__(self, page_name: str):
+        super().__init__(
+            f"The content is only the page's title heading '# {page_name}', "
+            "which is dropped since the page shows its name: nothing would be "
+            "written.")
+        self.page = page_name
 
 
 def strip_title_heading(content: str, page_name: str) -> str:
-    """Remove '# PageName' heading from content to prevent duplication."""
-    pattern = re.compile(rf"^#\s+{re.escape(page_name)}\s*$", re.IGNORECASE | re.MULTILINE)
-    return pattern.sub("", content).strip()
+    """Remove a leading '# PageName' heading from content to prevent
+    duplication, and the indentation the lines below it share.
+
+    Only the first line with text is the title. A '# PageName' line further
+    down, or in a code block, is the caller's text and stays.
+
+    Refuses content that was nothing but that heading (TitleHeadingOnly). The
+    commands check for empty content before they get here, so text the
+    removal empties had passed that check, and was written as an empty block,
+    or as "Added 0 block(s)" with exit 0. Checked here, where the text is
+    emptied, so every writer that removes the heading refuses it the same way.
+    """
+    lines = content.split("\n")
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    # From the line's start, as before: " # Title" stays text (see
+    # test_the_title_is_stripped_once).
+    title = re.compile(rf"#\s+{re.escape(page_name)}\s*", re.IGNORECASE)
+    if first is not None and title.fullmatch(lines[first]):
+        lines = lines[first + 1:]
+    # The lines below go out together: stripped alone, the first lost its
+    # indentation and became the parent of the lines that shared it.
+    stripped = textwrap.dedent("\n".join(lines)).strip()
+    if content.strip() and not stripped:
+        raise TitleHeadingOnly(page_name)
+    return stripped
 
 
 _HEADING_SUFFIX_RE = re.compile(r'(\s*\{\{[^}]*\}\})+\s*$')
@@ -54,34 +90,17 @@ def find_heading(api, page_name: str, heading: str) -> str | None:
     return None
 
 
-def find_or_create_heading(api, page_name: str, heading: str) -> str | None:
+def find_or_create_heading(api, page_name: str, heading: str) -> str:
     """Find heading block UUID on page, create if missing.
 
     Matches existing headings tolerantly via :func:`normalize_heading` so that
     renderer macros and whitespace variations do not cause spurious duplicates.
 
-    Returns the UUID of the heading block, or None if creation failed.
+    Returns the UUID of the heading block. A heading Logseq does not create
+    raises WriteNotVerified from the API; the callers once wrote to the top of
+    the page instead, with a warning (removed once every write was proven).
     """
-    target = normalize_heading(heading)
     found = find_heading(api, page_name, heading)
     if found:
         return found
-
-    # Heading doesn't exist — create it
-    heading_result = api.append_block_in_page(page_name, heading)
-    if isinstance(heading_result, dict):
-        uuid = heading_result.get("uuid")
-        if uuid:
-            return uuid
-    elif isinstance(heading_result, list) and heading_result:
-        uuid = heading_result[0].get("uuid")
-        if uuid:
-            return uuid
-
-    # Fallback: re-fetch blocks to find the just-created heading
-    blocks = api.get_page_blocks_tree(page_name) or []
-    for block in blocks:
-        if normalize_heading(block.get("content", "")) == target:
-            return block.get("uuid")
-
-    return None
+    return api.append_block_in_page(page_name, heading)["uuid"]

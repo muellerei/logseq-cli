@@ -12,9 +12,9 @@ reach for each other, and a `commands/__init__.py` that imports a module makes
 that module load whether or not `cli.py` names it — which turns the explicit
 import list into decoration and hides a missing entry.
 
-Both were checked by `local/specs/audit-001-map.py` while the split was being
-made. That script parses the module map out of a specification which is now
-archived, and it runs nowhere on its own. These assertions do not depend on it.
+Both were checked by a one-off script while the split was being made. It
+parsed the module map out of the plan for the split, which is not part of
+the repository, and it runs nowhere now. These assertions do not depend on it.
 
 `docs/adr/0003-shared-code-is-split-by-what-it-decides.md` adds two more: the
 import graph of the whole package has no cycle, and the modules named in PURE

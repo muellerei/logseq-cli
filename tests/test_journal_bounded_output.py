@@ -31,9 +31,9 @@ def api(monkeypatch):
     mock.get_all_pages.return_value = _journal_pages(range(1, 11))  # 1..10 Aug
     mock.get_page_blocks_tree.return_value = [
         {"uuid": "h", "content": "## Log",
-         "children": [{"uuid": "c", "content": "**09:00** etwas"}]},
+         "children": [{"uuid": "c", "content": "**09:00** something"}]},
         {"uuid": "o", "content": "## Tasks",
-         "children": [{"uuid": "t", "content": "TODO offen"}]},
+         "children": [{"uuid": "t", "content": "TODO open"}]},
     ]
     return mock
 
@@ -132,9 +132,9 @@ class TestJournalSummaryNoContent:
 
     def test_default_still_includes_content(self, api, monkeypatch):
         monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
-                            lambda api_, name: "voller text")
+                            lambda api_, name: "full text")
         result = CliRunner().invoke(cli, [
             "get-journal-summary", "--range", "this year", "--json"])
         payload = json.loads(result.stdout)
         assert "content_omitted" not in payload
-        assert payload["entries"][0]["content"] == "voller text"
+        assert payload["entries"][0]["content"] == "full text"

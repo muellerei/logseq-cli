@@ -4,6 +4,7 @@ import click
 
 from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
+from logseq_cli.notes import print_note
 from logseq_cli.render import hanging, process_blocks
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
@@ -165,9 +166,9 @@ def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, wi
     # that it is holding part of an answer.
     if withheld:
         shown = len(matches)
-        click.echo(
+        print_note(
             f"showing {shown} of {shown + withheld} match(es) ... {withheld} omitted "
-            "(raise --limit, or narrow --content/--page)", err=True)
+            "(raise --limit, or narrow --content/--page)")
 
     if uuid_only:
         # Bare values for $(...). No match is a failure here, unlike the plain
@@ -207,6 +208,6 @@ def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, wi
                     click.echo(f"  content: {preview}")
                 click.echo()
             if truncated:
-                click.echo(
+                print_note(
                     f"({truncated} further match(es) not expanded; narrow --content "
-                    "or --page, or use --first)", err=True)
+                    "or --page, or use --first)")

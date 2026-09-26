@@ -14,6 +14,7 @@ from logseq_cli.blocktext import block_id_property
 from logseq_cli.cli import cli
 from logseq_cli.ids import collect_block_ids, invalid_block_ids
 from logseq_cli.strictinsert import insert_block_tree_as_siblings, insert_block_tree_with_uuids
+from tests.conftest import mock_api
 
 VALID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 VALID2 = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5c"
@@ -106,7 +107,7 @@ class TestKeepIds:
 
 class TestBatchPath:
     def _batch_api(self):
-        api = MagicMock()
+        api = mock_api()
         api.get_block.side_effect = [
             {"uuid": "parent", "children": []},
             {"uuid": "parent", "children": [{"uuid": "a"}, {"uuid": "b"}]},

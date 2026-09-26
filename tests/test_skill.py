@@ -60,7 +60,7 @@ class TestFrontmatter:
 
 
 def test_the_skill_stays_short():
-    # Spec 008: a long skill is not read. AGENTS.md carries the reference.
+    # A long skill is not read. AGENTS.md carries the reference.
     assert len(TEXT.splitlines()) < 80
 
 

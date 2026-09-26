@@ -54,7 +54,18 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
   else means it did not, and the error says why. Read the error, not the
   number: 1 and 2 carry no meaning. With `--json`, stdout holds only data;
   errors go to stderr, mostly as a JSON object, some as a plain `Error:`
-  line.
+  line. After a write, 0 means the tool has checked that Logseq holds it; a
+  read to confirm it adds nothing (a read to see the result's shape is fine).
+- **Act on a refused write by its `reason`**:
+  - `open_in_editor`: the user is typing in that block. The write did not
+    happen; earlier writes of the same call may have, and the message says
+    how many. Ask the user to leave the block and retry once they have,
+    not in a loop.
+  - `write_not_verified`: read the block before retrying. Someone writing
+    there at the same time can make a write that landed look missing.
+  - `rename_refused`, `page_exists`: nothing was written.
+
+  Every reason is listed in AGENTS.md, section "A Write Refused or Not Proven".
 
 ## Everything else
 

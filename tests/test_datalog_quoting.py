@@ -50,7 +50,7 @@ class TestDatascriptQueryRaises:
 
     def test_error_dict_raises_with_message_and_query(self):
         api = LogseqAPI(token="x")
-        query = "[:find ?x :where KAPUTT]"
+        query = "[:find ?x :where BROKEN]"
         with patch("logseq_cli.api.requests.post", return_value=_response(QUERY_ERROR)):
             with pytest.raises(DatalogQueryError) as exc:
                 api.datascript_query(query)
@@ -82,7 +82,7 @@ class TestCommandsWithoutOwnHandler:
 
     COMMANDS = {
         "get-todos": ["get-todos", "--json"],
-        "find-block": ["find-block", "--content", "irgendwas", "--json"],
+        "find-block": ["find-block", "--content", "anything", "--json"],
         "update-block --where-content": [
             "update-block", "--where-content", "Old", "--page", "Page One",
             "--content", "New", "--json",
@@ -129,7 +129,7 @@ class TestEdnString:
 
     def test_trailing_backslash_cannot_close_the_literal(self):
         """The bypass from the finding: input ending in a backslash."""
-        assert edn_string("endet auf \\") == '"endet auf \\\\"'
+        assert edn_string("ends in \\") == '"ends in \\\\"'
 
     def test_backslash_before_quote_keeps_the_order(self):
         r"""Backslash first, then quote. Input a\"b must come out as
@@ -139,8 +139,8 @@ class TestEdnString:
     def test_empty_string(self):
         assert edn_string("") == '""'
 
-    def test_umlauts_pass_unchanged(self):
-        assert edn_string("Gespräch über Lösungen") == '"Gespräch über Lösungen"'
+    def test_accented_letters_pass_unchanged(self):
+        assert edn_string("Café crème, piñata") == '"Café crème, piñata"'
 
     def test_newline_becomes_an_edn_escape(self):
         assert edn_string("a\nb") == '"a\\nb"'
@@ -201,7 +201,7 @@ class TestPageNameLiteral:
         assert page_name_literal("Alice") == '"alice"'
 
     def test_quotes_in_page_names_do_not_break(self):
-        assert page_name_literal('Sei"te') == '"sei\\"te"'
+        assert page_name_literal('Pa"ge') == '"pa\\"ge"'
 
 
 class QueryRecorder:
@@ -256,16 +256,16 @@ class TestInjectionPerCaller:
     def test_find_block_page_scoped(self):
         from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
-        find_blocks_by_content(rec, "text", page='Sei"te [?x :block/name ?y]')
+        find_blocks_by_content(rec, "text", page='Pa"ge [?x :block/name ?y]')
         q = rec.queries[0]
         # The malicious page name appears only as one escaped literal.
-        assert page_name_literal('Sei"te [?x :block/name ?y]') in q
+        assert page_name_literal('Pa"ge [?x :block/name ?y]') in q
 
     def test_find_block_regex_page_scoped(self):
         from logseq_cli.lookup import find_blocks_by_content
         rec = QueryRecorder()
-        find_blocks_by_content(rec, ".*", page='Sei"te', use_regex=True)
-        assert page_name_literal('Sei"te') in rec.queries[0]
+        find_blocks_by_content(rec, ".*", page='Pa"ge', use_regex=True)
+        assert page_name_literal('Pa"ge') in rec.queries[0]
 
     def test_get_todos_markers(self):
         # Markers are a fixed whitelist, but still routed through edn_string,
@@ -328,7 +328,7 @@ class TestStep4ErrorHandling:
     def test_advanced_query_error_exits_nonzero(self):
         with patch("logseq_cli.api.requests.post", side_effect=_post_failing_datalog):
             r = split_runner().invoke(
-                cli, ["smart-query", "--request", "[:find ?x :where KAPUTT]",
+                cli, ["smart-query", "--request", "[:find ?x :where BROKEN]",
                       "--advanced", "--json"])
         assert r.exit_code != 0
         payload = json.loads(r.stderr)
@@ -429,7 +429,7 @@ class TestContentSearchFallback:
         # exit 0; it must now fail loud via the decorator.
         with patch("logseq_cli.api.requests.post", side_effect=_post_failing_datalog):
             r = split_runner().invoke(
-                cli, ["smart-query", "--request", "irgendein freier suchtext", "--json"])
+                cli, ["smart-query", "--request", "some free search words", "--json"])
         assert r.exit_code != 0
         payload = json.loads(r.stderr)
         assert payload["reason"] == "datalog_query_failed"

@@ -23,7 +23,7 @@ Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled
 ```
 logseq-cli/
 ├── logseq_cli/
-│   ├── api.py          # HTTP API client (thin wrapper around Logseq's API)
+│   ├── api.py          # HTTP API client: the methods it may send, the editor gate, the proof of each write
 │   ├── blockprops.py   # Property keys and values: what Logseq reads back, what a write keeps
 │   ├── blocktext.py    # How Logseq reads a block's lines: code blocks, block boundaries, property and id:: lines
 │   ├── cliinput.py     # --content, --content-file and --tree, taken from the command line
@@ -34,11 +34,13 @@ logseq-cli/
 │   ├── headings.py     # Compare, find and add a heading on a page
 │   ├── ids.py          # id:: lines in written text: dropped with a note, or kept by --keep-ids
 │   ├── lookup.py       # Blocks by content, backlinks, incoming block refs, page text
+│   ├── notes.py        # Notes on stderr, held under --json until the command ends
 │   ├── outlinetext.py  # Indented outline text to a block tree, and back
 │   ├── output.py       # Results on stdout, failures on stderr, --json
-│   ├── pagenames.py    # Which page a name means: an alias as Logseq resolves it
+│   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under
 │   ├── render.py       # Blocks to text; finding and resolving references
-│   ├── strictinsert.py # Strict Insert: writes checked to land where asked, moves included
+│   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible
+│   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
 │   ├── commands/       # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page
 │   │   ├── blocks.py       # read a block, find blocks
@@ -50,7 +52,7 @@ logseq-cli/
 │   │   ├── query.py        # smart-query
 │   │   └── meta.py         # init and doctor
 │   └── cli.py          # Entry point: imports every command module
-├── tests/            # pytest suite (no fixtures beyond tests/conftest.py)
+├── tests/            # pytest suite: fixtures in conftest.py, the HTTP double in logseq_http_double.py
 ├── examples/         # Shell scripts for common workflows
 ├── AGENTS.md         # AI agent reference
 ├── skills/logseq-cli/SKILL.md  # When an agent reaches for the tool; tests/test_skill.py holds it to the CLI
@@ -69,17 +71,27 @@ logseq-cli/
    - Use `@handle_connection_error` decorator
    - Support `--dry-run` for write operations
 
+   A Logseq method the client has not sent before goes into `_METHODS` in
+   `api.py` first, a write with its editor rule and its proof: `call()`
+   refuses a method that is not listed, and
+   `tests/test_api_endpoint_binding.py` fails for a write without both.
+
 3. **Run the test suite, and add to it.**
    ```bash
    python3 -m pytest -q
    ruff check .
    ```
-   Tests mock the API (`unittest.mock` + `CliRunner`); `tests/conftest.py` has a
-   `FakeGraph` for the write paths, needed wherever a command verifies its write
-   by reading back, and a `PageGraph` that holds whole pages and answers the
-   way Logseq was measured to, for writes proven by reading the page back. A new command or flag ships with tests: the failure modes
-   that matter here are silent ones, since Logseq answers a failed write with
-   HTTP 200 + `null` rather than an error.
+   Most tests replace `LogseqAPI` method by method (`unittest.mock` +
+   `CliRunner`); `tests/conftest.py` has a `FakeGraph` for block writes and a
+   `PageGraph` that holds whole pages. Neither sees the editor gate or the
+   proof of a write: both sit inside the `LogseqAPI` write methods, and a
+   method mock replaces them. A test of a write's proof or of the gate uses
+   `tests/logseq_http_double.py` instead, which stands in for
+   `requests.post` and answers as Logseq was measured to, so the real
+   `LogseqAPI` runs in full; `LogseqHttpDouble.installed(monkeypatch, pages,
+   modes=...)` sets one up in one call. A new command or flag ships with
+   tests: the failure modes that matter here are silent ones, since Logseq
+   answers a failed write with HTTP 200 + `null` rather than an error.
 
    Then check it against a running Logseq instance as well, because the mocks
    encode what we believe the API does:

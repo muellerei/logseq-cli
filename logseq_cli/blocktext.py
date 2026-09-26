@@ -164,6 +164,69 @@ def without_block_ids(content: str) -> str:
     return "\n".join(line for line, value in id_lines(content) if not value)
 
 
+def _drawer_lines(lines: list) -> set:
+    """Indexes of the lines of every closed ``:LOGBOOK:`` drawer outside code.
+
+    An opener that no ``:END:`` closes is text, as for a fence: taking it for
+    a drawer would hide what follows from the comparison.
+    """
+    in_code, _ = code_block_lines(lines)
+    drawer, start = set(), None
+    for i, line in enumerate(lines):
+        if in_code[i]:
+            continue
+        if start is None and line.strip() == ":LOGBOOK:":
+            start = i
+        elif start is not None and line.strip() == ":END:":
+            drawer.update(range(start, i + 1))
+            start = None
+    return drawer
+
+
+def normalize_block_text(text: str) -> str:
+    """``text`` as a write's proof compares it: what Logseq rewrites on its
+    own is taken out, on the sent and the read side alike.
+
+    - ``id::`` lines go (without_block_ids): Logseq stores a ref target's id
+      as a line of its text (#95), which is no change the writer made.
+    - Whitespace goes from the end of each line and from the start of the
+      text: Logseq trims the text on both sides (editor.cljs
+      ``save-block-aux!``, 0.10.15). At
+      the end measured ("neu  " is read back as "neu"), at the start
+      measured too (0.10.15: spaces, a tab, blank lines); per line is an
+      assumption made on purpose, harmless because both sides are
+      normalised alike. The lines after the first keep their indent.
+    - Every ``:LOGBOOK:`` drawer goes. With time tracking on, Logseq's
+      default, a marker change appends a drawer or rewrites its last CLOCK
+      line (upstream editor.cljs ``with-marker-time``, util/clock.cljs
+      ``clock-in`` and ``clock-out``; read in the code, not measured: time
+      tracking was off), and
+      set-todo-status sends the old drawer back; comparing its content would
+      fail a write that landed. Whether a drawer arrived at all is
+      block_text_matches' check.
+
+    Nothing else: a rule as loose as "whitespace does not matter" would let a
+    write through that did not land.
+    """
+    lines = without_block_ids(text).split("\n")
+    drawer = _drawer_lines(lines)
+    kept = [line.rstrip() for i, line in enumerate(lines) if i not in drawer]
+    return "\n".join(kept).strip()
+
+
+def block_text_matches(sent: str, read: str) -> bool:
+    """Whether ``read`` shows the block text that ``sent`` wrote.
+
+    Equal once normalised, and if ``sent`` had a drawer, ``read`` has one too:
+    presence, not content, so a drawer the caller wrote cannot go missing
+    unnoticed while the time tracker may still rewrite it.
+    """
+    if normalize_block_text(sent) != normalize_block_text(read):
+        return False
+    had_drawer = bool(_drawer_lines(sent.split("\n")))
+    return not had_drawer or bool(_drawer_lines(read.split("\n")))
+
+
 # A Block Ref is what Logseq gives the target an Id Line for (#95), measured
 # against 0.10.15: ((uuid)) in text, in an embed, in [label](((uuid))) and as a
 # property value, in capitals too. Inside a code block or inline code it is
@@ -176,6 +239,13 @@ def without_block_ids(content: str) -> str:
 BLOCK_REF_RE = re.compile(
     r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)', re.IGNORECASE)
 _INLINE_CODE_RE = re.compile(r'(`+)(?:(?!\1).)+?\1')
+
+
+def unwrap_block_id(value: str) -> str:
+    """A block id as given on the command line, without surrounding
+    whitespace and without the ``((`` and ``))`` of a ref copied along;
+    the case is left as typed."""
+    return value.strip().replace("((", "").replace("))", "")
 
 
 def block_ref_uuids(content: str) -> list:

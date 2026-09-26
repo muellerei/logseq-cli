@@ -8,9 +8,13 @@ What makes it scriptable:
 
 - `--json` on **every** command; payload goes to stdout, nothing else does
 - errors go to **stderr**, so stdout can be parsed unconditionally; under
-  `--json` mostly as a JSON object, some (errors from the command line
-  itself, some input checks, and a write Logseq did not take) as a plain
-  `Error:` line
+  `--json` as a JSON object, a write refused or not proven always with a
+  `reason` (see "A Write Refused or Not Proven"). Some come as a plain
+  `Error:` line instead: errors from the command line itself and some input
+  checks, such as an anchor or a block to move that does not exist
+- notes (`Note:`, a warning) go to stderr too; under `--json` they follow
+  the result, and a failure carries them in its error object as `notes`,
+  so its stderr stays one JSON object
 - exit 0 when the call did what it says, non-zero when it did not, including
   "not found"; the error says why. The number itself carries no meaning, so
   do not branch on 1 versus 2
@@ -402,6 +406,54 @@ text as given.
   reported per name, like a missing page.
 - `delete-page` and `rename-page` refuse an alias (`reason: "alias"`)
   and name the page: use its own name.
+
+### 8. A Write Refused or Not Proven
+
+Exit 0 on a write means Logseq has it: each write is proven by Logseq's answer
+or by reading back what it changed, so no read is needed to confirm it. The
+read reaches Logseq's database; the page's Markdown file follows about 1.8 s
+later.
+
+A write the CLI refuses, or cannot show Logseq did, exits non-zero. Under
+`--json` stderr holds one object with `error` (the message), `reason` and
+the fields below. A refusal from a write itself adds `writes_landed`, the
+writes of the same call that landed before it; they stay (there is no
+rollback), and the message ends with how many, or "Nothing was written.".
+
+| `reason` | Meaning | Fields |
+|----------|---------|--------|
+| `open_in_editor` | The write would change the block open in Logseq's editor, where someone is typing | `block`, `page` |
+| `editor_state_unknown` | Logseq's answer to which block is open was not understood. The write was not sent; asked after a multi-block write, its blocks landed and count in `writes_landed` | `answer` |
+| `logseq_error` | Logseq threw on the write and answered with an error object | `method`, `logseq_message` |
+| `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
+| `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
+| `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
+
+`set-property` and `remove-property --name` check the page themselves and
+name `page` and `property` instead.
+
+A connection that fails after writes of the call landed (`connection_refused`,
+`timeout`, `bad_response`, `http_error`) adds `writes_landed` too. When it
+failed between a write and its proof, `unproven_write` names that write: it
+may have landed or not. Read the target before retrying; a retry of the whole
+command writes again what landed.
+
+On `open_in_editor`: the refused write did not happen; earlier writes of the
+same call may have (the message says how many). Ask the user to leave the
+block, check, then retry. Do not retry in a loop.
+
+What counts as changing the open block: a write to it, a removal or a move of
+it or of a block above it, a page deletion or a rename of its page, and a
+rename of a page it links to. An insert is written while a block is open,
+without moving the cursor. An insert whose text holds `((X))` is refused
+while X is open in the editor and has no `id::` yet (storing the id would
+write into X). A `--keep-ids` write is refused while any block is open.
+
+`write_not_verified` can be a false alarm when someone else wrote the block
+between the write and the read-back; read the block before retrying.
+
+`replace-text` writes the other blocks when one is refused, and names each
+refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 
 ## Environment Variables
 

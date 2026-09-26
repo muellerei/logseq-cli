@@ -110,7 +110,7 @@ class TestFailureModesAreDistinguished:
 
     def test_wrong_token(self, api, listener):
         listener(True)
-        api.token = "falsch"
+        api.token = "wrong"
         api.call.side_effect = _http_error(401)
         result = CliRunner().invoke(cli, ["doctor", "--json"])
         assert result.exit_code == 1

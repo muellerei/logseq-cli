@@ -18,7 +18,7 @@ and gets no line (measured); a ref in capitals and an embed do.
 Checked at LogseqAPI, like the id:: contract (#56), so no write path can go
 around it.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -45,12 +45,56 @@ BLOCKS = {
 }
 
 
+def _read_back(nodes, made):
+    """A batch's nodes as getBlock hands them back, with fresh uuids."""
+    out = []
+    for node in nodes:
+        made.append(f"00000000-0000-4000-8000-{len(made) + 1:012d}")
+        out.append({"uuid": made[-1], "content": node["content"],
+                    "children": _read_back(node.get("children") or [], made)})
+    return out
+
+
 def _api():
     api = LogseqAPI(token="t")
+    batches = []
+    # OWN as written: an update and a property write read it back as their
+    # proof, its text through getBlock, its properties through
+    # the datascript pull.
+    own = {"content": BLOCKS[OWN]["content"], "texts": {}}
+    # The blocks setBlocksId was asked for: its proof reads their id back.
+    stored = set()
 
-    def call(method, args=None):
+    def call(method, args=None, *, cached=True):
+        if method == "logseq.Editor.setBlocksId":
+            stored.update(args[0])
+            return None
+        if method == "logseq.Editor.insertBatchBlock":
+            batches.extend(args[1])
+            return None
+        if method == "logseq.Editor.updateBlock":
+            own["texts"] = dict((args[2] if len(args) > 2 else {}).get("properties") or {})
+            # Logseq drops a ref to the block from its own text (measured).
+            text = args[1].replace(f"(({OWN}))", "")
+            own["content"] = "\n".join([text, *(f"{k}:: {v}" for k, v in own["texts"].items())])
+            return None
+        if method == "logseq.Editor.upsertBlockProperty":
+            own["texts"][args[1]] = str(args[2])
+            return None
+        if method == "logseq.DB.datascriptQuery":
+            texts = own["texts"]
+            return [[{"properties": texts, "properties-text-values": texts} if texts else None]]
         if method == "logseq.Editor.getBlock":
-            return BLOCKS.get(args[0].lower())
+            block = BLOCKS.get(args[0].lower())
+            if block and args[0].lower() in stored:
+                block = {**block, "properties": {"id": block["uuid"]}}
+            if block and args[0].lower() == OWN:
+                block = {**block, "content": own["content"]}
+                if batches:
+                    # The anchor with the batch under it: insertBatchBlock's
+                    # proof reads it back.
+                    block["children"] = _read_back(batches, [])
+            return block
         return {"uuid": "new"}
 
     api.call = MagicMock(side_effect=call)
@@ -165,19 +209,17 @@ class TestReplaceTextReadsBackAStoredId:
     block reads back with its Id Line after the text it was sent (measured,
     0.10.15). That is the write landing, not failing."""
 
-    def test_the_block_that_gained_its_id_counts_as_written(self):
-        api = MagicMock()
-        api.get_page_blocks_tree.return_value = [
-            {"uuid": BARE, "content": "draft B", "children": []},
-            {"uuid": OWN, "content": f"draft A (({BARE}))", "children": []}]
-        written = {}
-        api.update_block.side_effect = lambda uuid, new, properties=None, replacing=None: \
-            written.__setitem__(uuid, new)
-        api.get_block.side_effect = lambda uuid, include_children=False: {
-            "uuid": uuid,
-            "content": written[uuid] + (f"\nid:: {BARE}" if uuid == BARE else "")}
-        with patch("logseq_cli.group.LogseqAPI", return_value=api):
-            result = split_runner().invoke(cli, [
-                "replace-text", "--page", "P", "--find", "draft", "--replace", "final"])
+    def test_the_block_that_gained_its_id_counts_as_written(self, monkeypatch):
+        from tests.logseq_http_double import LogseqHttpDouble
+        double = LogseqHttpDouble()
+        # The ref first: its write stores B's id before B is replaced.
+        double.add_page("P", [{"content": f"draft A (({BARE}))", "uuid": OWN},
+                              {"content": "draft B", "uuid": BARE}])
+        double.install(monkeypatch)
+        result = split_runner().invoke(cli, [
+            "--token", "t", "replace-text", "--page", "P", "--find", "draft",
+            "--replace", "final"])
         assert result.exit_code == 0, result.stderr
         assert "not written" not in result.stdout
+        # The case itself: B read back with the id its text was not sent with.
+        assert double.uuid_of(f"final B\nid:: {BARE}") == BARE

@@ -10,14 +10,13 @@ apply_block_properties writes them.
 import re
 import uuid as uuid_module
 
-import click
-
 from logseq_cli.blocktext import (
     PROPERTY_KEY_STOP,
     PROPERTY_LINE_RE,
     refuse_split_property,
     stored_property_key,
 )
+from logseq_cli.notes import print_note
 
 
 # Why a property value is sent as a number only in one narrow case
@@ -117,10 +116,9 @@ def normalize_property_key(key: str) -> str:
 def note_renamed_property_key(key: str, stored: str) -> None:
     """Say on stderr when the key written differs from the key given."""
     if key != stored:
-        click.echo(
+        print_note(
             f"Note: property key {key!r} is stored as {stored!r} "
             "(Logseq lower-cases keys and reads '_' as '-').",
-            err=True,
         )
 
 

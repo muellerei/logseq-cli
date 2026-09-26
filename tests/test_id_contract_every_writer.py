@@ -60,7 +60,8 @@ def _contents(graph):
 class TestTheApiRefusesAnUndecidedIdLine:
     def _api(self):
         api = LogseqAPI(token="t")
-        api.call = MagicMock()
+        # A block, as an insert answers: its proof reads the uuid.
+        api.call = MagicMock(return_value={"uuid": TARGET})
         return api
 
     @pytest.mark.parametrize("write", [
@@ -97,18 +98,32 @@ class TestTheApiRefusesAnUndecidedIdLine:
         api.insert_block(TARGET, f"x\nid:: {FOREIGN}\r")
         api.call.assert_called_once()
 
+    def _updated(self, text):
+        """An API whose Logseq holds ``text`` once written: the update is
+        read back as its proof."""
+        api = LogseqAPI(token="t")
+        api.call = MagicMock(return_value={"uuid": TARGET, "content": text})
+        return api
+
+    @staticmethod
+    def _updates_sent(api):
+        return [c.args for c in api.call.call_args_list
+                if c.args[0] == "logseq.Editor.updateBlock"]
+
     def test_an_update_may_carry_the_blocks_own_id(self):
         # What getBlock hands out, written back: the uuid stays (measured).
-        api = self._api()
-        api.update_block(TARGET, f"new\nid:: {TARGET.upper()}")
-        api.call.assert_called_once()
+        text = f"new\nid:: {TARGET.upper()}"
+        api = self._updated(text)
+        api.update_block(TARGET, text)
+        assert self._updates_sent(api) == [("logseq.Editor.updateBlock", [TARGET, text])]
 
     def test_an_update_may_keep_a_line_the_block_had(self):
         # A copy carries its source's line until the file is read again
         # (measured); replace-text and set-todo-status change another line.
-        api = self._api()
-        api.update_block(TARGET, f"DONE x\nid:: {FOREIGN}", replacing=f"TODO x\nid:: {FOREIGN}")
-        api.call.assert_called_once()
+        text = f"DONE x\nid:: {FOREIGN}"
+        api = self._updated(text)
+        api.update_block(TARGET, text, replacing=f"TODO x\nid:: {FOREIGN}")
+        assert self._updates_sent(api) == [("logseq.Editor.updateBlock", [TARGET, text])]
 
     def test_but_not_add_one(self):
         api = self._api()
@@ -119,8 +134,20 @@ class TestTheApiRefusesAnUndecidedIdLine:
     def test_a_batch_that_keeps_ids_carries_them(self):
         # --keep-ids: check_block_ids has vetted the ids before this call.
         api = self._api()
-        api.insert_batch_block(TARGET, [{"content": f"x\nid:: {FOREIGN}"}], {"keepUUID": True})
-        api.call.assert_called_once()
+        sent = []
+
+        def call(method, args=None, *, cached=True):
+            if method == "logseq.Editor.insertBatchBlock":
+                sent.append(args[1])
+                return None
+            # The anchor, with the kept block under it once the batch is in:
+            # the batch's proof reads it before and after.
+            return {"uuid": TARGET, "children": [
+                {"uuid": FOREIGN, "content": n["content"]} for b in sent for n in b]}
+        api.call.side_effect = call
+        assert api.insert_batch_block(
+            TARGET, [{"content": f"x\nid:: {FOREIGN}"}], {"keepUUID": True}) == [FOREIGN]
+        assert sent == [[{"content": f"x\nid:: {FOREIGN}"}]]
 
     def test_an_id_line_in_a_code_block_is_code(self):
         api = self._api()
@@ -240,9 +267,9 @@ class TestCreatePageAndAddJournalEntry:
         assert r.exit_code == 0, r.stderr
         assert "will be dropped" in r.stderr
         assert FOREIGN not in " ".join(_contents(api.graph))
-        # createPage leaves one empty block; a line that was only the id is
-        # not written as a second one.
-        assert api.graph.tree("2026-01-05") == [("", []), ("text", [])]
+        # A new journal starts with what was written, not with an empty block
+        # (measured); a line that was only the id is not written as one either.
+        assert api.graph.tree("2026-01-05") == [("text", [])]
 
 
 class TestCopyBlock:

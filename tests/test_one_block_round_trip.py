@@ -87,8 +87,12 @@ class TestTheApiRefusesBeforeSending:
 
     def test_an_update_may_keep_a_line_the_block_had(self):
         api = self._api()
+        # Logseq holds the text once written: the update reads it back.
+        api.call.return_value = {"uuid": ANCHOR, "content": "DONE x\n- b"}
         api.update_block(ANCHOR, "DONE x\n- b", replacing="TODO x\n- b")
-        api.call.assert_called_once()
+        assert [c.args for c in api.call.call_args_list
+                if c.args[0] == "logseq.Editor.updateBlock"] == [
+            ("logseq.Editor.updateBlock", [ANCHOR, "DONE x\n- b"])]
 
     @pytest.mark.parametrize("had", ["a\n- b", "a\n- b\n```\n- b\n```"],
                              ids=["repeated", "freed from a code block"])

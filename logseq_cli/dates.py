@@ -39,23 +39,47 @@ def parse_date_keyword(date_str: str) -> datetime.date:
         )
 
 
-def is_journal_date(name: str) -> bool:
-    """Check if a page name looks like a journal date.
+# The journal titles Logseq takes as such whatever the graph's date format,
+# besides the graph's own: "MMM do, yyyy", "yyyy-MM-dd" and "yyyy_MM_dd"
+# (date_time_util.cljs safe-journal-title-formatters, 0.10.15; read in the
+# code). Logseq creates a page of such a name as the journal under the
+# graph's name, and answers createPage with null (measured for
+# "Jan 1st, 2099"). Matched against the name stripped and in lower case, as
+# Logseq capitalises it before parsing.
+_JOURNAL_NAMES = [
+    re.compile(r"^(?P<mon>[a-z]{3})\s+(?P<d>\d{1,2})(?:st|nd|rd|th),\s+(?P<y>\d{4})$"),  # MMM do, yyyy
+    re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})$"),                            # yyyy-MM-dd
+    re.compile(r"^(?P<y>\d{4})_(?P<m>\d{2})_(?P<d>\d{2})$"),                            # yyyy_MM_dd
+]
 
-    Supports multiple Logseq date formats:
-    - 'mar 14th, 2025' (MMM do, yyyy)
-    - '2025-03-14, friday' (yyyy-MM-dd, EEEE)
-    - '2025-03-14' (yyyy-MM-dd)
-    - '14.03.2025' (dd.MM.yyyy)
+
+def parse_journal_name(name: str) -> datetime.date | None:
+    """The day ``name`` names as a journal title in one of the formats
+    above, or ``None``: for any other name, and for a day no calendar has
+    (``2099-02-30``, a month ``foo``).
+
+    A name in the graph's own format needs no such reading: Logseq creates
+    and answers it under that name (measured). For
+    ``pagenames.page_name_to_create``, which sends such a title under the
+    graph's name.
     """
     name = name.strip().lower()
-    patterns = [
-        r"^[a-z]{3}\s+\d{1,2}(?:st|nd|rd|th),\s+\d{4}$",       # MMM do, yyyy
-        r"^\d{4}-\d{2}-\d{2},\s+[a-z]+$",                        # yyyy-MM-dd, EEEE
-        r"^\d{4}-\d{2}-\d{2}$",                                   # yyyy-MM-dd
-        r"^\d{2}\.\d{2}\.\d{4}$",                                 # dd.MM.yyyy
-    ]
-    return any(re.match(p, name) for p in patterns)
+    for pattern in _JOURNAL_NAMES:
+        m = pattern.match(name)
+        if not m:
+            continue
+        parts = m.groupdict()
+        if "mon" in parts:
+            if parts["mon"] not in _MONTHS_ABBR[1:]:
+                return None
+            month = _MONTHS_ABBR.index(parts["mon"])
+        else:
+            month = int(parts["m"])
+        try:
+            return datetime.date(int(parts["y"]), month, int(parts["d"]))
+        except ValueError:
+            return None
+    return None
 
 
 def journal_day_to_date(jd: int) -> datetime.date:
