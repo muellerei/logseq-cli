@@ -226,8 +226,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `add-note-content` and `add-journal-content` reported "Added 0 block(s)"
   with exit 0, `--property` dropped with a warning. The check now sits
   where the heading is removed, for every writer that removes it, including
-  `add-journal-entry`, and answers like an empty `--content`, in the run and
-  under `--dry-run`.
+  `add-journal-entry`, in the run and under `--dry-run`: exit 1, under
+  `--json` an error object with `reason: "empty_content"` and the `page`.
 - `insert-block --page`, `add-block-ref --page` and `copy-block --to-page`
   on a page that does not exist no longer leave an empty block at its top.
   `appendBlockInPage` created the page itself, with an empty block before

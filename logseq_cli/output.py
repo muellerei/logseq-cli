@@ -13,6 +13,7 @@ import requests
 from logseq_cli.api import BadResponseError, DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
+from logseq_cli.headings import TitleHeadingOnly
 from logseq_cli.blocktext import IdLineError, SplitBlockError
 from logseq_cli.notes import hold_notes, release_notes, take_notes
 from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
@@ -159,6 +160,10 @@ def handle_connection_error(func):
                 reason="id_line",
                 line=e.line,
             )
+        except TitleHeadingOnly as e:
+            # Refused before the write: the text is empty once the heading
+            # the page shows anyway is dropped.
+            fail(str(e), as_json=as_json, reason="empty_content", page=e.page)
         except AmbiguousAliasError as e:
             # Logseq would take the first of the pages; the CLI names them all
             # and lets the caller choose, so no read or write guesses.
