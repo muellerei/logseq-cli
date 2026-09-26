@@ -19,7 +19,7 @@ from logseq_cli.cliinput import (
     require_content,
 )
 from logseq_cli.config import load_config, resolve_heading
-from logseq_cli.dates import format_journal_date, parse_date_keyword
+from logseq_cli.dates import parse_date_keyword
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading
 from logseq_cli.ids import (
@@ -39,6 +39,7 @@ from logseq_cli.outlinetext import (
     subtree_uuids,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output, uuid_fields
+from logseq_cli.pagenames import journal_page_name, page_to_write
 from logseq_cli.strictinsert import (
     append_in_page,
     check_move,
@@ -424,8 +425,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     alias = {}
     if page and not (after or before or child_of):
         ref = follow_page(api, page, as_json)
-        page = ref.page
-        alias = {"alias_of": page} if ref.redirected else {}
+        alias = {"alias_of": ref.page} if ref.redirected else {}
+        # A missing page is written under the name Logseq creates it with: a
+        # journal title in another format is the journal (M14).
+        page, _ = page_to_write(api, ref.page)
 
     # --tree-file is --tree from a file; resolve it before any other validation
     # so the rest of the command sees a single tree_input.
@@ -701,9 +704,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     would_create_page = False
     if journal_date and not page:
         d = parse_date_keyword(journal_date)
-        configs = api.get_user_configs()
-        date_fmt = configs.get("preferredDateFormat") if configs else None
-        page = format_journal_date(d, date_fmt)
+        page = journal_page_name(api, d)
         # Ensure journal page exists
         try:
             existing = api.get_page(page)

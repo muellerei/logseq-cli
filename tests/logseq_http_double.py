@@ -66,9 +66,10 @@ _MARKERS = ("TODO", "DOING", "DONE", "LATER", "NOW", "WAITING", "CANCELED", "CAN
 
 # M14: the date format of the measured graph.
 DATE_FORMAT = "yyyy-MM-dd, EEEE"
-# M14: a journal title in another format that Logseq still recognises. Only
-# this one was measured ("Jan 1st, 2099"); Logseq's own default format.
-_OTHER_JOURNAL_FORMAT = "MMM do, yyyy"
+# The journal titles Logseq takes as such whatever the graph's format, besides
+# the graph's own (safe-journal-title-formatters, date_time_util.cljs:15-19,
+# read in the code). Only "MMM do, yyyy" was measured (M14: "Jan 1st, 2099").
+_OTHER_JOURNAL_FORMATS = ("MMM do, yyyy", "yyyy-MM-dd", "yyyy_MM_dd")
 
 # Assumed, not measured (time tracking is off in the measured graph, M11):
 # the clock lines as upstream util/clock.cljs:75-93 writes them, at a fixed
@@ -107,9 +108,26 @@ class Response:
 # --- names, keys, values -----------------------------------------------------
 
 def _key(name) -> str:
-    """How Logseq compares page names: NFC and lower case
-    (``page-name-sanity-lc``, as pagenames._comparable does)."""
-    return unicodedata.normalize("NFC", str(name)).lower()
+    """How Logseq compares page names: lower case, a slash at either end
+    dropped, NFC (``page-name-sanity-lc``, graph_parser/util.cljs:134-165;
+    the slashes measured, 0.10.15: getPage on "/X/" finds X)."""
+    return unicodedata.normalize("NFC", _without_boundary_slashes(str(name).lower()))
+
+
+def _without_boundary_slashes(name: str) -> str:
+    """``remove-boundary-slashes``: one "/" at the start, one at the end."""
+    name = name[1:] if name.startswith("/") else name
+    return name[:-1] if name.endswith("/") else name
+
+
+def _created_title(name: str) -> str:
+    """The title ``create!`` makes of a name (handler/page.cljs:137-142):
+    trimmed, ``[[...]]`` unwrapped, leading ``#`` dropped, a slash at either
+    end dropped. Measured, 0.10.15, for each of the four."""
+    title = name.strip()
+    m = re.fullmatch(r"\[\[(.*)\]\]", title)
+    title = re.sub(r"^#+", "", m.group(1) if m else title)
+    return _without_boundary_slashes(title)
 
 
 def _is_uuid(value) -> bool:
@@ -751,6 +769,11 @@ class LogseqHttpDouble:
         block; passed properties become its property block (M14b: the file
         starts with ``journal?:: true``). M14: a journal title in another
         format is created under the graph's name and answered with null.
+
+        The name is looked up as sent, then created as ``create!`` makes it
+        (``_created_title``) and answered under that (api.cljs:555-572;
+        measured, 0.10.15): ``[[X]]`` answers the page X, a page X that
+        exists included, its properties sent dropped.
         """
         name = args[0]
         properties = (args[1] if len(args) > 1 else None) or {}
@@ -758,10 +781,16 @@ class LogseqHttpDouble:
         existing = self._find_page(name)
         if existing is not None:
             return self._page_out(existing)
-        other_day = _parse_date(name, _OTHER_JOURNAL_FORMAT)
+        name = _created_title(name)
+        other_day = next((d for f in _OTHER_JOURNAL_FORMATS if (d := _parse_date(name, f))), None)
         if other_day and not _parse_date(name, self.date_format):
-            self._create_page([_format_date(other_day, self.date_format), properties, options])
+            journal = _format_date(other_day, self.date_format)
+            if self._find_page(journal) is None:
+                self._create_page([journal, properties, options])
             return None
+        existing = self._find_page(name)
+        if existing is not None:
+            return self._page_out(existing)
         if properties:
             text = "\n".join(f"{k}:: {_value_text(v)}" for k, v in properties.items())
             blocks = [self._build(text)]
@@ -840,16 +869,21 @@ class LogseqHttpDouble:
 
     def _append_block_in_page(self, args):
         """The new block. A missing page is made first, with its empty first
-        block, and the block goes after it (strictinsert.py, measured)."""
+        block, and the block goes after it (strictinsert.py, measured). It is
+        made through createPage's ``create!`` and then looked up under the
+        name as sent (api.cljs:830-845, read in the code): a journal title in
+        another format makes the journal and answers null."""
         name, content = args[0], args[1]
         options = (args[2] if len(args) > 2 else None) or {}
         wanted = options.get("customUUID")
         if self._taken(wanted):
             # PageGraph, measured: a uuid a block or placeholder holds.
             return {"error": "Custom block UUID already exists"}
+        if self._find_page(name) is None:
+            self._create_page([name, {}, {}])
         page = self._find_page(name)
         if page is None:
-            page = self._new_page(name, [self._build("")])
+            return None
         node = self._build({"content": content, "uuid": wanted})
         page["blocks"].append(node)
         self._index(node)

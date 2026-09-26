@@ -21,6 +21,7 @@ from logseq_cli.outlinetext import (
     count_blocks,
     page_blocks_by_uuid,
 )
+from logseq_cli.pagenames import page_to_write
 from logseq_cli.writerefused import WriteNotVerified, WriteRefused, partial_state
 
 # Why a --keep-ids write is refused while a block is open (E2, spec 030).
@@ -234,8 +235,11 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
     if editing is not None:
         api.refuse_open(editing, why=KEPT_IDS_MOVE_CURSOR)
     if where == "page_end":
-        page_name = target
-        if api.get_page(page_name) is None:
+        # A missing page under the name Logseq creates it with, which the
+        # reads below then find: a journal title in another format is the
+        # journal (M14).
+        page_name, page = page_to_write(api, target)
+        if page is None:
             # appendBlockInPage creates a missing page and writes to it; this
             # position does the same, without the empty block Logseq would
             # otherwise put first (M18). The empty page takes the stand-in below.

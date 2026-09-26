@@ -39,38 +39,29 @@ def parse_date_keyword(date_str: str) -> datetime.date:
         )
 
 
-# The journal names the CLI recognises, one pattern per format, matched
-# against the name stripped and in lower case. One list for recognising and
-# parsing, so the two cannot disagree on a format.
+# The journal titles Logseq takes as such whatever the graph's date format,
+# besides the graph's own: "MMM do, yyyy", "yyyy-MM-dd" and "yyyy_MM_dd"
+# (safe-journal-title-formatters, date_time_util.cljs:15-19; read in the
+# code). Logseq creates a page of such a name as the journal under the
+# graph's name, and answers createPage with null (M14, measured for
+# "Jan 1st, 2099"). Matched against the name stripped and in lower case, as
+# Logseq capitalises it before parsing.
 _JOURNAL_NAMES = [
     re.compile(r"^(?P<mon>[a-z]{3})\s+(?P<d>\d{1,2})(?:st|nd|rd|th),\s+(?P<y>\d{4})$"),  # MMM do, yyyy
-    re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2}),\s+[a-z]+$"),                 # yyyy-MM-dd, EEEE
     re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})$"),                            # yyyy-MM-dd
-    re.compile(r"^(?P<d>\d{2})\.(?P<m>\d{2})\.(?P<y>\d{4})$"),                          # dd.MM.yyyy
+    re.compile(r"^(?P<y>\d{4})_(?P<m>\d{2})_(?P<d>\d{2})$"),                            # yyyy_MM_dd
 ]
 
 
-def is_journal_date(name: str) -> bool:
-    """Check if a page name looks like a journal date.
-
-    Supports multiple Logseq date formats:
-    - 'mar 14th, 2025' (MMM do, yyyy)
-    - '2025-03-14, friday' (yyyy-MM-dd, EEEE)
-    - '2025-03-14' (yyyy-MM-dd)
-    - '14.03.2025' (dd.MM.yyyy)
-    """
-    name = name.strip().lower()
-    return any(p.match(name) for p in _JOURNAL_NAMES)
-
-
 def parse_journal_name(name: str) -> datetime.date | None:
-    """The day a journal name in one of :func:`is_journal_date`'s formats
-    names, or ``None``: for any other name, and for a day no calendar has
+    """The day ``name`` names as a journal title in one of the formats
+    above, or ``None``: for any other name, and for a day no calendar has
     (``2099-02-30``, a month ``foo``).
 
-    A weekday in the name is not read, a wrong one included; the date
-    decides. For create-page, which sends a journal under the graph's own
-    name (spec 030, M14).
+    A name in the graph's own format needs no such reading: Logseq creates
+    and answers it under that name (M14b). For
+    ``pagenames.page_name_to_create``, which sends such a title under the
+    graph's name.
     """
     name = name.strip().lower()
     for pattern in _JOURNAL_NAMES:

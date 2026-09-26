@@ -163,17 +163,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal holds for any caller that would.
 - `create-page` on a page that exists now fails with
   `reason: "page_exists"` under `--json`; the error had no reason.
-- `create-page` with a journal name in another of the four date formats it
-  recognises (`Jan 1st, 2099`, `2099-01-01`, `01.01.2099`,
-  `2099-01-01, Thursday`) now sends the name in the graph's date format.
-  Sent as typed, Logseq created the journal under its own name and answered
-  `null` (measured, 0.10.15, for `Jan 1st, 2099` in a `yyyy-MM-dd, EEEE`
-  graph; the other formats not measured), which the check above cannot tell
-  from a page not created. The check for a page that exists, `--dry-run`,
-  `--content` and the output use the converted name, so a journal that
-  exists is refused as one. The weekday goes in lower case
+- A page or journal the CLI created under a name Logseq changes no longer
+  reads as not created, and no longer lands beside the page meant. Logseq
+  creates a page under a cleaned title: trimmed, `[[…]]` unwrapped, a
+  leading `#` and a slash at either end dropped (`handler/page.cljs:137-142`;
+  measured, 0.10.15, for each). A journal title it takes as one in any graph
+  (`Jan 1st, 2099`, `2099-01-01`, `2099_01_01`; `date_time_util.cljs:15-19`)
+  becomes the journal under the graph's own name, and `createPage` answers
+  it with `null` (measured, 0.10.15, for `Jan 1st, 2099` in a
+  `yyyy-MM-dd, EEEE` graph; the other forms not measured). Asked for under
+  the name as sent, neither page is found: `create-page --name "[[X]]"`
+  failed with `write_not_verified` after creating X, and did not see an X
+  that existed; `add-note-content --page "Jan 1st, 2099"` and
+  `insert-block --page` with such a name created the journal and then
+  failed to write to it. `create-page`, `add-note-content`,
+  `insert-block --page` and every `--keep-ids` write to the end of a page
+  now use the name Logseq creates, for the check for a page that exists,
+  `--dry-run`, the write and the output, and write into a journal of that
+  name that exists. Under `--json`, `add-note-content` names that page in
+  `position`, in the run as in its preview; `page` stays the name asked
+  for, as in every result. The weekday goes in lower case
   (`2099-01-01, thursday`); Logseq keeps its own spelling of the title
-  (measured).
+  (measured). A date in a format Logseq takes for a journal only in a
+  graph of that format, such as `01.01.2099`, stays a page of that name, as
+  Logseq creates it.
 
 ### Changed
 

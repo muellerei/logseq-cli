@@ -38,6 +38,7 @@ from logseq_cli.outlinetext import (
     parse_hierarchical_content,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output, uuid_fields
+from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
     blocks_to_markdown,
     bound,
@@ -370,9 +371,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     else:
         d = datetime.date.today()
 
-    configs = api.get_user_configs()
-    date_fmt = configs.get("preferredDateFormat") if configs else None
-    page_name = format_journal_date(d, date_fmt)
+    page_name = journal_page_name(api, d)
 
     # Ensure the journal page exists
     existing = api.get_page(page_name)
@@ -532,9 +531,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         d = parse_date_keyword(date)
     else:
         d = datetime.date.today()
-    configs = api.get_user_configs()
-    date_fmt = configs.get("preferredDateFormat") if configs else None
-    page_name = format_journal_date(d, date_fmt)
+    page_name = journal_page_name(api, d)
 
     # What each value is written as, decided once: a tree when it carries
     # structure, otherwise one block (None here). The id check and the removal
@@ -886,9 +883,7 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
     else:
         d = datetime.date.today()
 
-    configs = api.get_user_configs()
-    date_fmt = configs.get("preferredDateFormat") if configs else None
-    page_name = format_journal_date(d, date_fmt)
+    page_name = journal_page_name(api, d)
     content = strip_title_heading(content, page_name)
 
     # Before the journal page is created: a refused id must leave the graph
