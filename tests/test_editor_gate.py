@@ -16,6 +16,7 @@ import json
 import pytest
 
 from logseq_cli.api import LogseqAPI
+from logseq_cli.writerefused import EditorOpen
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
@@ -41,11 +42,31 @@ def double(monkeypatch):
     return double
 
 
-@pytest.fixture
-def api(double):
+@pytest.fixture(params=[False, True], ids=["uncached", "cached"])
+def api(request, double):
+    """The API with its read cache off, and on as a run has it (TTL 60 s):
+    the gate must see the graph as it is when it asks, not as read before."""
     api = LogseqAPI(token="t")
-    api.cache_enabled = False
+    api.cache_enabled = request.param
     return api
+
+
+@pytest.fixture
+def cached_api(double):
+    api = LogseqAPI(token="t")
+    assert api.cache_enabled
+    return api
+
+
+def _open_new_child(double, parent, content="typed here"):
+    """Someone presses Enter under ``parent`` and types in the new child;
+    returns its uuid."""
+    _, siblings, i, _ = double._locate(parent)
+    node = double._build(content)
+    siblings[i]["children"].append(node)
+    double._index(node)
+    double.editing = node["uuid"]
+    return node["uuid"]
 
 
 def _uuid(double, content):
@@ -168,6 +189,60 @@ def test_gate_refuses_remove_block_target(double, api):
 def test_gate_refuses_remove_block_subtree(double, api):
     parent, kid = _uuid(double, "parent block"), _uuid(double, "kid block")
     _assert_refused(double, lambda: api.remove_block(parent), kid)
+
+
+# The subtree and the open block are read when the gate asks, not taken from
+# the cache: a child made after the call's first read, and typed in, was
+# missing from a subtree read earlier, and the write went through.
+
+def test_gate_remove_block_sees_a_child_made_after_the_first_read(double, cached_api):
+    parent = _uuid(double, "parent block")
+    cached_api.get_block(parent, include_children=True)
+    kid = _open_new_child(double, parent)
+    before = double.snapshot()
+    with pytest.raises(EditorOpen) as refused:
+        cached_api.remove_block(parent)
+    assert refused.value.fields["block"] == kid
+    assert double.writes() == [] and double.snapshot() == before
+
+
+def test_gate_move_block_sees_a_child_made_after_the_first_read(double, cached_api):
+    parent, anchor = _uuid(double, "parent block"), _uuid(double, "anchor block")
+    cached_api.get_block(parent, include_children=True)
+    _open_new_child(double, parent)
+    with pytest.raises(EditorOpen):
+        cached_api.move_block(parent, anchor, {"children": True})
+    assert double.writes() == []
+
+
+def test_gate_rename_page_sees_a_link_saved_after_the_first_read(double, cached_api):
+    # Logseq saved the open block with a link to the page after the CLI had
+    # read it without one.
+    open_block = _uuid(double, "unrelated block")
+    cached_api.get_block(open_block, include_children=False)
+    cached_api.get_page("Probe Page")
+    double._locate(open_block)[1][double._locate(open_block)[2]]["content"] = \
+        "now links [[Probe Page]]"
+    double.editing = open_block
+    with pytest.raises(EditorOpen):
+        cached_api.rename_page("Probe Page", "New Name")
+    assert double.writes() == []
+
+
+def test_remove_block_command_sees_a_child_made_during_the_call(double):
+    # Through the command, with its cache: the child appears while the call
+    # looks for refs into the block, after it read the block's subtree.
+    parent = _uuid(double, "parent block")
+    query = double._handlers["logseq.DB.datascriptQuery"]
+
+    def child_appears(args):
+        _open_new_child(double, parent)
+        return query(args)
+    double._handlers["logseq.DB.datascriptQuery"] = child_appears
+    r = split_runner().invoke(cli, ["--token", "t", "remove-block", "--id", parent, "--json"])
+    assert r.exit_code == 1
+    assert _error_object(r)["reason"] == "open_in_editor"
+    assert double.sent("removeBlock") == []
 
 
 def test_gate_refuses_delete_page(double, api):

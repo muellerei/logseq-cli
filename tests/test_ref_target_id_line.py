@@ -65,7 +65,7 @@ def _api():
     # The blocks setBlocksId was asked for: its proof reads their id back.
     stored = set()
 
-    def call(method, args=None):
+    def call(method, args=None, *, cached=True):
         if method == "logseq.Editor.setBlocksId":
             stored.update(args[0])
             return None
