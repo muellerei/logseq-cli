@@ -18,8 +18,8 @@ def _mock_response(payload):
 def _answering_writes(payload):
     """``requests.post`` for a test that updates a block: each method answers
     as Logseq does. checkEditing, which the editor gate sends before a write,
-    with raw text (M8, spec 030): ``false``, nobody is editing. updateBlock
-    with ``null`` (M1), and getBlock with the block as last written, for the
+    with raw text (measured): ``false``, nobody is editing. updateBlock
+    with ``null``, and getBlock with the block as last written, for the
     read that proves the update. Everything else answers ``payload``."""
     idle = MagicMock(status_code=200, text="false")
     block = {"uuid": "uuid-x", "content": ""}

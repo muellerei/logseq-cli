@@ -314,7 +314,7 @@ JOURNAL_PAGE = "2099-01-05, Monday"
 
 def _journal_double(monkeypatch, blocks=("journal top",)):
     """The journal of JOURNAL_DATE behind the HTTP double, so the real
-    LogseqAPI proves each write and counts what landed (spec 030)."""
+    LogseqAPI proves each write and counts what landed."""
     double = LogseqHttpDouble()
     double.add_page(JOURNAL_PAGE, list(blocks))
     return double.install(monkeypatch)
@@ -329,7 +329,7 @@ class TestPartialWriteIsNamed:
     live graph: a malformed node is skipped silently while its siblings land).
     So LogseqAPI.insert_batch_block re-reads the place and compares the count,
     and the message has to name that partial state just as the per-block path
-    did (spec 030).
+    did.
     """
 
     def test_message_names_the_partial_state(self, monkeypatch, tmp_path):
@@ -418,8 +418,8 @@ class TestPartialWriteIsNamed:
     def test_heading_failure_is_not_reported_as_success(self, monkeypatch, tmp_path):
         """A heading Logseq did not create fails the command. It once fell
         back to writing the blocks at the top of the page, with a warning
-        (017 called that fallback a probe: "delete or test"; spec 030
-        deleted it)."""
+        (an earlier review called that fallback a probe: "delete or test";
+        it was deleted once every write was proven)."""
         double = _journal_double(monkeypatch, [])
         double.set_mode("appendBlockInPage", "noop")
         f = tmp_path / "top.md"

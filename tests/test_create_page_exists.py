@@ -95,19 +95,16 @@ class TestDryRun:
         assert payload["has_content"] is True
 
 
-# --- against the HTTP double: the proof in LogseqAPI.create_page (spec 030) --
+# --- against the HTTP double: the proof in LogseqAPI.create_page ------------
 
 def _double(monkeypatch, *pages):
     from tests.logseq_http_double import LogseqHttpDouble
-    double = LogseqHttpDouble()
-    for name in pages:
-        double.add_page(name, ["a block"])
-    return double.install(monkeypatch)
+    return LogseqHttpDouble.installed(monkeypatch, {name: ["a block"] for name in pages})
 
 
 def test_create_page_method_refuses_existing(monkeypatch):
     # Logseq answers createPage on a page that exists with that page and
-    # drops the properties sent (M5). The commands ask first; the method
+    # drops the properties sent (measured). The commands ask first; the method
     # refuses too, for a caller that did not.
     from logseq_cli.api import LogseqAPI, PageExists
     double = _double(monkeypatch, "Probe Page")
@@ -120,7 +117,7 @@ def test_create_page_method_refuses_existing(monkeypatch):
 
 
 def test_create_page_journal_answer_is_verified(monkeypatch):
-    # M14b: a new journal under the name format_journal_date gives it, the
+    # Measured: a new journal under the name format_journal_date gives it, the
     # weekday in lower case, answers the page with Logseq's own spelling.
     from logseq_cli.api import LogseqAPI
     _double(monkeypatch)
@@ -131,7 +128,7 @@ def test_create_page_journal_answer_is_verified(monkeypatch):
 
 
 def test_create_page_converts_journal_name(monkeypatch):
-    # M14: "Jan 1st, 2099" in a graph of another format is created under the
+    # Measured: "Jan 1st, 2099" in a graph of another format is created under the
     # graph's name and answered with null. create-page sends the graph's
     # name instead, in the preview, the write, --content and the output.
     from logseq_cli.dates import format_journal_date
@@ -200,7 +197,7 @@ def _invoke(double, args):
 # end dropped. It answers the page under that name, and getPage under the name
 # as sent finds nothing. A journal title Logseq takes as one whatever the
 # graph's format (MMM do, yyyy; yyyy-MM-dd; yyyy_MM_dd, date_time_util.cljs:
-# 15-19) becomes the journal under the graph's name, answered with null (M14).
+# 15-19) becomes the journal under the graph's name, answered with null (measured).
 
 @pytest.mark.parametrize("sent", ["[[Fresh Page]]", "#Fresh Page", "  Fresh Page ",
                                   "/Fresh Page/"])

@@ -46,13 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen, with no option against it (`editor.cljs:1998`; measured, 0.10.15:
   16–34 ms after it answered). With nobody typing, the agent locked itself
   out: its next write to its own block ended in `open_in_editor`. The CLI
-  now watches for that block for up to 100 ms after each batch and closes
-  the editor once it shows. On a page that is not on screen nothing opens
-  and the window runs full, 100 ms for each multi-block write. While a block
+  now watches for that block after each batch, ten pauses of 10 ms with a
+  question before, between and after them, and closes the editor once it
+  shows. On a page that is not on screen nothing opens and the window runs
+  full: about 115 ms for each multi-block write (a question takes 1.2 ms,
+  measured). While a block
   is open, a tree goes block by block with `focus: false` instead, and a
   write with `--keep-ids`, which only the batch can do (#31), is refused
   with `reason: "open_in_editor"` before anything is written. Only a block
-  of the batch is closed: one someone else enters within those 100 ms stays
+  of the batch is closed: one someone else enters within that window stays
   open, since Logseq does not save a block left while its last editor
   operation is the batch (`lifecycle.cljs:35-43`, `editor.cljs:2024`; read
   in the code, not measured). Should `checkEditing` give no usable answer
@@ -115,8 +117,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Logseq (measured, 0.10.15); they took lower case only and left it as a
   hole. One pattern now defines a Block Ref for every reader and writer.
 - `update-block`, `set-todo-status`, `set-block-property`,
-  `remove-property --id` and the `--property` option of `insert-block` and
-  `add-note-content` reported success for a write Logseq had not done.
+  `remove-property --id`, `add-journal-block --upsert-heading` and the
+  `--property` option of `insert-block` and `add-note-content` reported
+  success for a write Logseq had not done.
   `updateBlock`, `upsertBlockProperty` and `removeBlockProperty` answer
   `null` whether they wrote or not, for a uuid no block has too (measured,
   0.10.15). The three API methods now read the block back right after the
@@ -149,8 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Otherwise they fail with `reason: "write_not_verified"`. A deleted page
   that other pages name as their namespace (`Project` beside
   `Project/Alpha`) stays without blocks, as Logseq keeps it (measured,
-  0.10.15), and counts as deleted. A page other blocks link to is removed
-  whole (read in the code, not measured).
+  0.10.15), and counts as deleted. A page a block of another page links to
+  is removed whole (`page.cljs:352-371`; measured, 0.10.15).
 - Storing the id of a ref's target (#95, above) is read back too: each
   target must then hold `id` among its properties, or the write fails with
   `reason: "write_not_verified"`. Each stored id counts in `writes_landed`.
@@ -208,7 +211,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not tell a block open in the editor from a write Logseq ignored. The CLI
   counts the landed writes itself, one per write and a batch by its blocks,
   so no command has to keep its own count for the message. Exit status
-  stays 1.
+  stays 1. Checks of the input before the first write are unchanged: an
+  anchor that does not exist for `--tree` or `--keep-ids` still fails with
+  an `Error:` line, and `update-block` on an id no block has with an error
+  object without `reason`.
 - An insert Logseq answers without a block now fails with
   `reason: "write_not_verified"`. `insertBlock` and `appendBlockInPage`
   answer `null` for a write they did not do (an unknown anchor, a page not
@@ -237,7 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose blocks came out under other ids or in another place fails the same
   way. On a page with no blocks such a write goes after a stand-in block
   that is removed again; a stand-in that cannot be removed is now named in
-  the error of a batch that failed, instead of that error being lost.
+  the error of a batch that failed, instead of that error being lost, and
+  counts in `writes_landed`, while one that was removed does not.
 - `move-block` that Logseq did not carry out fails with
   `reason: "write_not_verified"` and `method: "moveBlock"`, where it failed
   with "Move of … did not take effect" and no reason under `--json`. The

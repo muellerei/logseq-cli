@@ -253,7 +253,7 @@ def test_every_path_passes_the_id_on(args):
 
 @pytest.mark.parametrize("args", HEADING_MISSING_CASES.values(), ids=HEADING_MISSING_CASES.keys())
 def test_a_heading_not_created_writes_no_id(args):
-    # The heading's append raises in the API (spec 030). The writers once
+    # The heading's append raises in the API. The writers once
     # fell back to the top of the page, id and all; now nothing follows.
     api = _fake()
     refused = _not_verified("appendBlockInPage", "Page A", "a new block",

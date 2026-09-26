@@ -81,7 +81,7 @@ class TestFindOrCreateHeading:
 
     def test_a_heading_logseq_did_not_create_raises(self, monkeypatch):
         """It answered None, and the callers wrote to the top of the page
-        instead; the API's proof raises now (spec 030)."""
+        instead; the API's proof raises now."""
         double = LogseqHttpDouble()
         double.add_page("test-page", ["body"])
         double.set_mode("appendBlockInPage", "noop")

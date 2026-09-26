@@ -116,7 +116,7 @@ class TestTemplateWithRegex:
 
 class TestEveryFailedBlockIsReported:
     """replace-text writes every replacement it can and names each block that
-    failed with its reason (spec 030): a block open in the editor refuses
+    failed with its reason: a block open in the editor refuses
     its own write, not the others."""
 
     def _run(self, monkeypatch, *, noop_from_call=None):

@@ -107,7 +107,7 @@ def handle_connection_error(func):
                 kind=e.kind,
             )
         except WriteRefused as e:
-            # A write refused or not proven (spec 030). The partial state
+            # A write refused or not proven. The partial state
             # comes from the API's count, not from the type: a refusal that
             # falls after writes of the same call landed (copy-block --remove
             # with its source open) must say so, and one raised outside the

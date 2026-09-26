@@ -623,8 +623,8 @@ class TestEveryWriteHasADryRun:
         decorator lines of the next function at the end of the previous one --
         73 bodies carry foreign trailing text that way. Today that changes
         nothing (both scans find the same 18 writers), but it only holds while
-        the neighbours stay put. Spec 001 moves every command into one of nine
-        modules, which reorders all of them.
+        the neighbours stay put. The split of cli.py into nine command
+        modules moved every command, which reordered all of them.
 
         ``func.__module__`` after unwrapping names the file that defines the
         command, which is why this survives the move -- and why
@@ -718,7 +718,7 @@ class TestEveryWriteHasADryRun:
         unnoticed — and a name dropped from the set here is how the scan would
         be taught to miss a command later. Equality also makes a genuinely new
         write command fail here, deliberately: it costs one line in this set,
-        next to the README row spec 007 already asks for.
+        next to the README row CONTRIBUTING.md already asks for.
         """
         found = set(self._writing_commands())
         assert found == self._KNOWN_WRITERS, (

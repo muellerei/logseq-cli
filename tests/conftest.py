@@ -42,8 +42,9 @@ def no_batch_editor_wait(monkeypatch):
     """Ask checkEditing once after a batch, without waiting.
 
     LogseqAPI waits up to 100 ms after each insertBatchBlock for the block
-    Logseq opens in its editor (M16). The doubles open it at once, so the
-    wait would only slow the suite. Tests of the wait set it themselves.
+    Logseq opens in its editor (measured: 16–34 ms). The doubles open it at
+    once, so the wait would only slow the suite. Tests of the wait set it
+    themselves.
     """
     from logseq_cli.api import LogseqAPI
     monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0)
@@ -129,7 +130,7 @@ class FakeGraph:
     """Minimal in-memory stand-in for the block graph.
 
     Stands in for LogseqAPI's block writes and reads, and answers the way the
-    methods do after their proofs (spec 030): ``insert_batch_block`` the new
+    methods do after their proofs: ``insert_batch_block`` the new
     uuids in DFS pre-order, counted in the owning mock's ``writes_landed``. A
     MagicMock answers every read with a MagicMock, which reads as "nothing
     arrived" and would make every success test fail for the wrong reason.

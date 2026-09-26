@@ -1,8 +1,8 @@
-"""rename-page refuses a new name that would merge or do nothing (spec 030, B6).
+"""rename-page refuses a new name that would merge or do nothing.
 
-Measured (M4): renamePage onto a name another page has merges the two, the
-source page gone and its blocks under the target; an empty name does
-nothing. Logseq answers null to both, and rename-page reported "Renamed".
+Measured (Logseq 0.10.15): renamePage onto a name another page has merges
+the two, the source page gone and its blocks under the target; an empty
+name does nothing. Logseq answers null to both, and rename-page reported "Renamed".
 A change of case only is a rename that works: the page keeps its uuid.
 
 The check is shared by the preview and the run, like check_move for
@@ -16,10 +16,6 @@ from logseq_cli.api import LogseqAPI
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
-
-
-def _spec(task):
-    return pytest.mark.xfail(strict=True, reason=f"spec 030: {task}")
 
 
 @pytest.fixture
@@ -100,7 +96,7 @@ def test_the_name_is_reported_as_sent(double, extra, as_json):
 
 @pytest.mark.parametrize("extra", [(), ("--dry-run",)], ids=["run", "dry-run"])
 def test_a_change_of_case_is_allowed(double, extra):
-    # M4: same uuid, originalName changes. Not a merge.
+    # Measured: same uuid, originalName changes. Not a merge.
     uuid = LogseqAPI(token="t").get_page("old page")["uuid"]
     r = _rename("OLD page", *extra)
     assert r.exit_code == 0, r.stderr

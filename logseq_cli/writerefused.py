@@ -1,4 +1,4 @@
-"""The ways a write can end without being done or proven (spec 030).
+"""The ways a write can end without being done or proven.
 
 Each type carries a ``reason`` for ``--json`` and the fields an agent needs
 to act on it; the error handler in ``output`` turns any of them into the
@@ -6,10 +6,11 @@ same error object. Not click.ClickException: under ``--json`` that prints
 neither JSON nor a reason (measured), so a block open in the editor and a
 write Logseq ignored would read the same.
 
-A module of its own, importing nothing from the package: ``api`` and
-``strictinsert`` raise these and ``output`` catches them. In ``api`` they
-would close an import cycle as soon as ``strictinsert`` raises one. ``api``
-imports the names, so ``from logseq_cli.api import WriteNotVerified`` works.
+A leaf module, importing nothing from the package: ``api`` and
+``strictinsert`` raise these and ``output`` catches them, and so
+``strictinsert`` and ``output`` depend on the error types, not on the HTTP
+client. ``api`` imports the names, so ``from logseq_cli.api import
+WriteNotVerified`` works.
 
 No type has a ``writes_landed`` field: the handler adds that from the API's
 own count, for every type alike, and a field of the same name would collide

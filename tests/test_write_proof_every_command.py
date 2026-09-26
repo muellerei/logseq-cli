@@ -1,10 +1,11 @@
-"""Every writing command proves its write, or says why it could not (spec 030).
+"""Every writing command proves its write, or says why it could not.
 
 Logseq answers every write method with ``null``, whether it wrote or not, and
-a thrown error with HTTP 200 and ``{"error": ...}`` (M1-M9). These tests run
-each writing command through the real ``LogseqAPI`` against the HTTP double
-and let one write method fail in one of those two ways: ``noop`` answers
-``null`` and writes nothing, ``error`` answers an error object. Every other
+a thrown error with HTTP 200 and ``{"error": ...}`` (measured, 0.10.15).
+These tests run each writing command through the real ``LogseqAPI`` against
+the HTTP double and let one write method fail in one of those two ways:
+``noop`` answers ``null`` and writes nothing, ``error`` answers an error
+object. Every other
 write executes. Either way the command must end with a non-zero exit and a
 ``reason`` an agent can act on, never with exit 0.
 
@@ -14,7 +15,7 @@ to Logseq), and each needs a row in ``ROWS``: a command without one fails
 ``test_argument_table_is_complete`` rather than going unchecked.
 
 A row names the write method it lets fail; every write method proves its
-write in ``LogseqAPI`` (spec 030), so no row is expected to fail.
+write in ``LogseqAPI``, so no row is expected to fail.
 """
 import json
 
@@ -132,9 +133,10 @@ ROWS = [
 ]
 
 # Requests each row's --dry-run sends, measured 2026-09-26 on fix/write-proof
-# before spec 030's first change (all of them reads). A proof read that slips
-# into the preview raises the count. Checks the preview shares with the run
-# are no proof and may add a read, each with its comment here.
+# before the first change for the write proofs (all of them reads). A proof
+# read that slips into the preview raises the count. Checks the preview
+# shares with the run are no proof and may add a read, each with its comment
+# here.
 DRY_RUN_READS = {
     "insert-block-page": 1,
     "insert-block-after": 0,
@@ -176,8 +178,8 @@ DRY_RUN_READS = {
     "remove-block": 2,
     "remove-property-id": 2,
     "remove-property-page": 3,
-    # One more than before 030-B6: rename_refusal reads the new name, a
-    # check the preview shares with the run, not a proof (spec 030, Baustein 3).
+    # One more than before the rename target check: rename_refusal reads the
+    # new name, a check the preview shares with the run, not a proof.
     "rename-page": 3,
     "replace-text": 2,
     "set-block-property": 2,
@@ -187,7 +189,7 @@ DRY_RUN_READS = {
     "update-block": 2,
 }
 
-# Methods that change no data (spec 030, Baustein 0: "Oberfläche").
+# Methods that change no data: they ask or change Logseq's editor.
 UI_METHODS = ("checkEditing", "exitEditingMode")
 
 
@@ -281,7 +283,7 @@ def test_a_write_logseq_did_not_do_fails_with_its_reason(monkeypatch, args, meth
 @pytest.mark.parametrize("method", sorted(_MUTATING_METHODS), ids=_short)
 def test_error_object_on_each_write_method(monkeypatch, method):
     """Logseq answers a write it threw on with HTTP 200 and ``{"error": ...}``
-    (M1, M2, M6, M9). call() raises for every write in the registry, not only
+    (measured). call() raises for every write in the registry, not only
     for those the table above reaches."""
     double = _graph().install(monkeypatch)
     double.set_mode(_short(method), "error")
@@ -313,7 +315,7 @@ def test_dry_run_sends_no_write_and_no_proof_read(monkeypatch, row_id, args):
     assert len(sent) == DRY_RUN_READS[row_id], sent
 
 
-# --- updateBlock, upsertBlockProperty, removeBlockProperty (030-C4) ---------
+# --- updateBlock, upsertBlockProperty, removeBlockProperty ------------------
 # The first four are guards against a false alarm, green without a proof too:
 # a proof that compared more than the text written would turn them red.
 
@@ -335,7 +337,8 @@ def test_update_block_with_properties_is_not_a_false_alarm(monkeypatch):
 
 
 def test_set_todo_status_with_logbook_is_not_a_false_alarm(monkeypatch):
-    # With time tracking on, TODO -> DOING appends a drawer (M11).
+    # With time tracking on, TODO -> DOING appends a drawer (read in the code,
+    # not measured).
     double = _one_page(monkeypatch, "TODO task one", time_tracking=True)
     r = _invoke(double, ["set-todo-status", "--id", "@TODO task one", "--status", "DOING"])
     assert r.exit_code == 0, r.stderr
@@ -354,7 +357,7 @@ def test_doing_to_done_with_existing_drawer_is_success(monkeypatch):
 
 
 def test_marker_change_without_drawer_is_success(monkeypatch):
-    # Time tracking off: read back is what was written (M11).
+    # Time tracking off: read back is what was written (measured).
     double = _one_page(monkeypatch, "TODO task one")
     for old, new in (("TODO", "DOING"), ("DOING", "DONE")):
         r = _invoke(double, ["set-todo-status", "--id", f"@{old} task one", "--status", new])
@@ -377,10 +380,10 @@ def test_update_block_that_loses_a_property_is_not_verified(monkeypatch):
 
 @pytest.mark.parametrize("key,value", [
     ("created_at", "x"),    # stored as created-at
-    ("n", 5),               # M6: a number as its digits
-    ("l", ["a", "b"]),      # M6: a list as a,b
-    ("z", "01234"),         # M6: stays text
-    ("link", "[[Link]]"),   # M6: stays text
+    ("n", 5),               # measured: a number as its digits
+    ("l", ["a", "b"]),      # measured: a list as a,b
+    ("z", "01234"),         # measured: stays text
+    ("link", "[[Link]]"),   # measured: stays text
 ])
 def test_property_value_forms(monkeypatch, key, value):
     double = _one_page(monkeypatch, "alpha block")
@@ -403,7 +406,7 @@ def test_property_value_is_compared_stripped(monkeypatch):
     lambda api, uuid: api.update_block(uuid, "text"),
 ], ids=["upsertBlockProperty", "removeBlockProperty", "updateBlock"])
 def test_property_write_on_unknown_uuid_is_not_verified(monkeypatch, write):
-    # Logseq answers null for a uuid no block has (M1, M6), and the property
+    # Logseq answers null for a uuid no block has (measured), and the property
     # reader finds no key there: "key gone" would be a false proof.
     from logseq_cli.api import WriteNotVerified
     _one_page(monkeypatch, "alpha block")
@@ -437,14 +440,14 @@ def test_set_property_the_page_does_not_show_is_not_verified(monkeypatch):
     assert (error["reason"], error["property"]) == ("write_not_verified", "status"), error
 
 
-# --- removeBlock, deletePage, renamePage, createPage, setBlocksId (030-C5) --
+# --- removeBlock, deletePage, renamePage, createPage, setBlocksId -----------
 
 @pytest.mark.parametrize("write,landed", [
     (lambda api, d: api.remove_block(d.uuid_of("alpha block")), 1),
     (lambda api, d: api.delete_page("Other Page"), 1),
     (lambda api, d: api.rename_page("Other Page", "Renamed Page"), 1),
     (lambda api, d: api.create_page("Fresh Page"), 1),
-    # One per block asked for (spec 030, Baustein 4).
+    # One per block asked for.
     (lambda api, d: api.set_blocks_id([d.uuid_of("alpha block"), d.uuid_of("other block")]), 2),
 ], ids=["removeBlock", "deletePage", "renamePage", "createPage", "setBlocksId"])
 def test_a_proven_write_counts(monkeypatch, write, landed):
@@ -455,11 +458,9 @@ def test_a_proven_write_counts(monkeypatch, write, landed):
 
 
 def _namespace_graph(monkeypatch):
-    double = LogseqHttpDouble()
-    double.add_page("Project", ["project notes"])
-    double.add_page("Project/Alpha", ["alpha notes"])
-    double.add_page("Loose Page", [])
-    return double.install(monkeypatch)
+    return LogseqHttpDouble.installed(monkeypatch, {"Project": ["project notes"],
+                                                    "Project/Alpha": ["alpha notes"],
+                                                    "Loose Page": []})
 
 
 def test_delete_of_a_namespace_page_is_proven(monkeypatch):
@@ -496,7 +497,7 @@ def test_delete_of_a_page_without_blocks_that_stayed_is_not_verified(monkeypatch
 def test_rename_by_case_only_is_proven_by_the_new_original_name(monkeypatch):
     # getPage finds the page under the new name before the rename as well
     # (names compare in lower case), so the uuid alone proves nothing here:
-    # the new originalName does (M4).
+    # the new originalName does (measured).
     double = _graph().install(monkeypatch)
     r = _invoke(double, ["rename-page", "--page", "Other Page", "--new-name", "OTHER page"])
     assert r.exit_code == 0, r.stderr
@@ -518,7 +519,7 @@ def test_rename_that_leaves_another_page_under_the_name_is_not_verified(monkeypa
 
 
 def test_set_blocks_id_skips_pre_block(monkeypatch):
-    # A page's property block is skipped by setBlocksId (M12); asked for it,
+    # A page's property block is skipped by setBlocksId (measured); asked for it,
     # the proof would fail a write whose ref Logseq keeps without the id.
     double = LogseqHttpDouble()
     double.add_page("Props Page", ["typ:: probe", "body"])

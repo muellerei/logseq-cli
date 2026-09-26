@@ -322,7 +322,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
     # update_block proves each write itself and raises if it cannot. The one
     # caller that catches: its contract is a report of every block, so a
     # block open in the editor, one Logseq threw on or one it did not write
-    # fails alone, and the others are still written (spec 030).
+    # fails alone, and the others are still written.
     reasons = {}
     if not dry_run:
         for r in replacements:
@@ -427,7 +427,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         ref = follow_page(api, page, as_json)
         alias = {"alias_of": ref.page} if ref.redirected else {}
         # A missing page is written under the name Logseq creates it with: a
-        # journal title in another format is the journal (M14).
+        # journal title in another format is the journal (measured).
         page, _ = page_to_write(api, ref.page)
 
     # --tree-file is --tree from a file; resolve it before any other validation

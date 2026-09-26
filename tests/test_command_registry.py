@@ -1,9 +1,9 @@
 """The Registry holds every Command Name, and this file says which ones.
 
-Spec 001 splits `cli.py` into nine command modules that `cli.py` imports by
-name. A module nobody imports registers nothing, and the failure is silent:
-the Registry is simply short a few Command Names and the CLI starts fine.
-The same is true of a second Command Name left behind when its Command moves.
+`cli.py` imports its nine command modules by name. A module nobody imports
+registers nothing, and the failure is silent: the Registry is simply short
+a few Command Names and the CLI starts fine. The same is true of a second
+Command Name left behind when its Command moves.
 
 `test_counters_sum_to_the_number_of_commands` in
 `tests/test_readme_documents_options.py` does go red on a missing module, but
@@ -17,7 +17,7 @@ trace to iterate over. A count would hold as long as nothing is added in the
 same commit, and when it failed it would not say which name went.
 
 The cost is a deliberate line here for every new Command Name, next to the
-README row and the CHANGELOG entry that spec 007 already asks for.
+README row and the CHANGELOG entry that CONTRIBUTING.md already asks for.
 
 One thing the registry assertion alone cannot do, measured rather than
 assumed: run on its own it goes red when a module drops out of the import

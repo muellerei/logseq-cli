@@ -201,7 +201,7 @@ class TestUpdateBlockKeepsProperties:
 
     def test_api_omits_the_option_when_there_is_nothing_to_keep(self, monkeypatch):
         """No properties -> plain two-arg call, same as before. Against the
-        HTTP double: update_block reads its write back (spec 030)."""
+        HTTP double: update_block reads its write back."""
         from logseq_cli.api import LogseqAPI
         from tests.logseq_http_double import LogseqHttpDouble
         double = LogseqHttpDouble()
