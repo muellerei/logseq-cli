@@ -14,6 +14,7 @@ from logseq_cli.api import BadResponseError, DatalogQueryError
 from logseq_cli.config import ConfigError
 from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.blocktext import IdLineError, SplitBlockError
+from logseq_cli.notes import hold_notes, release_notes, take_notes
 from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
 from logseq_cli.writerefused import WriteRefused, partial_state
 
@@ -60,10 +61,16 @@ def handle_connection_error(func):
     built by hand reports the module that defines *this* decorator instead, so
     once the commands live elsewhere the scan would look in the wrong file and
     find no writing command at all.
+
+    Under ``--json`` it also holds the command's notes (``notes.print_note``) until
+    the command ends: :func:`fail` puts them in the error object, and
+    otherwise they are printed at the end, after the result.
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         as_json = bool(kwargs.get("as_json"))
+        if as_json:
+            hold_notes()
         try:
             return func(*args, **kwargs)
         # The four failures of the connection can come after writes of the
@@ -179,14 +186,17 @@ def handle_connection_error(func):
                 as_json=as_json,
                 reason="invalid_property_key",
             )
+        finally:
+            # A failure through fail() took them; any other end prints them.
+            release_notes()
     return wrapper
 
 
 def note_alias(ref, as_json: bool) -> None:
     """Say on stderr that a name was an alias, in text mode only.
 
-    Under --json a result that names the page carries ``alias_of`` instead: a
-    note there could stand in front of a later error object and break its JSON.
+    Under --json a result that names the page carries ``alias_of`` instead,
+    and a note would say it twice.
     """
     if ref.redirected and not as_json:
         click.echo(f"Note: '{ref.requested}' is an alias of '{ref.page}'.", err=True)
@@ -252,10 +262,13 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
     object (``{"error": ..., ...fields}``) so agents can parse it structurally
     instead of scraping prose; without it, a plain ``Error: ...`` line.
 
-    ``fields`` adds context keys (e.g. ``id=...``, ``page=...``) to the JSON form.
+    ``fields`` adds context keys (e.g. ``id=...``, ``page=...``) to the JSON form,
+    and ``notes`` the notes held until then (``notes.print_note``), since a line of
+    its own in front of the object would make stderr no JSON.
     """
     if as_json:
-        payload = {"error": message, **fields}
+        notes = take_notes()
+        payload = {"error": message, **fields, **({"notes": notes} if notes else {})}
         click.echo(json.dumps(payload, indent=2, default=str), err=True)
     else:
         click.echo(f"Error: {message}", err=True)

@@ -14,6 +14,7 @@ from logseq_cli.dates import (
 )
 from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
+from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 
 
@@ -398,13 +399,12 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
     if repeating_excluded:
         # Named, not just counted: a bare number would leave the caller unable
         # to tell which commitments were left out of the answer.
-        click.echo(
+        print_note(
             f"⚠️  {len(repeating_excluded)} repeating task(s) excluded from the "
             f"due range — their repeat interval could not be read, so the next "
-            f"occurrence cannot be derived:",
-            err=True)
+            f"occurrence cannot be derived:")
         for t in repeating_excluded:
-            click.echo(f"     {t['content'][:70]} ({t['page']})", err=True)
+            print_note(f"     {t['content'][:70]} ({t['page']})")
 
     if as_json:
         payload = {"todos": todos, "count": len(todos)}
@@ -524,7 +524,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
                 block_id = ref_uuid
                 old_content = ref_block.get("content", "")
             else:
-                click.echo(f"Warning: referenced block {ref_uuid} not found, updating original.", err=True)
+                print_note(f"Warning: referenced block {ref_uuid} not found, updating original.")
 
     new_content = _swap_todo_marker(old_content, status)
     if new_content == old_content:

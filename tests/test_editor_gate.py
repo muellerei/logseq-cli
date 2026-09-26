@@ -84,9 +84,7 @@ def _assert_refused(double, write, open_uuid):
 
 
 def _error_object(result):
-    start = result.stderr.find("{")
-    assert start >= 0, f"no --json error object on stderr: {result.stderr!r}"
-    return json.loads(result.stderr[start:])
+    return json.loads(result.stderr)
 
 
 def _sent_options(double, method):

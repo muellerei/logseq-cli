@@ -12,6 +12,9 @@ What makes it scriptable:
   `reason` (see "A Write Refused or Not Proven"). Some come as a plain
   `Error:` line instead: errors from the command line itself and some input
   checks, such as an anchor or a block to move that does not exist
+- notes (`Note:`, a warning) go to stderr too; under `--json` they follow
+  the result, and a failure carries them in its error object as `notes`,
+  so its stderr stays one JSON object
 - exit 0 when the call did what it says, non-zero when it did not, including
   "not found"; the error says why. The number itself carries no meaning, so
   do not branch on 1 versus 2

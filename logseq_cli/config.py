@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import click
+from logseq_cli.notes import print_note
 
 try:  # Python 3.11+
     import tomllib
@@ -108,10 +108,9 @@ def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         # commands need none, and taking the whole CLI down over a stale
         # variable helps nobody. A command that does need a setting still
         # fails loudly through require(), naming the setting.
-        click.echo(
+        print_note(
             f"warning: {CONFIG_ENV_VAR} points at {candidates[0]}, "
             "which does not exist; continuing without a config file",
-            err=True,
         )
     return {}
 

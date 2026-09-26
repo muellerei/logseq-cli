@@ -34,6 +34,7 @@ logseq-cli/
 │   ├── headings.py     # Compare, find and add a heading on a page
 │   ├── ids.py          # id:: lines in written text: dropped with a note, or kept by --keep-ids
 │   ├── lookup.py       # Blocks by content, backlinks, incoming block refs, page text
+│   ├── notes.py        # Notes on stderr, held under --json until the command ends
 │   ├── outlinetext.py  # Indented outline text to a block tree, and back
 │   ├── output.py       # Results on stdout, failures on stderr, --json
 │   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under

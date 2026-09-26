@@ -202,6 +202,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check: the page or journal created first, the heading, or the parent
   block of a tree whose children then go as one batch. The message now
   names the writes that landed, from the same count as every refusal.
+- Under `--json` a command that printed a note on stderr and then failed
+  left stderr no JSON: the note stood in front of the error object. Every
+  write can be refused after its notes, so this was reachable from each
+  note a writing command prints first, such as the deprecation note of
+  `add-journal-entry`, a dropped `id::` line or "Hierarchical content
+  detected"; `get-journal-range` printed "showing N of M" before a
+  `partial_read` error. Under `--json` notes are now held until the
+  command ends: a failure carries them in its error object as `notes`,
+  and otherwise they are printed after the result. `get-backlinks`, which
+  dropped its fallback warning under `--json` for that reason, reports it
+  the same way now. Without `--json` nothing changes.
 
 ### Changed
 

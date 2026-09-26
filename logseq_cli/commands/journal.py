@@ -28,6 +28,7 @@ from logseq_cli.ids import (
     without_block_ids_noted,
 )
 from logseq_cli.lookup import get_page_content
+from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
     contains_hierarchical_content,
     count_blocks,
@@ -278,11 +279,10 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
     # Never truncate silently: a shortened result must not read as the full range.
     if omitted > 0:
         which = "newest" if tail is not None else "oldest"
-        click.echo(
+        print_note(
             f"Note: showing {len(entries)} of {total_days} journal day(s) "
             f"({which} {len(entries)}); {omitted} omitted. "
             f"Widen with --tail/--limit or drop the flag for the full range.",
-            err=True,
         )
 
     def _render(entries):
@@ -322,16 +322,15 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
     except LookupError as exc:
         fail(str(exc), as_json)
     if note:
-        click.echo(note, err=True)
+        print_note(note)
 
     # After the cap: the warning speaks about what is printed.
     if not resolve_refs:
         total_refs = sum(count_unresolved_refs(e.get("blocks", [])) for e in entries)
         if total_refs > 0:
-            click.echo(
+            print_note(
                 f"⚠️  {total_refs} unresolved block-ref(s) in output — "
                 f"re-run with --resolve-refs to inline them.",
-                err=True,
             )
 
     click.echo(_render(entries), nl=False)
@@ -363,7 +362,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
 
     Use --multi-block to split multi-line content into separate blocks.
     """
-    click.echo("Note: add-journal-entry is deprecated. Use add-journal-block instead (supports --under-heading).", err=True)
+    print_note("Note: add-journal-entry is deprecated. Use add-journal-block instead (supports --under-heading).")
     api = ctx.obj["api"]
 
     if date:
@@ -389,7 +388,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
         if not as_block:
             blocks = [block for block in blocks if block.strip()]
         require_text_besides_ids("\n".join(blocks))
-        click.echo(id_note, err=True)
+        print_note(id_note)
     note_quote_breaks([{"content": block} for block in blocks])
 
     # Before the journal page is created: the preview must not be the one run
@@ -564,8 +563,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         # is passed through, so a literal "## Log" keeps working. With no value
         # at all, the env var wins over the config's default_heading.
         under_heading = resolve_heading(load_config(), under_heading)
-        # Before the id note below, which would otherwise sit ahead of the
-        # refusal and break its JSON.
+        # Before the id note below, which would otherwise speak of text this
+        # refusal never writes.
         refuse_split_heading(under_heading, command="add-journal-block")
     # Before the journal page is looked up and created: that is a write. And
     # before the id note below, like the heading check.
@@ -595,7 +594,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                  "it replaces the matched block's text, which would be left empty. "
                  "Nothing was written.", as_json=as_json,
                  dropped_ids=collect_block_ids(blocks[:1]))
-        click.echo(note, err=True)
+        print_note(note)
 
     # For single content: unwrap to scalar for backward-compatible logic below
     if len(contents) == 1:
@@ -640,7 +639,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                         "would_create_page": would_create_page, "contents": list(contents), "dry_run": True}, True)
             else:
                 if any_hierarchical:
-                    click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
+                    print_note("Note: Hierarchical content detected, using structured insertion")
                 click.echo(f"[DRY RUN] Would add {planned_total} block(s) to journal: {page_name}")
             if would_create_page:
                 click.echo("  the journal page does not exist yet and would be created")
@@ -668,7 +667,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                 uuids.append(r["uuid"])
         total = len(uuids)
         if any_hierarchical:
-            click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
+            print_note("Note: Hierarchical content detected, using structured insertion")
 
         # The heading was found or written, or the command failed before
         # the blocks (#93).
@@ -756,7 +755,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # --content-file always takes this path: its flush "- " lines are roots,
     # which contains_hierarchical_content (indentation-based) would not detect.
     if tree is not None:
-        click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
+        print_note("Note: Hierarchical content detected, using structured insertion")
         n = count_blocks(tree)
         position = f"under '{under_heading}'" if under_heading else "top-level"
 
@@ -895,7 +894,7 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
     except BlockIdError as e:
         fail(str(e), as_json=as_json, **{e.field: e.ids})
     if note:
-        click.echo(note, err=True)
+        print_note(note)
         tree = tree_without_block_ids(tree)
         content = outline_text(tree)  # what the preview shows
 

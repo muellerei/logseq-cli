@@ -215,10 +215,10 @@ def _invoke(double, args, *extra):
 
 
 def _error_object(stderr):
-    """The --json error object on stderr, after any notes, or ``None``."""
-    start = stderr.find("{")
+    """The --json error object, all of stderr, or ``None``: a note printed
+    in front of it would make stderr no JSON (notes go in its ``notes``)."""
     try:
-        return json.loads(stderr[start:]) if start >= 0 else None
+        return json.loads(stderr)
     except json.JSONDecodeError:
         return None
 
