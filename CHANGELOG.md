@@ -216,8 +216,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a reason (measured: stdout empty, stderr `Error: …`), so an agent could
   not tell a block open in the editor from a write Logseq ignored. The CLI
   counts the landed writes itself, one per write and a batch by its blocks,
-  so no command has to keep its own count for the message. Exit status
-  stays 1. Checks of the input before the first write are unchanged: an
+  so no command has to keep its own count for the message. A failure of the
+  connection after writes of the call landed (`connection_refused`,
+  `timeout`, `bad_response`, `http_error`) names them the same way, and a
+  write sent and not yet proven when it came as `unproven_write`: it may
+  have landed. Before the first write these errors read as they did. Exit
+  status stays 1. Checks of the input before the first write are unchanged: an
   anchor that does not exist for `--tree` or `--keep-ids` still fails with
   an `Error:` line, and `update-block` on an id no block has with an error
   object without `reason`.

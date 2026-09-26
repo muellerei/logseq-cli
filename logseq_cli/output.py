@@ -18,6 +18,31 @@ from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page
 from logseq_cli.writerefused import WriteRefused, partial_state
 
 
+def _after_writes(message: str) -> tuple:
+    """``message`` and the fields for a failure of the connection, which can
+    come after writes of the same call landed, and between a write and its
+    proof: say both, as a refusal says the first. Nothing is added before
+    the first write, so a read or a first contact reads as it always did.
+
+    The counts come from the call's LogseqAPI, when the command has one."""
+    ctx = click.get_current_context(silent=True)
+    obj = ctx.obj if ctx is not None and isinstance(ctx.obj, dict) else {}
+    api = obj.get("api")
+    landed = getattr(api, "writes_landed", 0)
+    unproven = getattr(api, "write_unproven", None)
+    fields = {}
+    if unproven:
+        message = f"{message} Whether {unproven} landed is not known."
+        fields["unproven_write"] = unproven
+    if landed:
+        message = f"{message} {partial_state(landed)}"
+    elif unproven:
+        message = f"{message} No earlier write of this call landed."
+    if landed or unproven:
+        fields["writes_landed"] = landed
+    return message, fields
+
+
 def handle_connection_error(func):
     """Catch transport-level errors and report them like every other failure.
 
@@ -41,38 +66,35 @@ def handle_connection_error(func):
         as_json = bool(kwargs.get("as_json"))
         try:
             return func(*args, **kwargs)
+        # The four failures of the connection can come after writes of the
+        # call landed, or with one sent and not proven: _after_writes adds
+        # what a retry would meet.
         except requests.ConnectionError:
-            fail(
+            message, fields = _after_writes(
                 "Cannot connect to Logseq API. "
-                "Is Logseq running with the HTTP API enabled?",
-                as_json=as_json,
-                reason="connection_refused",
-            )
+                "Is Logseq running with the HTTP API enabled?")
+            fail(message, as_json=as_json, reason="connection_refused", **fields)
         except requests.Timeout:
             # A read that took longer than the request timeout. It used to be
             # a traceback, and a rare one, while scans swallowed read errors;
             # they reach the caller now (#93), so it gets a reason like the rest.
-            fail(
-                "Logseq did not answer in time.",
-                as_json=as_json,
-                reason="timeout",
-            )
+            message, fields = _after_writes("Logseq did not answer in time.")
+            fail(message, as_json=as_json, reason="timeout", **fields)
         except BadResponseError as e:
-            fail(
-                str(e),
-                as_json=as_json,
-                reason="bad_response",
-            )
+            message, fields = _after_writes(str(e))
+            fail(message, as_json=as_json, reason="bad_response", **fields)
         except requests.HTTPError as e:
             status = e.response.status_code
             hint = ("Check --token: Logseq rejected it." if status in (401, 403)
                     else None)
+            message, fields = _after_writes(f"HTTP {status} - {e.response.text}")
             fail(
-                f"HTTP {status} - {e.response.text}",
+                message,
                 as_json=as_json,
                 reason="http_error",
                 status_code=status,
                 **({"hint": hint} if hint else {}),
+                **fields,
             )
         except DatalogQueryError as e:
             # Not a transport error: the connection is healthy, Logseq rejected

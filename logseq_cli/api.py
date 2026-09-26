@@ -438,6 +438,10 @@ class LogseqAPI:
         # refusal reports: one instance per call (group.py), so the
         # count is the call's, and no command has to keep its own.
         self.writes_landed = 0
+        # The write sent and not yet proven, by its short name: a connection
+        # that fails before the proof holds leaves it unknown, and the error
+        # handler names it beside writes_landed. None between writes.
+        self.write_unproven = None
 
     def _cache_key(self, method, args):
         try:
@@ -550,7 +554,9 @@ class LogseqAPI:
         5. the write;
         6. prove it, through ``_prove_<proof>``, which answers the result the
            method returns; ``proof_args`` are what it compares with beyond
-           the target (a batch: what it sent, and its place as read before);
+           the target (a batch: what it sent, and its place as read before).
+           From the write until the proof holds or refuses, the write is
+           ``write_unproven``;
         7. ``count`` more writes landed (a batch counts its blocks): after
            the proof, so a write that fails it does not count. A batch that
            landed in part counts those blocks in its proof before it raises,
@@ -580,9 +586,16 @@ class LogseqAPI:
         # answer: it is the write into them, and the first write of all.
         if wanted:
             self.set_blocks_id(wanted, editing=editing)
-        result = self.call(method, args)
-        result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
-                                                        **(proof_args or {}))
+        self.write_unproven = method.rsplit(".", 1)[-1]
+        try:
+            result = self.call(method, args)
+            result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
+                                                            **(proof_args or {}))
+        except WriteRefused:
+            # Refused or not shown: the refusal says so, nothing is in doubt.
+            self.write_unproven = None
+            raise
+        self.write_unproven = None
         self.writes_landed += count
         return result
 

@@ -100,14 +100,16 @@ def mock_api(**overrides):
 
     On a bare MagicMock every call answers truthy: ``check_editing()`` would
     read as "a block is open", ``rename_refusal()`` as a refusal, and
-    ``writes_landed`` would be a Mock that neither counts nor serialises.
-    ``overrides`` set further attributes on the mock.
+    ``writes_landed`` and ``write_unproven`` would be Mocks, which the error
+    handler would print as writes that landed. ``overrides`` set further
+    attributes on the mock.
     """
     from unittest.mock import MagicMock
     api = MagicMock()
     api.check_editing.return_value = None
     api.rename_refusal.return_value = None
     api.writes_landed = 0
+    api.write_unproven = None
     for name, value in overrides.items():
         setattr(api, name, value)
     return api

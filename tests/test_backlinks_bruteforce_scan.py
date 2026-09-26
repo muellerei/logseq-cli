@@ -17,7 +17,7 @@ is matched literally, whatever characters it contains.
 
 import json
 import re
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -25,7 +25,7 @@ import requests
 from logseq_cli.cli import cli
 from logseq_cli.lookup import escape_regex, find_backlinks
 from logseq_cli.pagenames import PageRef
-from tests.conftest import split_runner
+from tests.conftest import mock_api, split_runner
 
 
 # Names that are legal Logseq page titles and also regex syntax. Each one is a
@@ -46,7 +46,7 @@ METACHARACTER_NAMES = [
 
 def _api(pages):
     """pages: {page name: page text}. get_page_blocks_tree answers one block."""
-    api = MagicMock()
+    api = mock_api()
     api.get_all_pages.return_value = [{"originalName": n} for n in pages]
 
     def _tree(name):
@@ -134,7 +134,7 @@ class TestBothWaysFailing:
     """
 
     def _api(self):
-        api = MagicMock()
+        api = mock_api()
         api.get_page.side_effect = lambda n: {"name": n.lower(), "originalName": n}
 
         def native(name):
