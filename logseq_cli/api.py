@@ -52,8 +52,7 @@ class Write:
     ``editor`` and ``proof`` name the ``LogseqAPI._gate_<editor>`` and
     ``_prove_<proof>`` methods the central write dispatches on (spec 030).
     Names rather than descriptions: a label nothing acts on can disagree
-    with the code. ``proof`` is ``None`` for a write whose proof still sits
-    with its callers (030-C*).
+    with the code.
 
     ``proof`` says how the write is shown to have landed:
 
@@ -67,6 +66,12 @@ class Write:
       properties sent along, which are read back as values.
     * ``property``: the block holds the key with the value sent.
     * ``no_property``: the block no longer holds the key.
+    * ``no_block``: no block is found under the uuid.
+    * ``no_page``: no page is found under the name, or one without blocks
+      that is the namespace of others.
+    * ``renamed``: the new name finds the page's uuid, spelt as sent.
+    * ``page``: the answer names a page, and the name sent finds that page.
+    * ``ids``: each block asked for holds ``id`` among its properties.
 
     Why each is proven the way it is: the note above ``_METHODS``.
 
@@ -89,7 +94,7 @@ class Write:
       (M10), so it neither asks nor refuses.
     """
     editor: str | None
-    proof: str | None
+    proof: str
 
 
 @dataclass(frozen=True)
@@ -130,8 +135,29 @@ class UI:
 #       no_property): stored_properties, never getBlock's map, which
 #       camel-cases the keys. The block is read first: for a uuid no block
 #       has the reader finds no key, which would pass as "removed".
-#   removeBlock (M2), deletePage (M3), renamePage (M4), createPage (M5,
-#       M14), setBlocksId (M12): their proof entries follow (030-C5).
+#   removeBlock  null on success and for a uuid no block has (M2). getBlock
+#       then finds none (no_block). A uuid that never had a block passes
+#       too: the commands read the block first, and strictinsert's stand-in
+#       was written a moment before.
+#   deletePage  null, for a missing page too (M3). getPage then finds none
+#       (no_page), or a page without blocks that others name as their
+#       namespace, which Logseq keeps (measured). A page other blocks link to
+#       is retracted whole (page.cljs:352-371, read in the code, not
+#       measured); a page named in another's alias:: is gone too (measured).
+#   renamePage  null (M4). The new name then finds the page's uuid, spelt
+#       as sent (renamed): the uuid alone would pass a change of case that
+#       did nothing, since getPage finds a page by its name in lower case.
+#   createPage  answers the page (M5), and null for a journal title in
+#       another format, which it creates under the graph's name (M14):
+#       create-page sends the graph's name. A page that exists comes back as
+#       it is, the properties sent dropped (M5), so it is refused before the
+#       write (PageExists). The answer's uuid must be the page getPage finds
+#       under the name sent (page): no names are compared here, since Logseq
+#       normalises them further than lower() does (NFC, pagenames.py). The
+#       properties in the answer are not read; the proof needs none.
+#   setBlocksId  null; it skips a page's property block (M12), which its
+#       caller leaves out. Each block asked for then shows id among its
+#       properties (ids).
 #
 # A read proves Logseq's database, not the file, which follows 1.8 s later
 # (M7); it reaches Logseq, not the cache, since every write clears the cache.
@@ -156,18 +182,18 @@ _METHODS = {
     "logseq.Editor.getAllPages": Read(cache=True),
     "logseq.App.getUserConfigs": Read(cache=True),
     "logseq.DB.datascriptQuery": Read(cache=True),
-    "logseq.Editor.createPage": Write(editor="never", proof=None),
-    "logseq.Editor.deletePage": Write(editor="page", proof=None),
-    "logseq.Editor.renamePage": Write(editor="page_or_link", proof=None),
+    "logseq.Editor.createPage": Write(editor="never", proof="page"),
+    "logseq.Editor.deletePage": Write(editor="page", proof="no_page"),
+    "logseq.Editor.renamePage": Write(editor="page_or_link", proof="renamed"),
     "logseq.Editor.appendBlockInPage": Write(editor="never", proof="uuid"),
     "logseq.Editor.insertBlock": Write(editor="never", proof="uuid"),
     "logseq.Editor.updateBlock": Write(editor="target", proof="text"),
-    "logseq.Editor.removeBlock": Write(editor="subtree", proof=None),
+    "logseq.Editor.removeBlock": Write(editor="subtree", proof="no_block"),
     "logseq.Editor.upsertBlockProperty": Write(editor="target", proof="property"),
     "logseq.Editor.removeBlockProperty": Write(editor="target", proof="no_property"),
     "logseq.Editor.insertBatchBlock": Write(editor="any", proof="batch"),
     "logseq.Editor.moveBlock": Write(editor="subtree", proof="move"),
-    "logseq.Editor.setBlocksId": Write(editor="requested", proof=None),
+    "logseq.Editor.setBlocksId": Write(editor="requested", proof="ids"),
     "logseq.Editor.checkEditing": UI(),
     "logseq.Editor.exitEditingMode": UI(),
 }
@@ -512,9 +538,9 @@ class LogseqAPI:
            method returns; ``proof_args`` are what it compares with beyond
            the target (a batch: what it sent, and its place as read before);
         7. ``count`` more writes landed (a batch counts its blocks): after
-           the proof, so a write that fails it does not count. A write with
-           no proof yet counts on Logseq's answer. A batch that landed in
-           part counts those blocks in its proof before it raises.
+           the proof, so a write that fails it does not count. A batch that
+           landed in part counts those blocks in its proof before it raises,
+           and so does setBlocksId.
 
         Asked before the ids are stored, not after: setBlocksId would
         otherwise write an id:: into a block for a write the gate then
@@ -523,10 +549,9 @@ class LogseqAPI:
         milliseconds in which someone can enter a block there stay (spec 030,
         named).
 
-        Step 6 is skipped for an entry whose ``proof`` is None, because the
-        entry says so (030-C*), not because a method is missing: a name with
-        no ``_prove_`` method behind it fails at the lookup instead of passing
-        as a check nobody made (and test_api_endpoint_binding names it).
+        A proof name with no ``_prove_`` method behind it fails at the lookup
+        instead of passing as a check nobody made (and
+        test_api_endpoint_binding names it).
         """
         kind = _METHODS[method]
         can_refuse = kind.editor not in (None, "never")
@@ -541,9 +566,8 @@ class LogseqAPI:
         if wanted:
             self.set_blocks_id(wanted, editing=editing)
         result = self.call(method, args)
-        if kind.proof is not None:
-            result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
-                                                            **(proof_args or {}))
+        result = getattr(self, f"_prove_{kind.proof}")(method, target, result,
+                                                        **(proof_args or {}))
         self.writes_landed += count
         return result
 
@@ -657,6 +681,69 @@ class LogseqAPI:
         if stored in values or stored in texts:
             got = texts.get(stored, values.get(stored))
             raise _not_verified(method, target, f"no {key}::", f"{key}:: {got}")
+        return result
+
+    def _prove_no_block(self, method, target, result):
+        """No block under ``target`` any more; its children went with it (M2)."""
+        if self.get_block(target, include_children=False):
+            raise _not_verified(method, target, "no block", "the block still there")
+        return result
+
+    def _prove_no_page(self, method, target, result):
+        """No page under the name ``target`` any more (M3), or one Logseq
+        keeps because other pages name it as their namespace: delete! then
+        removes its blocks and file and leaves the page (page.cljs:352-371;
+        measured, 0.10.15: getPage answers it, getPageBlocksTree ``[]``).
+        Without blocks alone is not enough: a page that had none and was not
+        deleted would pass."""
+        page = self.get_page(target)
+        if page and (self.get_page_blocks_tree(target) or not self._is_namespace(page)):
+            raise _not_verified(method, target, "no page", "the page still there")
+        return result
+
+    def _is_namespace(self, page) -> bool:
+        """Whether another page has ``page`` as its namespace (X for X/Y)."""
+        uuid = page.get("uuid") if isinstance(page, dict) else None
+        if not uuid:
+            return False
+        return bool(self.datascript_query(
+            f'[:find ?c :where [?p :block/uuid #uuid "{uuid}"] [?c :block/namespace ?p]]'))
+
+    def _prove_renamed(self, method, target, result, *, uuid, name):
+        """``name`` finds the page ``uuid``, and ``originalName`` is ``name``."""
+        page = self.get_page(name)
+        if not isinstance(page, dict):
+            got = "no page"
+        elif page.get("uuid") != uuid:
+            got = "another page"
+        elif page.get("originalName") != name:
+            got = f"it named {page.get('originalName')!r}"
+        else:
+            return result
+        raise _not_verified(method, target, f"it named {name!r}", got)
+
+    def _prove_page(self, method, target, result):
+        """The answer names a page, and getPage under the name sent finds the
+        same one; how the name resolves is left to Logseq."""
+        uuid = result.get("uuid") if isinstance(result, dict) else None
+        if not uuid:
+            raise _not_verified(method, target, "the new page", "no page uuid in the answer")
+        page = self.get_page(target)
+        found = page.get("uuid") if isinstance(page, dict) else None
+        if found != uuid:
+            raise _not_verified(method, target, f"page {uuid}",
+                                f"page {found}" if found else "no page")
+        return result
+
+    def _prove_ids(self, method, target, result):
+        """Each block of ``target`` holds ``id`` among its properties. Those
+        that do stay so, and count before the refusal."""
+        missing = [u for u in target
+                   if not ((self.get_block(u, include_children=False) or {})
+                           .get("properties") or {}).get("id")]
+        if missing:
+            self.writes_landed += len(target) - len(missing)
+            raise _not_verified(method, missing[0], "id:: among its properties", "none")
         return result
 
     def _block_to_prove(self, method, target, expected) -> dict:
@@ -857,7 +944,19 @@ class LogseqAPI:
         for a caller that writes right after: otherwise the page starts with
         an empty block. A page created without a first block and without
         text gets no file (measured), so a caller that writes nothing keeps it.
+
+        Raises PageExists for a page that exists, before anything is sent,
+        and WriteNotVerified unless the new page shows (``_prove_page``).
         """
+        # Logseq answers createPage on a page that exists with that page, the
+        # properties sent dropped (M5). The commands ask first and refuse with
+        # their own advice; this holds for a caller that did not.
+        if self.get_page(page_name):
+            raise PageExists(
+                f"Page '{page_name}' already exists; createPage would leave it as it "
+                "is and drop the properties sent.",
+                page=page_name,
+            )
         # Without redirect: false, Logseq turns its view to the new page (M13,
         # spec 030) -- every page and journal the CLI created moved the view.
         options = {"redirect": False}
@@ -1023,6 +1122,8 @@ class LogseqAPI:
         property write on the target drops it from the file (measured,
         0.10.15). A page uuid, a dead ref and a target that has its id are
         left alone, as is ``own``: the block being written replaces its text.
+        So is a page's property block: setBlocksId skips it (M12), and its
+        proof would fail a write whose ref is written all the same.
 
         Before the write, not after: then Logseq adds no column-0 line at all
         (measured), and updateBlock and insertBatchBlock answer null either
@@ -1034,7 +1135,8 @@ class LogseqAPI:
             if uuid == (own or "").lower():
                 continue
             block = self.get_block(uuid, include_children=False)
-            if block and block.get("page") and not (block.get("properties") or {}).get("id"):
+            if block and block.get("page") and not (block.get("properties") or {}).get("id") \
+                    and not block.get("preBlock?"):
                 wanted.append(block["uuid"])
         return wanted
 
@@ -1047,11 +1149,14 @@ class LogseqAPI:
 
         ``editing`` is checkEditing's answer when the caller has it already
         (_write, before the write whose refs these are), so it is not asked
-        twice."""
+        twice. Raises WriteNotVerified unless each block then holds its id
+        (``_prove_ids``); counts one write per block."""
         return self._write("logseq.Editor.setBlocksId", [block_uuids], target=block_uuids,
-                           editing=editing)
+                           editing=editing, count=len(block_uuids))
 
     def remove_block(self, block_uuid: str):
+        """Remove a block with its children; raises WriteNotVerified unless
+        getBlock then finds none (``_prove_no_block``)."""
         return self._write("logseq.Editor.removeBlock", [block_uuid], target=block_uuid)
 
     def get_page_linked_references(self, page_name: str):
@@ -1098,15 +1203,21 @@ class LogseqAPI:
     def rename_page(self, old_name: str, new_name: str):
         """Rename a page; the new name is sent stripped.
 
-        Raises RenameRefused before anything is sent, see rename_refusal."""
+        Raises RenameRefused before anything is sent, see rename_refusal, and
+        WriteNotVerified unless the new name then finds the page, spelt as
+        sent (``_prove_renamed``)."""
         why = self.rename_refusal(old_name, new_name)
         if why:
             raise rename_refused(old_name, new_name, why)
-        return self._write("logseq.Editor.renamePage", [old_name, new_name.strip()],
-                           target=old_name)
+        page = self.get_page(old_name)
+        name = new_name.strip()
+        return self._write("logseq.Editor.renamePage", [old_name, name], target=old_name,
+                           proof_args={"uuid": page.get("uuid") if isinstance(page, dict) else None,
+                                       "name": name})
 
     def delete_page(self, page_name: str):
-        """Delete a page."""
+        """Delete a page; raises WriteNotVerified unless getPage then finds
+        none (``_prove_no_page``)."""
         return self._write("logseq.Editor.deletePage", [page_name], target=page_name)
 
     def get_user_configs(self):

@@ -62,8 +62,13 @@ def _api():
     # proof (spec 030), its text through getBlock, its properties through
     # the datascript pull.
     own = {"content": BLOCKS[OWN]["content"], "texts": {}}
+    # The blocks setBlocksId was asked for: its proof reads their id back.
+    stored = set()
 
     def call(method, args=None):
+        if method == "logseq.Editor.setBlocksId":
+            stored.update(args[0])
+            return None
         if method == "logseq.Editor.insertBatchBlock":
             batches.extend(args[1])
             return None
@@ -81,6 +86,8 @@ def _api():
             return [[{"properties": texts, "properties-text-values": texts} if texts else None]]
         if method == "logseq.Editor.getBlock":
             block = BLOCKS.get(args[0].lower())
+            if block and args[0].lower() in stored:
+                block = {**block, "properties": {"id": block["uuid"]}}
             if block and args[0].lower() == OWN:
                 block = {**block, "content": own["content"]}
                 if batches:

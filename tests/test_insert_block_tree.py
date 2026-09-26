@@ -658,12 +658,12 @@ class TestTheStandInIsReported:
 
     ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 
-    def _run(self, monkeypatch, *, batch):
+    def _run(self, monkeypatch, *, batch, removal="error"):
         double = LogseqHttpDouble()
         double.add_page("Empty", [])
         if batch:
             double.set_mode("insertBatchBlock", batch)
-        double.set_mode("removeBlock", "error")
+        double.set_mode("removeBlock", removal)
         double.install(monkeypatch)
         r = split_runner().invoke(cli, [
             "--token", "t", "add-note-content", "--page", "Empty", "--content",
@@ -679,6 +679,17 @@ class TestTheStandInIsReported:
         assert f"stand-in block {stand_in[:8]}..." in error["error"]
         assert "removeBlock failed" in error["error"]
         # The stand-in landed and stays.
+        assert error["writes_landed"] == 1
+
+    def test_stand_in_removal_not_shown_does_not_hide_batch_error(self, monkeypatch):
+        # removeBlock proves itself: a removal Logseq answered null for and
+        # did not do is added to the batch's error like an error object.
+        double, r = self._run(monkeypatch, batch="noop", removal="noop")
+        error = _json.loads(r.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        stand_in = double.sent("removeBlock")[0][0]
+        assert f"stand-in block {stand_in[:8]}... written for the batch stayed too: " \
+               "removeBlock on block" in error["error"]
         assert error["writes_landed"] == 1
 
     def test_a_stand_in_left_after_a_batch_that_landed_is_reported(self, monkeypatch):

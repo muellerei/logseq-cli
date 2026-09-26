@@ -12,6 +12,7 @@ from logseq_cli.blockprops import (
 )
 from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.cliinput import content_or_file
+from logseq_cli.dates import format_journal_date, parse_journal_name
 from logseq_cli.group import cli
 from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
 from logseq_cli.ids import (
@@ -529,6 +530,16 @@ def create_page(ctx, page, content, as_json, dry_run):
     """Create a new page, optionally with initial content."""
     api = ctx.obj["api"]
 
+    # A journal title in another format than the graph's is created under the
+    # graph's name, and createPage then answers null (M14, spec 030), which
+    # the proof cannot tell from nothing written. So such a name is sent as
+    # the graph spells it, and the same name serves the check below, the
+    # preview, the write, --content and the output.
+    day = parse_journal_name(page)
+    if day is not None:
+        configs = api.get_user_configs()
+        page = format_journal_date(day, configs.get("preferredDateFormat") if configs else None)
+
     # Logseq answers createPage for an existing page with that page, so the
     # call alone cannot tell "created" from "was already there" — the command
     # reported success either way, and --content went on to append to the page
@@ -586,7 +597,8 @@ def create_page(ctx, page, content, as_json, dry_run):
              **ref.fields())
     if exists:
         fail(f"Page '{page}' already exists. Use add-note-content to add to it, "
-             "or delete-page first.", as_json=as_json, page=page, exists=True)
+             "or delete-page first.", as_json=as_json, reason="page_exists",
+             page=page, exists=True)
 
     # Logseq tells a journal by its name (M18). Without text, the first block
     # stays: a page with neither gets no file and is lost on a re-index.

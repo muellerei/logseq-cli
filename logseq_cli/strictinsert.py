@@ -341,8 +341,7 @@ def _remove_stand_in(api, stand_in: str, failed: Exception) -> None:
     """Remove the stand-in after the batch raised ``failed``; a refusal of
     the removal is added to ``failed``'s message rather than raised over it,
     which would hide why the batch failed. Any WriteRefused: the removal can
-    meet an error object, an open editor, and once removeBlock proves itself
-    (030-C5) a removal that did not show."""
+    meet an error object, an open editor, or a removal that did not show."""
     try:
         api.remove_block(stand_in)
     except WriteRefused as refused:

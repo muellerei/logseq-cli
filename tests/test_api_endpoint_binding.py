@@ -214,23 +214,8 @@ def test_ui_call_neither_caches_nor_clears(method):
     assert list(api._cache) == [kept]
 
 
-# The task that gives each write its proof completes its entry; the gate
-# rules come earlier (030-B3), so the proof decides when a case turns green.
-# A write missing here has its proof.
-_PROOF_TASK = {
-    "logseq.Editor.removeBlock": "030-C5",
-    "logseq.Editor.deletePage": "030-C5",
-    "logseq.Editor.renamePage": "030-C5",
-    "logseq.Editor.createPage": "030-C5",
-    "logseq.Editor.setBlocksId": "030-C5",
-}
-
-
-@pytest.mark.parametrize("method", [
-    pytest.param(m, marks=[pytest.mark.xfail(
-        strict=True, reason=f"spec 030: {_PROOF_TASK[m]}")] if m in _PROOF_TASK else [])
-    for m in sorted(m for m, kind in _METHODS.items() if isinstance(kind, Write))
-])
+@pytest.mark.parametrize(
+    "method", sorted(m for m, kind in _METHODS.items() if isinstance(kind, Write)))
 def test_every_write_has_rule_and_proof(method):
     """Each write names its editor rule and its proof, and both exist.
 
