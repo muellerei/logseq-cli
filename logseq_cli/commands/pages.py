@@ -536,7 +536,7 @@ def create_page(ctx, page, content, as_json, dry_run):
     api = ctx.obj["api"]
 
     # The name Logseq creates the page under: [[X]] makes X, a journal title
-    # in another format the journal under the graph's name (M14, spec 030).
+    # in another format the journal under the graph's name (measured, 0.10.15).
     # The same name serves the check below, the preview, the write,
     # --content and the output.
     page = page_name_to_create(api, page)
@@ -601,7 +601,7 @@ def create_page(ctx, page, content, as_json, dry_run):
              "or delete-page first.", as_json=as_json, reason="page_exists",
              page=page, exists=True)
 
-    # Logseq tells a journal by its name (M18). Without text, the first block
+    # Logseq tells a journal by its name (measured). Without text, the first block
     # stays: a page with neither gets no file and is lost on a re-index.
     result = api.create_page(page, first_block=content is None)
 

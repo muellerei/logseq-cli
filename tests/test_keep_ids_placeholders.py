@@ -166,7 +166,7 @@ class TestPositionsTheBatchCannotTakeDirectly:
 
     def test_a_fresh_page_holds_only_what_was_written(self):
         """The page is created without a first block, since the write follows
-        at once (M18); the stand-in that took the batch is gone again."""
+        at once (measured); the stand-in that took the batch is gone again."""
         graph = _graph()
         result, _ = _run(["add-note-content", "--page", "New Page", "--content", TOP,
                           "--keep-ids"], graph)
@@ -187,15 +187,14 @@ class TestTheWriteIsProven:
 
     @staticmethod
     def _double(monkeypatch, *, noop_from):
-        """The real LogseqAPI, whose insert_batch_block proves the batch
-        (spec 030), against a Logseq whose batches from call ``noop_from`` on
+        """The real LogseqAPI, whose insert_batch_block proves the batch,
+        against a Logseq whose batches from call ``noop_from`` on
         answer null and write nothing."""
-        double = LogseqHttpDouble()
-        double.add_page("Page A", ["first"])
-        double.add_page("2026-01-05, Monday",
-                        [{"content": "## Log", "children": ["earlier entry"]}])
-        double.set_mode("insertBatchBlock", "noop", from_call=noop_from)
-        return double.install(monkeypatch)
+        return LogseqHttpDouble.installed(
+            monkeypatch,
+            {"Page A": ["first"],
+             "2026-01-05, Monday": [{"content": "## Log", "children": ["earlier entry"]}]},
+            modes={"insertBatchBlock": "noop"}, from_call=noop_from)
 
     def test_a_batch_that_wrote_nothing_fails(self, monkeypatch):
         double = self._double(monkeypatch, noop_from=1)
@@ -205,7 +204,7 @@ class TestTheWriteIsProven:
         assert result.exit_code == 1
         error = json.loads(result.stderr)
         assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
-        assert (error["expected"], error["got"], error["writes_landed"]) == ("1 blocks", "0", 0)
+        assert (error["expected"], error["got"], error["writes_landed"]) == ("1 block", "0", 0)
 
     def test_a_batch_that_minted_new_ids_fails(self):
         def drop_keep(real, a, n, o):
@@ -264,7 +263,7 @@ class TestTargets:
     def test_a_missing_page_is_created_without_an_empty_block(self):
         """appendBlockInPage creates a missing page and writes to it; the
         restore creates it too, without a first block, since it writes at
-        once (M18)."""
+        once (measured)."""
         graph = _graph()
         result, _ = _run(["insert-block", "--page", "Nowhere Yet", "--content", TOP,
                           "--keep-ids"], graph)

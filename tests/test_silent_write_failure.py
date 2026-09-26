@@ -26,12 +26,10 @@ TREE = [{"content": "Head", "children": [{"content": "Detail"}]}]
 
 def _null_answering(monkeypatch, method):
     """The real LogseqAPI against a Logseq that answers ``method`` with null
-    and writes nothing: the proof sits in the API method (spec 030), which a
+    and writes nothing: the proof sits in the API method, which a
     method mock would replace."""
-    double = LogseqHttpDouble()
-    double.add_page("Page One", ["parent block"])
-    double.set_mode(method, "noop")
-    double.install(monkeypatch)
+    double = LogseqHttpDouble.installed(monkeypatch, {"Page One": ["parent block"]},
+                                        modes={method: "noop"})
     return LogseqAPI(token="t"), double
 
 
@@ -56,7 +54,7 @@ class TestHelperDefaults:
 
     def test_batch_partial_write_is_detected_and_named(self, monkeypatch):
         """A batch can write part of its nodes; the method's count catches it,
-        and counts what landed for the message (spec 030)."""
+        and counts what landed for the message."""
         double = LogseqHttpDouble()
         double.add_page("Page One", ["parent block"])
         real = double._handlers["logseq.Editor.insertBatchBlock"]

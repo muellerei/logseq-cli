@@ -61,7 +61,7 @@ def find_or_create_heading(api, page_name: str, heading: str) -> str:
 
     Returns the UUID of the heading block. A heading Logseq does not create
     raises WriteNotVerified from the API; the callers once wrote to the top of
-    the page instead, with a warning (removed in spec 030).
+    the page instead, with a warning (removed once every write was proven).
     """
     found = find_heading(api, page_name, heading)
     if found:

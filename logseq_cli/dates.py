@@ -43,7 +43,7 @@ def parse_date_keyword(date_str: str) -> datetime.date:
 # besides the graph's own: "MMM do, yyyy", "yyyy-MM-dd" and "yyyy_MM_dd"
 # (safe-journal-title-formatters, date_time_util.cljs:15-19; read in the
 # code). Logseq creates a page of such a name as the journal under the
-# graph's name, and answers createPage with null (M14, measured for
+# graph's name, and answers createPage with null (measured for
 # "Jan 1st, 2099"). Matched against the name stripped and in lower case, as
 # Logseq capitalises it before parsing.
 _JOURNAL_NAMES = [
@@ -59,7 +59,7 @@ def parse_journal_name(name: str) -> datetime.date | None:
     (``2099-02-30``, a month ``foo``).
 
     A name in the graph's own format needs no such reading: Logseq creates
-    and answers it under that name (M14b). For
+    and answers it under that name (measured). For
     ``pagenames.page_name_to_create``, which sends such a title under the
     graph's name.
     """

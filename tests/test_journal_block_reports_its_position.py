@@ -6,7 +6,7 @@ journal writers fell back to the top of the page, warned, and said so in
 reported `under '<heading>'`, so the output named a place the blocks were
 not (#93).
 
-Since spec 030 the fallback is gone: a heading Logseq does not create fails
+Now the fallback is gone: a heading Logseq does not create fails
 the command in the API's proof, before any block is written. So no position
 is reported that the blocks do not have, on either path.
 """

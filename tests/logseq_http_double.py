@@ -2,15 +2,14 @@
 
 The test suite mostly replaces ``LogseqAPI`` method by method (``FakeGraph``,
 ``PageGraph``, ``MagicMock``). Whatever ``LogseqAPI`` does inside its methods,
-the editor gate and the proof of each write (spec 030), is invisible there.
+the editor gate and the proof of each write, is invisible there.
 This double sits one level lower: it stands in for ``requests.post`` and
 answers each JSON-RPC request ``{method, args}`` from a small graph, so the
 real ``LogseqAPI`` runs in full.
 
-Every answer form below was measured against Logseq 0.10.15 and carries its
-number from the measurement table of spec 030 (M1–M18; raw data under
-``local/specs/030-skripte/``). A form that was not measured says so, with
-the source it follows. A double that answers more kindly than Logseq would
+Every answer form below was measured against Logseq 0.10.15, unless it says
+otherwise: a form that was not measured says so, with the source it
+follows. A double that answers more kindly than Logseq would
 let a proof pass that Logseq fails, which is the one thing it must not do.
 
 Switches, all on the instance:
@@ -27,7 +26,7 @@ Switches, all on the instance:
 * ``show_page(name)``: the page is on screen, so an insert opens a block.
 * ``batch_opens_after_checks``: after a batch on a visible page, how many
   ``checkEditing`` requests still answer ``false`` before the opened block
-  shows. Logseq opens it asynchronously, 16–34 ms after answering (M16);
+  shows. Logseq opens it asynchronously, 16–34 ms after answering (three runs);
   0, the default, opens it at once.
 * ``time_tracking``: Logseq's time tracking, off as in the measured graph.
 
@@ -53,7 +52,7 @@ WRITES = frozenset({
 MODES = ("execute", "noop", "error")
 CHECK_EDITING_FORMS = ("raw", "json", "empty", "error", "ok1", "timeout")
 
-# M1, M2, M6: these four check the uuid before anything else, in every mode.
+# These four check the uuid before anything else, in every mode.
 _UUID_CHECKED = frozenset({"updateBlock", "removeBlock", "upsertBlockProperty",
                            "removeBlockProperty"})
 
@@ -64,14 +63,14 @@ _TAG = re.compile(r"(?:^|(?<=\s))#([^\s#\[\],]+)")
 _BLOCK_REF = re.compile(r"\(\(([0-9a-fA-F-]{36})\)\)")
 _MARKERS = ("TODO", "DOING", "DONE", "LATER", "NOW", "WAITING", "CANCELED", "CANCELLED")
 
-# M14: the date format of the measured graph.
+# The date format of the measured graph.
 DATE_FORMAT = "yyyy-MM-dd, EEEE"
 # The journal titles Logseq takes as such whatever the graph's format, besides
 # the graph's own (safe-journal-title-formatters, date_time_util.cljs:15-19,
-# read in the code). Only "MMM do, yyyy" was measured (M14: "Jan 1st, 2099").
+# read in the code). Only "MMM do, yyyy" was measured (with "Jan 1st, 2099").
 _OTHER_JOURNAL_FORMATS = ("MMM do, yyyy", "yyyy-MM-dd", "yyyy_MM_dd")
 
-# Assumed, not measured (time tracking is off in the measured graph, M11):
+# Assumed, not measured (time tracking is off in the measured graph):
 # the clock lines as upstream util/clock.cljs:75-93 writes them, at a fixed
 # time so a test can spell them out.
 CLOCK_IN = "CLOCK: [2026-09-26 Sat 14:00]"
@@ -87,7 +86,7 @@ class Response:
     """What ``requests.post`` hands back, as far as the client reads it.
 
     Always HTTP 200: Logseq answers a failure with 200 and an error object in
-    the body (M1–M9).
+    the body.
     """
 
     def __init__(self, text):
@@ -98,7 +97,8 @@ class Response:
         try:
             return json.loads(self.text)
         except json.JSONDecodeError as e:
-            # What requests raises, and what api.call catches (M8: raw text).
+            # What requests raises, and what api.call catches (checkEditing
+            # answers raw text).
             raise requests.exceptions.JSONDecodeError(e.msg, e.doc, e.pos) from None
 
     def raise_for_status(self):
@@ -141,14 +141,14 @@ def _stored_key(key: str) -> str:
 
 
 def _camel(key: str) -> str:
-    """M1: the plugin API camel-cases keys on the way out (created-at →
+    """The plugin API camel-cases keys on the way out (created-at →
     createdAt, due-date → dueDate)."""
     head, *rest = key.split("-")
     return head + "".join(p[:1].upper() + p[1:] for p in rest)
 
 
 def _value_text(value) -> str:
-    """M6: a list is written as a,b, a number as itself."""
+    """A list is written as a,b, a number as itself."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
@@ -159,7 +159,7 @@ def _value_text(value) -> str:
 def _parse_value(key: str, text: str):
     """The value Logseq's parser makes of a property's text.
 
-    M6: a whole number becomes a number, "01234" and "[[Link]]" stay text.
+    A whole number becomes a number, "01234" and "[[Link]]" stay text.
     ``tags`` and ``alias`` hold page names (tests/test_stored_property_keys.py).
     """
     if key in ("tags", "alias"):
@@ -200,7 +200,7 @@ def _marker(content: str):
 
 def _page_names(content: str, texts: dict) -> list:
     """Page names ``content`` refers to: [[Name]], #Name, tags::/alias::
-    values (M15: all three count alike)."""
+    values (all three count alike)."""
     names = _PAGE_LINK.findall(content) + _TAG.findall(content)
     for key in ("tags", "alias"):
         if key in texts:
@@ -332,6 +332,18 @@ class LogseqHttpDouble:
         }
 
     # --- switches and inspection -------------------------------------------
+    @classmethod
+    def installed(cls, monkeypatch, pages=None, *, modes=None, from_call=1):
+        """A double with ``pages`` (``{name: blocks}``, as ``add_page`` takes
+        them) and ``modes`` (``{method: mode}``, each from ``from_call`` on),
+        standing in for ``requests.post``: the set-up most tests repeat."""
+        double = cls()
+        for name, blocks in (pages or {}).items():
+            double.add_page(name, blocks)
+        for method, mode in (modes or {}).items():
+            double.set_mode(method, mode, from_call=from_call)
+        return double.install(monkeypatch)
+
     def install(self, monkeypatch):
         """Stand in for ``requests.post`` in logseq_cli.api for this test.
 
@@ -349,7 +361,7 @@ class LogseqHttpDouble:
         self._modes[method] = (mode, from_call)
 
     def show_page(self, name):
-        """Put the page on screen: Logseq then opens an inserted block (M10, M16)."""
+        """Put the page on screen: Logseq then opens an inserted block."""
         self._visible.add(self._require_page(name)["id"])
 
     def sent(self, method: str) -> list:
@@ -380,7 +392,7 @@ class LogseqHttpDouble:
     # --- building ----------------------------------------------------------
     def add_page(self, name, blocks=()):
         """A page as a file read in makes it: a first block holding only
-        property lines is its property block (M12). ``blocks`` are texts or
+        property lines is its property block. ``blocks`` are texts or
         ``{"content", "children", "uuid"}``. Returns the page."""
         page = self._new_page(name, [self._build(b) for b in blocks])
         self._settle(page)
@@ -413,7 +425,7 @@ class LogseqHttpDouble:
     def _new_page(self, name, blocks):
         day = _parse_date(name, self.date_format)
         page = {"id": self._fresh_id(), "uuid": self._fresh_uuid(),
-                # M14b: a journal's title is Logseq's own spelling of the date.
+                # A journal's title is Logseq's own spelling of the date.
                 "name": _format_date(day, self.date_format) if day else name,
                 "blocks": blocks, "props": {},
                 "journal_day": int(day.strftime("%Y%m%d")) if day else None}
@@ -421,7 +433,7 @@ class LogseqHttpDouble:
         return page
 
     def _settle(self, page):
-        """M12: a first block of property lines only is the page's property block."""
+        """A first block of property lines only is the page's property block."""
         if page["blocks"]:
             first = page["blocks"][0]
             texts = _only_properties(first["content"])
@@ -486,7 +498,7 @@ class LogseqHttpDouble:
     # --- answer forms ------------------------------------------------------
     def _values(self, node) -> dict:
         """Stored key -> value. A value upserted as a list or number keeps its
-        type while its text is unchanged (M6)."""
+        type while its text is unchanged."""
         values = {}
         for key, text in _property_texts(node["content"]).items():
             typed = node["typed"].get(key)
@@ -494,7 +506,7 @@ class LogseqHttpDouble:
         return values
 
     def _refs(self, node) -> list:
-        """M15: ``[{"id": <db id>}]`` per page linked, then per block ref."""
+        """``[{"id": <db id>}]`` per page linked, then per block ref."""
         ids = []
         for name in _page_names(node["content"], _property_texts(node["content"])):
             page = self._find_page(name)
@@ -506,9 +518,9 @@ class LogseqHttpDouble:
         return [{"id": i} for i in dict.fromkeys(i for i in ids if i is not None)]
 
     def _block_out(self, page, node, parent, children):
-        """getBlock's form. M1: ``page`` and ``parent`` as ``{"id": <int>}``
+        """getBlock's form: ``page`` and ``parent`` as ``{"id": <int>}``
         (a db id, no uuid), property keys camel-cased, property lines kept in
-        ``content``. M12: ``preBlock?``. M15: ``refs`` with or without
+        ``content``; ``preBlock?``; ``refs`` with or without
         children. Children only when asked for."""
         texts = _property_texts(node["content"])
         out = {"id": node["id"], "uuid": node["uuid"], "content": node["content"],
@@ -528,7 +540,7 @@ class LogseqHttpDouble:
 
     def _page_out(self, page):
         """getPage's form: uuid, name (lower), originalName, id, journal?;
-        properties when it has any (M5, M14); ``file`` once a block holds
+        properties when it has any; ``file`` once a block holds
         text (a page from a link or an empty createPage has none)."""
         out = {"id": page["id"], "uuid": page["uuid"], "name": _key(page["name"]),
                "originalName": page["name"], "format": "markdown",
@@ -551,11 +563,11 @@ class LogseqHttpDouble:
             return self._check_editing()
         handler = self._handlers.get(method)
         if handler is None:
-            # M9: HTTP 200, the error in the body, the name in snake case.
+            # HTTP 200, the error in the body, the name in snake case.
             return self._answer({"error": f"MethodNotExist: {_snake(short)}"})
         if short in WRITES:
             if short in _UUID_CHECKED and not _is_uuid(args[0] if args else None):
-                # M1, M2, M6: in every mode.
+                # In every mode.
                 return self._answer({"error": f"{args[0] if args else None} is not a valid UUID string."})
             self._calls[short] = self._calls.get(short, 0) + 1
             mode, from_call = self._modes.get(short, ("execute", 1))
@@ -571,7 +583,7 @@ class LogseqHttpDouble:
         return Response(json.dumps(value))
 
     def _check_editing(self):
-        """M8: the open block's uuid as raw text (not JSON), else ``false``.
+        """The open block's uuid as raw text (not JSON), else ``false``.
         The other forms are there for the gate's fail-closed tests."""
         form = self.check_editing_form
         if form == "timeout":
@@ -594,7 +606,7 @@ class LogseqHttpDouble:
         return Response(json.dumps(self.editing) if form == "json" else self.editing)
 
     def _exit_editing_mode(self, args):
-        # M8: null.
+        # Answers null.
         self.editing = None
         return None
 
@@ -608,7 +620,6 @@ class LogseqHttpDouble:
     def _get_block(self, args):
         key, opts = args[0], (args[1] if len(args) > 1 else {}) or {}
         if isinstance(key, str) and not _is_uuid(key):
-            # M1.
             return {"error": f"{key} is not a valid UUID string."}
         found = self._locate(key if isinstance(key, int) else key.lower())
         if found:
@@ -652,7 +663,7 @@ class LogseqHttpDouble:
         return [self._page_out(p) for p in self.pages]
 
     def _get_user_configs(self, args):
-        # M14: the date format of the measured graph. The rest invented.
+        # The date format of the measured graph. The rest invented.
         return {"preferredDateFormat": self.date_format, "preferredFormat": "markdown",
                 "preferredWorkflow": "todo", "preferredLanguage": "en",
                 "currentGraph": "logseq_local_/invented/probe-graph"}
@@ -679,7 +690,7 @@ class LogseqHttpDouble:
 
     def _pull_properties(self, query):
         """blockprops.stored_properties: stored keys, parsed values and texts
-        (M6: 5 in properties, "5" as text; ["a","b"] and "a,b"). A page's are
+        (5 in properties, "5" as text; ["a","b"] and "a,b"). A page's are
         those of its property block. Unknown entity: no row; one without
         properties: a nil pull."""
         uuid = re.search(r'#uuid "([^"]+)"', query).group(1).lower()
@@ -761,13 +772,13 @@ class LogseqHttpDouble:
 
     # --- writes --------------------------------------------------------------
     def _create_page(self, args):
-        """M5: the page, with the properties as sent; an existing page comes
+        """The page, with the properties as sent; an existing page comes
         back as it is, the passed properties silently dropped.
 
-        M18: a name in the graph's date format is a journal, property or not.
+        A name in the graph's date format is a journal, property or not.
         Without ``createFirstBlock: false`` the page gets an empty first
-        block; passed properties become its property block (M14b: the file
-        starts with ``journal?:: true``). M14: a journal title in another
+        block; passed properties become its property block (the file
+        starts with ``journal?:: true``). A journal title in another
         format is created under the graph's name and answered with null.
 
         The name is looked up as sent, then created as ``create!`` makes it
@@ -805,7 +816,7 @@ class LogseqHttpDouble:
         return {**self._page_out(page), "properties": properties}
 
     def _delete_page(self, args):
-        """M3: null, a missing page too. A page other pages name as their
+        """Answers null, a missing page too. A page other pages name as their
         namespace keeps its entity without blocks (page.cljs:352-371;
         measured, 0.10.15: getPage answers it, getPageBlocksTree [])."""
         page = self._find_page(args[0])
@@ -825,7 +836,7 @@ class LogseqHttpDouble:
                 and "/" not in _key(p["name"])[len(prefix):]]
 
     def _rename_page(self, args):
-        """M4: null, the uuid stays. Case only: originalName changes, name
+        """Answers null; the uuid stays. Case only: originalName changes, name
         not. Empty name: nothing. An existing name: the pages merge, the
         source is gone and its blocks follow the target's. A missing source:
         Logseq's own TypeError."""
@@ -862,7 +873,7 @@ class LogseqHttpDouble:
         return bool(uuid) and (self._locate(uuid.lower()) or uuid.lower() in self.placeholders)
 
     def _opened(self, page, node, options):
-        """M10: an insert opens its block on a visible page unless
+        """An insert opens its block on a visible page unless
         ``focus: false`` (editor.cljs:647)."""
         if options.get("focus", True) and page["id"] in self._visible:
             self.editing = node["uuid"]
@@ -923,7 +934,7 @@ class LogseqHttpDouble:
         first block or on a page with none, every node gets "* " in front.
 
         On a visible page Logseq then opens the last inserted block
-        (``edit-last-block-after-inserted!``, editor.cljs:1998, M16).
+        (``edit-last-block-after-inserted!``, editor.cljs:1998; measured).
         """
         anchor, batch = args[0], args[1]
         options = (args[2] if len(args) > 2 else None) or {}
@@ -960,7 +971,8 @@ class LogseqHttpDouble:
     def _track_time(self, old, new):
         """With time tracking on, a marker change to DOING/NOW clocks in, one
         to DONE/LATER/TODO closes the open CLOCK line (upstream
-        util/clock.cljs:75-93; format assumed, M11 could not measure it)."""
+        util/clock.cljs:75-93; format assumed: time tracking was off in the
+        measured graph)."""
         before, after = _marker(old), _marker(new)
         if not self.time_tracking or before == after:
             return new
@@ -979,7 +991,7 @@ class LogseqHttpDouble:
         return "\n".join(lines)
 
     def _update_block(self, args):
-        """M1: null on success, for the same text and for an unknown uuid.
+        """Answers null on success, for the same text and for an unknown uuid.
         The text is trimmed on both sides ("neu  " → "neu"; at the start
         measured for spaces, a tab and blank lines, 0.10.15), and a ref to
         the block itself is dropped ("see ((own)) here" → "see  here",
@@ -1026,7 +1038,7 @@ class LogseqHttpDouble:
             node["pre"], page["props"] = False, {}
 
     def _remove_block(self, args):
-        # M2: null; the block goes with its subtree. Unknown uuid: null.
+        # Answers null; the block goes with its subtree. Unknown uuid: null.
         found = self._locate(args[0].lower())
         if found:
             page, siblings, i, _ = found
@@ -1036,7 +1048,7 @@ class LogseqHttpDouble:
         return None
 
     def _upsert_block_property(self, args):
-        """M6: null, for an unknown uuid too. Writes ``key:: value`` into the
+        """Answers null, for an unknown uuid too. Writes ``key:: value`` into the
         text (a list as a,b), in place of the key's line or at the end. The
         page's properties do not follow a property block written this way
         (#80)."""
@@ -1062,7 +1074,7 @@ class LogseqHttpDouble:
         return None
 
     def _remove_block_property(self, args):
-        # M6: null, for an unknown uuid and a missing key too.
+        # Answers null, for an unknown uuid and a missing key too.
         uuid, key = args[0], args[1]
         found = self._locate(uuid.lower())
         if found:
@@ -1096,7 +1108,7 @@ class LogseqHttpDouble:
     def _set_blocks_id(self, args):
         """null. Stores each asked block's uuid as its id property; skips a
         uuid without a block and a page's property block, leaves a stored id
-        as it is (api.set_blocks_id, measured; M12)."""
+        as it is (api.set_blocks_id, measured)."""
         for uuid in args[0] or []:
             found = self._locate(str(uuid).lower())
             if not found:

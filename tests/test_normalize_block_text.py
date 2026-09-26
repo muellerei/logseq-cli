@@ -1,11 +1,12 @@
-"""One normalisation for every comparison of block text (spec 030, C1).
+"""One normalisation for every comparison of block text.
 
 A proof compares what was sent with what Logseq reads back, and Logseq
-rewrites a few things on the way: it trims spaces at the end (M1), stores a
-ref target's id:: line (#95), and with time tracking on appends or rewrites a
-:LOGBOOK: drawer on a marker change (M11; upstream editor.cljs:256-285,
-util/clock.cljs:75-93). None of these is a failed write, and a comparison
-that took them for one raised a false alarm (#95, replace-text).
+rewrites a few things on the way: it trims spaces at the end (measured),
+stores a ref target's id:: line (#95), and with time tracking on appends or
+rewrites a :LOGBOOK: drawer on a marker change (upstream
+editor.cljs:256-285, util/clock.cljs:75-93; read in the code, not
+measured). None of these is a failed write, and a comparison that took
+them for one raised a false alarm (#95, replace-text).
 
 The drawer format is assumed from Logseq's file format, not measured: time
 tracking is off in the measured graph. The CLOCK lines are the double's.
@@ -42,7 +43,7 @@ def test_an_id_line_in_code_stays():
 
 
 def test_spaces_at_the_end_go():
-    # M1, measured: "neu  " is read back as "neu".
+    # Measured: "neu  " is read back as "neu".
     assert _normalize("neu  ") == "neu"
 
 
@@ -68,7 +69,8 @@ def test_a_rewritten_clock_line_matches():
 
 
 def test_an_appended_drawer_matches():
-    # M11: a marker change to DOING appends a drawer the sender never wrote.
+    # Read in the code: a marker change to DOING appends a drawer the sender
+    # never wrote.
     assert _matches("DOING task", f"DOING task\n{DRAWER_IN}")
 
 

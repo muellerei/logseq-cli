@@ -60,7 +60,7 @@ def _contents(graph):
 class TestTheApiRefusesAnUndecidedIdLine:
     def _api(self):
         api = LogseqAPI(token="t")
-        # A block, as an insert answers: its proof reads the uuid (spec 030).
+        # A block, as an insert answers: its proof reads the uuid.
         api.call = MagicMock(return_value={"uuid": TARGET})
         return api
 
@@ -100,7 +100,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
 
     def _updated(self, text):
         """An API whose Logseq holds ``text`` once written: the update is
-        read back as its proof (spec 030)."""
+        read back as its proof."""
         api = LogseqAPI(token="t")
         api.call = MagicMock(return_value={"uuid": TARGET, "content": text})
         return api
@@ -141,7 +141,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
                 sent.append(args[1])
                 return None
             # The anchor, with the kept block under it once the batch is in:
-            # the batch's proof reads it before and after (spec 030).
+            # the batch's proof reads it before and after.
             return {"uuid": TARGET, "children": [
                 {"uuid": FOREIGN, "content": n["content"]} for b in sent for n in b]}
         api.call.side_effect = call
@@ -268,7 +268,7 @@ class TestCreatePageAndAddJournalEntry:
         assert "will be dropped" in r.stderr
         assert FOREIGN not in " ".join(_contents(api.graph))
         # A new journal starts with what was written, not with an empty block
-        # (M18); a line that was only the id is not written as one either.
+        # (measured); a line that was only the id is not written as one either.
         assert api.graph.tree("2026-01-05") == [("text", [])]
 
 

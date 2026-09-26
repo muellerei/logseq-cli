@@ -117,14 +117,11 @@ class TestCopyBlockRemoveIsGuarded:
     """Regression: a failed copy must never take the source with it."""
 
     # Failed copies run against the HTTP double: the real LogseqAPI proves
-    # each insert and raises on Logseq's null (spec 030), which a method mock
+    # each insert and raises on Logseq's null, which a method mock
     # would never do.
     def _copy_failing(self, monkeypatch, method, source):
-        double = LogseqHttpDouble()
-        double.add_page("Source", [source])
-        double.add_page("Target", ["target block"])
-        double.set_mode(method, "noop")
-        double.install(monkeypatch)
+        double = LogseqHttpDouble.installed(
+            monkeypatch, {"Source": [source], "Target": ["target block"]}, modes={method: "noop"})
         uuid = double.uuid_of(source if isinstance(source, str) else source["content"])
         r = split_runner().invoke(cli, [
             "--token", "t", "copy-block", "--id", uuid, "--to-page", "Target",
@@ -276,14 +273,11 @@ def _run(graph, *args):
 def _double(pages, *, noop=False, monkeypatch):
     """The real LogseqAPI against the HTTP double, which reads a page the way
     Logseq does (getBlock answers null for a page's id, getPageBlocksTree
-    wants the name): the move's proof sits in LogseqAPI.move_block (spec 030),
+    wants the name): the move's proof sits in LogseqAPI.move_block,
     which the stand-ins above replace."""
-    double = LogseqHttpDouble()
-    for name, blocks in pages.items():
-        double.add_page(name, blocks)
-    if noop:
-        double.set_mode("moveBlock", "noop")   # Logseq's null, nothing moved
-    return double.install(monkeypatch)
+    # noop: Logseq's null, nothing moved.
+    return LogseqHttpDouble.installed(monkeypatch, pages,
+                                      modes={"moveBlock": "noop"} if noop else None)
 
 
 def _move(double, src, flag, target):

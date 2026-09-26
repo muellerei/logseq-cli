@@ -1,4 +1,4 @@
-"""A refused or unproven write reaches the caller with its reason (spec 030).
+"""A refused or unproven write reaches the caller with its reason.
 
 click.ClickException carries no reason and, under --json, no JSON (measured:
 stdout empty, stderr "Error: ..."), so an agent could not tell a block open
@@ -20,7 +20,7 @@ from tests.conftest import mock_api, split_runner
 BLOCK = "1f7fab12-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 MESSAGE = "The write was refused here."
 
-# (type, reason, fields), from spec 030, "Fehlertypen und Meldung".
+# (type, reason, fields): the contract --json callers rely on.
 TYPES = [
     ("EditorOpen", "open_in_editor", {"block": BLOCK, "page": "Probe Page"}),
     ("EditorStateUnknown", "editor_state_unknown", {"answer": '{"ok": 1}'}),
@@ -58,7 +58,7 @@ def test_each_type_has_its_reason():
         cls = getattr(writerefused, name)
         assert issubclass(cls, writerefused.WriteRefused), name
         assert cls.reason == reason, name
-    # The API re-exports them (spec 030, Fehlertypen).
+    # The API re-exports them.
     import logseq_cli.api
     assert logseq_cli.api.WriteNotVerified is writerefused.WriteNotVerified
 

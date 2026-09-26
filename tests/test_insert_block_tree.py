@@ -28,12 +28,10 @@ from tests.logseq_http_double import LogseqHttpDouble
 
 def _null_answering(monkeypatch):
     """A Logseq answering insertBlock with null and writing nothing, behind
-    the real LogseqAPI: the uuid check sits in the API method (spec 030),
+    the real LogseqAPI: the uuid check sits in the API method,
     which a method mock would replace."""
-    double = LogseqHttpDouble()
-    double.add_page("P", ["anchor block"])
-    double.set_mode("insertBlock", "noop")
-    return double.install(monkeypatch)
+    return LogseqHttpDouble.installed(monkeypatch, {"P": ["anchor block"]},
+                                      modes={"insertBlock": "noop"})
 
 
 def _make_api_with_uuid_sequence(uuids):
@@ -260,7 +258,7 @@ class TestInsertBlockTreeAsSiblings:
         assert uuids == ["h", "c1", "c2"]
 
     def test_aborts_on_null_result(self, monkeypatch):
-        # Logseq's silent failure; the real API raises on it (spec 030).
+        # Logseq's silent failure; the real API raises on it.
         double = _null_answering(monkeypatch)
         with pytest.raises(WriteNotVerified):
             insert_block_tree_as_siblings(LogseqAPI(token="t"), [{"content": "x", "children": []}],
@@ -390,9 +388,7 @@ class TestResponseValidation:
         assert api.writes_landed == 0
 
     def test_insert_returns_the_block(self, monkeypatch):
-        double = LogseqHttpDouble()
-        double.add_page("P", ["anchor block"])
-        double.install(monkeypatch)
+        double = LogseqHttpDouble.installed(monkeypatch, {"P": ["anchor block"]})
         api = LogseqAPI(token="t")
         block = api.insert_block(double.uuid_of("anchor block"), "x")
         assert block["uuid"] == double.uuid_of("x")
@@ -401,9 +397,7 @@ class TestResponseValidation:
     def test_a_bare_uuid_answer_becomes_a_block(self, monkeypatch):
         """Not seen from 0.10.15, but tolerated since the first check: the
         method turns it into a dict, so callers read result["uuid"] alone."""
-        double = LogseqHttpDouble()
-        double.add_page("P", [])
-        double.install(monkeypatch)
+        double = LogseqHttpDouble.installed(monkeypatch, {"P": []})
         uuid = "6500c0de-0000-4000-8000-0000000000aa"
         monkeypatch.setitem(double._handlers, "logseq.Editor.appendBlockInPage",
                             lambda args: uuid)
@@ -542,14 +536,14 @@ class TestInsertFirstChild:
         assert calls == []
 
 
-# ---------- insertBatchBlock proves itself (spec 030, 030-C3) ---------------
+# ---------- insertBatchBlock proves itself -----------------------------------
 
 TREE3 = [{"content": "root", "children": [{"content": "kid"}]}, {"content": "next"}]
 
 
 def _batch_double(monkeypatch, *, keep=None):
     """A page with a nested and a top-level place to write, behind the real
-    LogseqAPI: the batch's proof sits in the method (spec 030).
+    LogseqAPI: the batch's proof sits in the method.
 
     ``keep`` writes only that many roots of every batch, the partial write a
     batch can do (a malformed node is skipped while its siblings land)."""
@@ -630,7 +624,7 @@ class TestTheBatchProvesItself:
 
     def test_the_proof_reads_logseq_not_the_cache(self, monkeypatch):
         """The read before the write is cached; the write clears the cache, so
-        the read after it reaches Logseq (spec 030)."""
+        the read after it reaches Logseq."""
         double, api = _batch_double(monkeypatch)
         assert api.cache_enabled
         anchor = double.uuid_of("parent block")
@@ -640,7 +634,7 @@ class TestTheBatchProvesItself:
                 and a[0] == anchor]
 
     def test_a_failed_proof_still_closes_the_editor_the_batch_opened(self, monkeypatch):
-        """The batch opens its last block on a visible page (E2, M16). A proof
+        """The batch opens its last block on a visible page (measured). A proof
         that fails must not leave it open: the agent's next write to it would
         meet open_in_editor."""
         double, api = _batch_double(monkeypatch, keep=1)
@@ -659,12 +653,9 @@ class TestTheStandInIsReported:
     ID = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 
     def _run(self, monkeypatch, *, batch, removal="error"):
-        double = LogseqHttpDouble()
-        double.add_page("Empty", [])
-        if batch:
-            double.set_mode("insertBatchBlock", batch)
-        double.set_mode("removeBlock", removal)
-        double.install(monkeypatch)
+        modes = {"insertBatchBlock": batch} if batch else {}
+        double = LogseqHttpDouble.installed(monkeypatch, {"Empty": []},
+                                            modes={**modes, "removeBlock": removal})
         r = split_runner().invoke(cli, [
             "--token", "t", "add-note-content", "--page", "Empty", "--content",
             f"restored\nid:: {self.ID}", "--keep-ids", "--json"])
@@ -691,6 +682,27 @@ class TestTheStandInIsReported:
         assert f"stand-in block {stand_in[:8]}... written for the batch stayed too: " \
                "removeBlock on block" in error["error"]
         assert error["writes_landed"] == 1
+
+    def test_a_stand_in_removed_does_not_count(self, monkeypatch):
+        # Appended and removed again: nothing of it remains, so neither
+        # write counts, or a retry would be told of writes that are gone.
+        double, r = self._run(monkeypatch, batch="noop", removal="execute")
+        assert r.exit_code == 1
+        error = _json.loads(r.stderr)
+        assert (error["reason"], error["method"]) == ("write_not_verified", "insertBatchBlock")
+        assert error["writes_landed"] == 0
+        assert "Nothing was written." in error["error"]
+        assert double.tree("Empty") == []
+
+    def test_a_stand_in_removed_after_a_batch_that_landed_does_not_count(self, monkeypatch):
+        from logseq_cli.api import LogseqAPI
+        from logseq_cli.strictinsert import insert_tree_keeping_ids
+        double = LogseqHttpDouble.installed(monkeypatch, {"Empty": []})
+        api = LogseqAPI(token="t")
+        insert_tree_keeping_ids(api, [{"content": f"restored\nid:: {self.ID}", "children": []}],
+                                "page_end", "Empty")
+        assert api.writes_landed == 1
+        assert double.tree("Empty") == [("restored", [])]
 
     def test_a_stand_in_left_after_a_batch_that_landed_is_reported(self, monkeypatch):
         double, r = self._run(monkeypatch, batch=None)

@@ -29,15 +29,9 @@ def count_blocks(tree: list) -> int:
 
 
 def collect_child_uuids(node) -> list:
-    """UUIDs of a getBlock(includeChildren=True) subtree, DFS pre-order."""
-    out = []
-    for child in (node.get("children") or []):
-        if not isinstance(child, dict):
-            continue  # a children list of bare UUID refs carries no content
-        if child.get("uuid"):
-            out.append(child["uuid"])
-        out.extend(collect_child_uuids(child))
-    return out
+    """UUIDs below a getBlock(includeChildren=True) block, DFS pre-order; a
+    child given as a bare uuid ref carries no content and is skipped."""
+    return [b["uuid"] for b in preorder_blocks(node.get("children")) if b.get("uuid")]
 
 
 def subtree_uuids(block: dict) -> list:
@@ -48,18 +42,13 @@ def subtree_uuids(block: dict) -> list:
 def preorder_blocks(blocks) -> list:
     """``blocks`` and all their descendants, DFS pre-order, as getBlock's
     ``children`` or getPageBlocksTree hand them back. A child given as a bare
-    uuid ref carries no content and is skipped, as in collect_child_uuids."""
+    uuid ref carries no content and is skipped."""
     out = []
     for block in blocks or []:
         if isinstance(block, dict):
             out.append(block)
             out.extend(preorder_blocks(block.get("children")))
     return out
-
-
-def preorder_uuids(tree: list) -> list:
-    """The uuids of a page tree, DFS pre-order."""
-    return [b["uuid"] for b in preorder_blocks(tree) if b.get("uuid")]
 
 
 def page_blocks_by_uuid(tree: list) -> dict:

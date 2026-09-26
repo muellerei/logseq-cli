@@ -28,7 +28,8 @@ from logseq_cli.blocktext import (
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
 from logseq_cli.pagenames import page_name_to_create
 # Raised by the writes below; imported here too so that callers can take them
-# from the API they call (spec 030). They live apart to keep imports acyclic.
+# from the API they call. They live in a leaf module, so that
+# strictinsert and output need not import the HTTP client for them.
 from logseq_cli.writerefused import (  # noqa: F401  re-exported
     EditorOpen,
     EditorStateUnknown,
@@ -51,7 +52,7 @@ class Write:
     """Changes the graph, so the whole cache is cleared after it.
 
     ``editor`` and ``proof`` name the ``LogseqAPI._gate_<editor>`` and
-    ``_prove_<proof>`` methods the central write dispatches on (spec 030).
+    ``_prove_<proof>`` methods the central write dispatches on.
     Names rather than descriptions: a label nothing acts on can disagree
     with the code.
 
@@ -82,19 +83,19 @@ class Write:
     * ``target``: the target is the open block;
     * ``subtree``: the open block is the target or below it (a removed or
       moved block takes its children along; the anchor of a move does not
-      count, a block beside the open one changes nothing in it, M10);
+      count, a block beside the open one changes nothing in it, measured);
     * ``requested``: the open block is one of the blocks asked for;
     * ``page``: the open block is on the target page;
     * ``page_or_link``: ... or refers to it (Logseq rewrites the link on a
       rename, and the open editor would save the old text back);
     * ``any``: any block is open. insertBatchBlock opens its last block in
       the editor once the page is on screen, with no option against it
-      (editor.cljs:1998, M16): the cursor would leave the block being typed
-      in (E2);
+      (editor.cljs:1998; measured): the cursor would leave the block being
+      typed in;
     * ``never``: an insert. Logseq saves the open block before it inserts
-      (M10), so it neither asks nor refuses.
+      (measured), so it neither asks nor refuses.
     """
-    editor: str | None
+    editor: str
     proof: str
 
 
@@ -107,11 +108,11 @@ class UI:
 # here: a write nobody registered would otherwise run past the cache, and
 # later past the editor gate and the proof, without a trace.
 #
-# How a write is proven, and why (spec 030; measured on 0.10.15, the batch
+# How a write is proven, and why (measured on 0.10.15, the batch
 # and the move against a live graph on 2026-08-22)
 # ------------------------------------------------------------------------
 # Logseq answers most writes with null, whether it wrote or not, and a write
-# it threw on with HTTP 200 and {"error": ...} (M1-M6, M9). call() turns the
+# it threw on with HTTP 200 and {"error": ...}. call() turns the
 # error object into LogseqWriteError for every write; the null has to be
 # proven away, each method by what it can show:
 #
@@ -125,44 +126,45 @@ class UI:
 #       into the block's own subtree does nothing). The block is read back
 #       where it was sent (move).
 #   updateBlock  null on success, for the same text and for a uuid no block
-#       has (M1). The block is read back (text): the text through
+#       has. The block is read back (text): the text through
 #       block_text_matches, since Logseq trims it and, with time tracking
-#       on, appends or rewrites a :LOGBOOK: drawer (M11); the properties
+#       on, appends or rewrites a :LOGBOOK: drawer (editor.cljs:256-285, read
+#       in the code, not measured: time tracking was off); the properties
 #       sent along through stored_properties. Their key:: lines are taken
 #       out of the text by key, not by place: Logseq writes them below the
 #       text, where in a text of several lines was not measured.
 #   upsertBlockProperty, removeBlockProperty  null either way, an unknown
-#       uuid too (M6). The block's stored properties are read (property,
+#       uuid too. The block's stored properties are read (property,
 #       no_property): stored_properties, never getBlock's map, which
 #       camel-cases the keys. The block is read first: for a uuid no block
 #       has the reader finds no key, which would pass as "removed".
-#   removeBlock  null on success and for a uuid no block has (M2). getBlock
+#   removeBlock  null on success and for a uuid no block has. getBlock
 #       then finds none (no_block). A uuid that never had a block passes
 #       too: the commands read the block first, and strictinsert's stand-in
 #       was written a moment before.
-#   deletePage  null, for a missing page too (M3). getPage then finds none
+#   deletePage  null, for a missing page too. getPage then finds none
 #       (no_page), or a page without blocks that others name as their
-#       namespace, which Logseq keeps (measured). A page other blocks link to
-#       is retracted whole (page.cljs:352-371, read in the code, not
-#       measured); a page named in another's alias:: is gone too (measured).
-#   renamePage  null (M4). The new name then finds the page's uuid, spelt
+#       namespace, which Logseq keeps (measured). A page a block of another
+#       page links to is retracted whole (page.cljs:352-371; measured), and
+#       so is a page named in another's alias:: (measured).
+#   renamePage  null. The new name then finds the page's uuid, spelt
 #       as sent (renamed): the uuid alone would pass a change of case that
 #       did nothing, since getPage finds a page by its name in lower case.
-#   createPage  answers the page (M5), and null for a journal title in
-#       another format, which it creates under the graph's name (M14):
+#   createPage  answers the page, and null for a journal title in
+#       another format, which it creates under the graph's name:
 #       create_page sends the name Logseq creates (page_name_to_create), the
 #       journal's under the graph's format. A page that exists comes back as
-#       it is, the properties sent dropped (M5), so it is refused before the
+#       it is, the properties sent dropped, so it is refused before the
 #       write (PageExists). The answer's uuid must be the page getPage finds
 #       under the name sent (page): no names are compared here, since Logseq
 #       normalises them further than lower() does (NFC, pagenames.py). The
 #       properties in the answer are not read; the proof needs none.
-#   setBlocksId  null; it skips a page's property block (M12), which its
+#   setBlocksId  null; it skips a page's property block, which its
 #       caller leaves out. Each block asked for then shows id among its
 #       properties (ids).
 #
-# A read proves Logseq's database, not the file, which follows 1.8 s later
-# (M7); it reaches Logseq, not the cache, since every write clears the cache.
+# A read proves Logseq's database, not the file, which follows 1.8 s later;
+# it reaches Logseq, not the cache, since every write clears the cache.
 # A write elsewhere between a write and its read shows as a failed proof,
 # with what was expected and what was read. Should a Logseq version answer
 # one of these writes with what it wrote, or with an error when it wrote
@@ -296,7 +298,7 @@ def _without_focus(options: dict | None) -> dict:
     Unset, Logseq takes focus as true and opens the new block in its editor
     (api.cljs:603, editor.cljs:647); on the visible page the cursor of
     whoever is typing jumps into it and the rest of their typing lands there
-    (M10, spec 030). No caller wants that, so a caller's own focus is
+    (measured, 0.10.15). No caller wants that, so a caller's own focus is
     overridden.
     """
     return {**(options or {}), "focus": False}
@@ -323,7 +325,7 @@ def rename_refused(old_name: str, new_name: str, why: str) -> RenameRefused:
 # (no block open).
 _UNSET = object()
 
-# checkEditing's answer when a block is open: its uuid (M8).
+# checkEditing's answer when a block is open: its uuid (measured).
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
 
 
@@ -343,7 +345,7 @@ def _block_uuid_from_result(result):
 
 
 def _property_text(value) -> str:
-    """A property value as Logseq writes it into the text (M6): a list as
+    """A property value as Logseq writes it into the text (measured): a list as
     ``a,b``, a number as its digits, a string as it is (``01234`` and
     ``[[Link]]`` stay text)."""
     if isinstance(value, (list, tuple)):
@@ -357,6 +359,11 @@ def _target_text(target) -> str:
     if isinstance(target, str) and _UUID_TEXT.fullmatch(target):
         return f"block {target[:8]}..."
     return f"'{target}'"
+
+
+def _block_count_text(n: int) -> str:
+    """``n`` as "1 block" or "n blocks", for what a proof expected."""
+    return f"{n} block" if n == 1 else f"{n} blocks"
 
 
 def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerified:
@@ -375,7 +382,7 @@ def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerif
 
 # The reasons EditorOpen gives. A write into the open block loses what is
 # typed there; a batch beside it only moves the cursor, since Logseq saves
-# the open block before it inserts (M10).
+# the open block before it inserts (measured).
 DISCARDS_TYPING = "writing now would discard what is being typed there"
 MOVES_CURSOR = "a batch insert would move the cursor out of the block being edited"
 
@@ -396,10 +403,12 @@ def _editor_unknown_after_batch(answer: str) -> EditorStateUnknown:
 
 class LogseqAPI:
     # After a batch, how long to watch for the block Logseq opens in its
-    # editor: it opened 16–34 ms after the answer (M16), so 100 ms, counted
-    # as ten naps of 10 ms; the checkEditing requests between them come on
-    # top. A page not on screen opens nothing, and the window runs full for
-    # each multi-block write. Attributes, so that tests need not wait:
+    # editor: it opened 16–34 ms after the answer (measured, three runs), so
+    # 100 ms, counted as ten naps of 10 ms; the checkEditing requests between
+    # them come on top, eleven of 1.2 ms each (measured), about 115 ms in all.
+    # A page not on screen opens nothing, and the window runs full for each
+    # multi-block write. Attributes, so that tests need not
+    # wait:
     # conftest sets the window to 0, a test of the window replaces _sleep.
     batch_editor_wait_s = 0.1
     _sleep = staticmethod(time.sleep)
@@ -426,7 +435,7 @@ class LogseqAPI:
         self.cache_enabled = self._cache_ttl > 0
         self._cache = {}
         # Writes of this CLI call that landed, for the partial state every
-        # refusal reports (spec 030): one instance per call (group.py), so the
+        # refusal reports: one instance per call (group.py), so the
         # count is the call's, and no command has to keep its own.
         self.writes_landed = 0
 
@@ -485,9 +494,9 @@ class LogseqAPI:
         cacheable = cached and self.cache_enabled and isinstance(kind, Read) and kind.cache
         if cacheable:
             key = self._cache_key(method, args)
-            cached = self._cache_get(key)
-            if cached is not None:
-                return cached
+            hit = self._cache_get(key)
+            if hit is not None:
+                return hit
         else:
             key = None
 
@@ -506,7 +515,8 @@ class LogseqAPI:
         elif isinstance(kind, Write):
             self.clear_cache()
             # Logseq answers a write it threw on with HTTP 200 and
-            # {"error": ...} (M1, M2, M6, M9), which went on as the result and
+            # {"error": ...} (measured for updateBlock, removeBlock, the property
+            # writes and an unknown method), which went on as the result and
             # read as success. The test is get_block's: a block map carries a
             # uuid, an error object does not. Writes only; a read's error
             # object stays with the method that knows what it means.
@@ -526,7 +536,7 @@ class LogseqAPI:
         """Send one write the way its ``_METHODS`` entry says, and count it.
 
         Every public write goes through here, so the steps below hold for all
-        of them and no command can go around one (spec 030):
+        of them and no command can go around one:
 
         1. ask checkEditing once, if the entry can refuse or ``texts`` hold
            Block Refs (``editing``, when given, is that answer already, so
@@ -551,15 +561,15 @@ class LogseqAPI:
         refuses. The gate reads what it compares when it asks, past the
         cache. What stays open is the time from those reads to the write: the
         ref targets are read, their ids may be stored, and the write is sent;
-        a block someone enters or makes in those milliseconds is not seen
-        (spec 030, named).
+        a block someone enters or makes in those milliseconds is not seen,
+        a gap that is known and accepted.
 
         A proof name with no ``_prove_`` method behind it fails at the lookup
         instead of passing as a check nobody made (and
         test_api_endpoint_binding names it).
         """
         kind = _METHODS[method]
-        can_refuse = kind.editor not in (None, "never")
+        can_refuse = kind.editor != "never"
         refs = [u for t in texts for u in block_ref_uuids(t)]
         if editing is _UNSET:
             editing = self.check_editing() if can_refuse or refs else None
@@ -594,13 +604,13 @@ class LogseqAPI:
         A batch is not atomic: the blocks that landed are counted before
         anything is raised, since they stay. The editor the batch opened is
         closed whether the proof holds or not, so that a failed one leaves
-        no block open either (E2); an editor that cannot be asked is added
+        no block open either; an editor that cannot be asked is added
         to the proof's error, or raised with the blocks counted."""
         old = {b.get("uuid") for b in before}
         new = [b for b in self._blocks_in(place) if b.get("uuid") not in old]
         failed, landed = None, len(new)
         if len(new) != len(texts):
-            failed = _not_verified(method, target, f"{len(texts)} blocks", str(len(new)))
+            failed = _not_verified(method, target, _block_count_text(len(texts)), str(len(new)))
             landed = min(len(new), len(texts))
         else:
             for sent, block in zip(texts, new):
@@ -624,7 +634,7 @@ class LogseqAPI:
     def _prove_move(self, method, target, result, *, to, before):
         """``target`` sits right in front of ``to`` (``before``), or among its
         children. Among, not first: moveBlock's own placement is not held to
-        more than it was (spec 030 leaves that finding open)."""
+        more than it was (that finding is left open)."""
         landed = self.get_block(to, include_children=True) or {}
         if before:
             # Directly in front: "same parent" would pass a move that did
@@ -689,13 +699,14 @@ class LogseqAPI:
         return result
 
     def _prove_no_block(self, method, target, result):
-        """No block under ``target`` any more; its children went with it (M2)."""
+        """No block under ``target`` any more; its children went with it
+        (measured)."""
         if self.get_block(target, include_children=False):
             raise _not_verified(method, target, "no block", "the block still there")
         return result
 
     def _prove_no_page(self, method, target, result):
-        """No page under the name ``target`` any more (M3), or one Logseq
+        """No page under the name ``target`` any more (measured), or one Logseq
         keeps because other pages name it as their namespace: delete! then
         removes its blocks and file and leaves the page (page.cljs:352-371;
         measured, 0.10.15: getPage answers it, getPageBlocksTree ``[]``).
@@ -754,8 +765,8 @@ class LogseqAPI:
     def _block_to_prove(self, method, target, expected) -> dict:
         """The block ``target``, read from Logseq; WriteNotVerified if there is
         none. Read right away, without waiting: with no block open, getBlock
-        shows a write at once (M1). The editor gate lets no write through to
-        an open block, where getBlock would show the old text (M8)."""
+        shows a write at once (measured). The editor gate lets no write through to
+        an open block, where getBlock would show the old text (measured)."""
         block = self.get_block(target, include_children=False)
         if not block:
             raise _not_verified(method, target, expected, "no block")
@@ -828,7 +839,7 @@ class LogseqAPI:
         """The uuid of the block open in Logseq's editor, lower case, or
         ``None`` when none is.
 
-        Logseq answers with raw text, not JSON (M8): the uuid, or ``false``;
+        Logseq answers with raw text, not JSON (measured): the uuid, or ``false``;
         the same values as JSON are taken too. Anything else fails closed
         with EditorStateUnknown: a write on an answer nobody understood could
         be the one that discards what is being typed. A timeout, a refused
@@ -851,7 +862,7 @@ class LogseqAPI:
         )
 
     def exit_editing_mode(self):
-        """Close Logseq's editor, saving the open block (M10). Answers null."""
+        """Close Logseq's editor, saving the open block (measured). Answers null."""
         return self.call("logseq.Editor.exitEditingMode")
 
     # The editor rules of _METHODS, one per ``Write.editor`` name. Each gets
@@ -866,7 +877,7 @@ class LogseqAPI:
     def _gate_target(self, editing, uuid):
         # Lower case on both sides: update-block passes --id through as
         # typed, checkEditing answers in lower case, and compared as typed
-        # the write went past the gate (M8).
+        # the write went past the gate (measured).
         if editing == uuid.lower():
             self.refuse_open(editing)
 
@@ -890,7 +901,7 @@ class LogseqAPI:
     def _gate_page_or_link(self, editing, page_name, *, links=True):
         # A link is found through the open block's refs, which list every
         # page it refers to, as [[Page]], #Page or a property value alike
-        # (M15): no parsing of the text here.
+        # (measured): no parsing of the text here.
         open_block = self.get_block(editing, include_children=False, cached=False)
         page = self.get_page(page_name, cached=False)
         if not (open_block and isinstance(page, dict) and page.get("id") is not None):
@@ -905,7 +916,7 @@ class LogseqAPI:
         """Raise EditorOpen for the open block, naming its page.
 
         Public for strictinsert, which refuses a --keep-ids write before its
-        first write (E2) with its own ``why``."""
+        first write with its own ``why``."""
         if open_block is None:
             open_block = self.get_block(editing, include_children=False)
         page_id = ((open_block or {}).get("page") or {}).get("id")
@@ -946,7 +957,7 @@ class LogseqAPI:
     def create_page(self, page_name: str, properties: dict = None, *, first_block: bool = True):
         """Create a page. A name in the graph's date format is a journal.
 
-        Logseq tells a journal by its name alone (M18, spec 030); a
+        Logseq tells a journal by its name alone (measured, 0.10.15); a
         ``journal?`` property is not needed and lands as a line
         ``journal?:: true`` at the top of the file. ``first_block=False`` is
         for a caller that writes right after: otherwise the page starts with
@@ -964,7 +975,7 @@ class LogseqAPI:
         """
         page_name = page_name_to_create(self, page_name)
         # Logseq answers createPage on a page that exists with that page, the
-        # properties sent dropped (M5). The commands ask first and refuse with
+        # properties sent dropped (measured). The commands ask first and refuse with
         # their own advice; this holds for a caller that did not.
         if self.get_page(page_name):
             raise PageExists(
@@ -972,8 +983,9 @@ class LogseqAPI:
                 "is and drop the properties sent.",
                 page=page_name,
             )
-        # Without redirect: false, Logseq turns its view to the new page (M13,
-        # spec 030) -- every page and journal the CLI created moved the view.
+        # Without redirect: false, Logseq turns its view to the new page
+        # (measured, 0.10.15) -- every page and journal the CLI created moved
+        # the view.
         options = {"redirect": False}
         if not first_block:
             options["createFirstBlock"] = False
@@ -1021,13 +1033,13 @@ class LogseqAPI:
         the last existing child with ``sibling: true``.
         """
         refuse_split_tree(batch, command="logseq-cli", single_label="The text")
+        options = options or {}
         # With keepUUID the id:: lines are the point of the call, vetted by
         # check_block_ids. Without it Logseq drops them (measured), so none
         # should arrive: one that does was decided on by no command.
-        if not (options or {}).get("keepUUID"):
+        if not options.get("keepUUID"):
             refuse_id_lines_tree(batch)
         texts = list(tree_texts(batch))
-        options = options or {}
         # Read before the editor question, so that only the reads _write
         # names lie between the question and the write.
         place = self._batch_place(block_uuid, options)
@@ -1043,8 +1055,8 @@ class LogseqAPI:
         Left open, it would refuse the agent's next write to it with
         open_in_editor. Here rather than in strictinsert, so it holds for
         every batch, --keep-ids included. Logseq opens it asynchronously
-        (M16), so it is asked again every 10 ms within
-        ``batch_editor_wait_s``.
+        (measured: 16–34 ms after the answer), so it is asked again every
+        10 ms within ``batch_editor_wait_s``.
 
         Only a block of the batch (``new_uuids``) is closed. One someone else
         entered in that window stays open: Logseq does not save a block left
@@ -1142,7 +1154,7 @@ class LogseqAPI:
         property write on the target drops it from the file (measured,
         0.10.15). A page uuid, a dead ref and a target that has its id are
         left alone, as is ``own``: the block being written replaces its text.
-        So is a page's property block: setBlocksId skips it (M12), and its
+        So is a page's property block: setBlocksId skips it (measured), and its
         proof would fail a write whose ref is written all the same.
 
         Before the write, not after: then Logseq adds no column-0 line at all
@@ -1201,9 +1213,9 @@ class LogseqAPI:
         """Why renaming ``old_name`` to ``new_name`` is refused, or ``None``.
 
         ``"empty"``: nothing is left of the name once stripped; Logseq does
-        nothing and answers null, as for a rename (M4). ``"exists"``: getPage
+        nothing and answers null, as for a rename (measured). ``"exists"``: getPage
         finds another page under the name, and Logseq would merge the two into
-        it, the old page gone and its blocks under the other (M4). The same
+        it, the old page gone and its blocks under the other (measured). The same
         page, by uuid, is a change of case only, a rename that works.
 
         Not named for an endpoint: it wraps none. Shared by rename_page and

@@ -1,4 +1,4 @@
-"""The HTTP double answers the way Logseq 0.10.15 does (spec 030, M1–M18).
+"""The HTTP double answers the way Logseq 0.10.15 does, as measured.
 
 Gate and proof move into ``LogseqAPI``'s methods, where tests that replace
 ``LogseqAPI`` cannot see them. The double sits one level lower, in place of
@@ -70,7 +70,7 @@ def test_get_block_unknown_is_null(double):
 
 
 def test_get_block_malformed_is_error_object(double):
-    # M1: HTTP 200, the error in the body.
+    # HTTP 200, the error in the body.
     assert answer(double, "getBlock", "foo", {"includeChildren": False}) == \
         {"error": "foo is not a valid UUID string."}
 
@@ -117,7 +117,7 @@ def test_get_block_children_only_when_asked(double):
 
 
 def test_refs_for_link_tag_and_tags_property(double):
-    # M15: the same {"id": <page id>} for all three spellings, children or not.
+    # The same {"id": <page id>} for all three spellings, children or not.
     double.add_page("Target Page", ["t"])
     double.add_page("Probe Page", ["see [[Target Page]]", "see #target", "x\ntags:: Target Page"])
     target = answer(double, "getPage", "target page")
@@ -132,7 +132,7 @@ def test_refs_for_link_tag_and_tags_property(double):
 
 
 def test_pre_block_flag(double):
-    # M12: a page's property block carries preBlock? true, others false.
+    # A page's property block carries preBlock? true, others false.
     double.add_page("Probe Page", ["typ:: probe", "body"])
     pre = answer(double, "getBlock", double.uuid_of("typ:: probe"), {"includeChildren": False})
     body = answer(double, "getBlock", double.uuid_of("body"), {"includeChildren": False})
@@ -192,7 +192,7 @@ def test_get_all_pages_and_user_configs(double):
     names = [p["originalName"] for p in answer(double, "getAllPages")]
     assert "Probe Page" in names
     configs = answer(double, "logseq.App.getUserConfigs")
-    assert configs["preferredDateFormat"] == "yyyy-MM-dd, EEEE"  # M14
+    assert configs["preferredDateFormat"] == "yyyy-MM-dd, EEEE"  # measured graph
 
 
 def test_linked_references(double):
@@ -208,7 +208,7 @@ def test_linked_references(double):
 # --- datascriptQuery ---------------------------------------------------------
 
 def test_properties_camel_case_and_text_values(double, api):
-    # M1 (created_at), M6 (5, a,b, 01234, [[Link]]).
+    # created_at, and the values 5, a,b, 01234, [[Link]].
     double.add_page("Probe Page", ["props\ncreated_at:: 1"])
     uuid = double.uuid_of("props\ncreated_at:: 1")
     for key, value in (("zahl", 5), ("liste", ["a", "b"]), ("zip", "01234"),
@@ -276,7 +276,7 @@ def test_unanswered_query_fails_loudly(double):
 ])
 @pytest.mark.parametrize("mode", ["execute", "noop", "error"])
 def test_write_with_malformed_uuid_is_error_object(double, method, args, mode):
-    # M1, M2, M6: in every mode, the uuid check comes first.
+    # In every mode, the uuid check comes first.
     double.set_mode(method, mode)
     assert answer(double, method, *args) == {"error": "foo is not a valid UUID string."}
 
@@ -332,7 +332,7 @@ def test_update_block_makes_or_unmakes_the_property_block(double):
 
 
 def test_remove_block_removes_subtree(double):
-    # M2: null, and block and child are null right after.
+    # null, and block and child are null right after.
     double.add_page("Probe Page", [{"content": "parent", "children": ["child"]}, "other"])
     parent, child = double.uuid_of("parent"), double.uuid_of("child")
     assert answer(double, "removeBlock", parent) is None
@@ -358,7 +358,7 @@ def test_upsert_on_unknown_uuid_is_null(double):
 
 
 def test_create_page_answers_the_page(double):
-    # M5: the page, with the properties as sent.
+    # The page, with the properties as sent.
     page = answer(double, "createPage", "New Page", {"status": "a"}, {"redirect": False})
     assert page["name"] == "new page"
     assert page["originalName"] == "New Page"
@@ -368,7 +368,7 @@ def test_create_page_answers_the_page(double):
 
 
 def test_create_page_existing_ignores_properties(double):
-    # M5: the same page, its old properties, the passed ones dropped.
+    # The same page, its old properties, the passed ones dropped.
     first = answer(double, "createPage", "New Page", {"status": "a"})
     again = answer(double, "createPage", "new page", {"status": "b"})
     assert again["uuid"] == first["uuid"]
@@ -377,7 +377,7 @@ def test_create_page_existing_ignores_properties(double):
 
 
 def test_create_page_first_block(double):
-    # M18: an empty first block unless createFirstBlock is false.
+    # An empty first block unless createFirstBlock is false.
     answer(double, "createPage", "With Block")
     answer(double, "createPage", "Without Block", {}, {"createFirstBlock": False})
     assert double.tree("With Block") == [("", [])]
@@ -385,7 +385,7 @@ def test_create_page_first_block(double):
 
 
 def test_create_page_journal_title_case(double):
-    # M14b: name as sent (lower), originalName with the weekday capitalised.
+    # Name as sent (lower), originalName with the weekday capitalised.
     page = answer(double, "createPage", "2099-01-05, monday", {"journal?": True})
     assert page["name"] == "2099-01-05, monday"
     assert page["originalName"] == "2099-01-05, Monday"
@@ -394,7 +394,7 @@ def test_create_page_journal_title_case(double):
 
 
 def test_create_page_journal_by_name_alone(double):
-    # M18: the name in the graph's format makes it a journal, no property needed.
+    # The name in the graph's format makes it a journal, no property needed.
     page = answer(double, "createPage", "2099-02-02, monday", {}, {"createFirstBlock": False})
     assert page["journal?"] is True
     found = answer(double, "getPage", "2099-02-02, monday")
@@ -404,13 +404,13 @@ def test_create_page_journal_by_name_alone(double):
 
 
 def test_create_page_journal_in_another_format_is_null(double):
-    # M14: created under the graph's name, answered with null.
+    # Created under the graph's name, answered with null.
     assert answer(double, "createPage", "Jan 1st, 2099") is None
     assert answer(double, "getPage", "2099-01-01, thursday")["journal?"] is True
 
 
 def test_delete_page(double):
-    # M3: null, for a missing page too.
+    # null, for a missing page too.
     double.add_page("Probe Page", ["a"])
     assert answer(double, "deletePage", "probe page") is None
     assert answer(double, "getPage", "probe page") is None
@@ -447,7 +447,7 @@ def test_rename_to_empty_does_nothing(double):
 
 
 def test_rename_onto_existing_merges(double):
-    # M4: null; the source is gone, its blocks hang under the target. Built
+    # null; the source is gone, its blocks hang under the target. Built
     # as measured, each page made by createPage (its empty first block) and
     # then appended to: the target reads "", d, "", c.
     for name, text in (("Source Page", "c-text"), ("Target Page", "d-text")):
@@ -591,7 +591,7 @@ def test_mode_rejects_a_read_or_unknown_name(double):
 # --- editor ------------------------------------------------------------------
 
 def test_check_editing_is_raw_text(double, api):
-    # M8: the uuid as raw text, not JSON.
+    # The uuid as raw text, not JSON.
     double.editing = "6a1d2e3f-4b5c-4d6e-8f70-8192a3b4c5d6"
     r = rpc(double, "checkEditing")
     assert r.text == double.editing
@@ -631,7 +631,7 @@ def test_exit_editing_mode(double):
 
 
 def test_insert_batch_block_opens_the_last_block_on_a_visible_page(double):
-    # editor.cljs:1998, M16: only where the page is shown.
+    # editor.cljs:1998, measured: only where the page is shown.
     double.add_page("Probe Page", ["anchor"])
     anchor = double.uuid_of("anchor")
     tree = [{"content": "r1", "children": [{"content": "r1a"}]}, {"content": "r2"}]
@@ -644,7 +644,7 @@ def test_insert_batch_block_opens_the_last_block_on_a_visible_page(double):
 
 
 def test_insert_opens_the_new_block_unless_focus_false(double):
-    # M10: the cursor jumps into the new block on a visible page.
+    # The cursor jumps into the new block on a visible page.
     double.add_page("Probe Page", ["anchor"])
     double.show_page("Probe Page")
     anchor = double.uuid_of("anchor")
@@ -682,7 +682,6 @@ def test_time_tracking_clocks_in_and_out(double):
 # --- protocol ------------------------------------------------------------------
 
 def test_unknown_method_is_error_object(double):
-    # M9.
     assert answer(double, "logseq.Editor.gibtsNicht") == {"error": "MethodNotExist: gibts_nicht"}
 
 

@@ -671,7 +671,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             click.echo("Note: Hierarchical content detected, using structured insertion", err=True)
 
         # The heading was found or written, or the command failed before
-        # the blocks (#93, spec 030).
+        # the blocks (#93).
         position = f"under '{under_heading}'" if heading_uuid else "top-level"
         if as_json:
             output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids)}, True)

@@ -12,7 +12,7 @@ happened to carry a tab:
 Every command guarded here writes into the journal or the block-ref network, so a
 silent miss means a log entry or a TODO link that looks present and is not.
 
-The check sits in LogseqAPI now (spec 030), so a failed insert is run against
+The check sits in LogseqAPI now, so a failed insert is run against
 the HTTP double, where the real API sees Logseq's `null`; a method mock would
 never raise.
 """
@@ -32,12 +32,11 @@ def _dead_graph(monkeypatch, *, from_call=1):
     """Logseq answering insertBlock and appendBlockInPage with ``null`` and
     writing nothing, as it does on a page it has not loaded; with
     ``from_call`` the calls before it still land."""
-    double = LogseqHttpDouble()
-    double.add_page("2099-01-05, Monday", [{"content": "## Log", "children": ["logged"]}])
-    double.add_page("P", ["## Refs", "src block"])
-    for method in ("insertBlock", "appendBlockInPage"):
-        double.set_mode(method, "noop", from_call=from_call)
-    return double.install(monkeypatch)
+    return LogseqHttpDouble.installed(
+        monkeypatch,
+        {"2099-01-05, Monday": [{"content": "## Log", "children": ["logged"]}],
+         "P": ["## Refs", "src block"]},
+        modes={"insertBlock": "noop", "appendBlockInPage": "noop"}, from_call=from_call)
 
 
 def _run_json(args):
@@ -184,14 +183,12 @@ class TestCreatePageWithContent:
 
 class TestReplaceTextVerifiesByReading:
     """updateBlock answers null either way, so the count must come from a
-    read. update_block makes that read itself (spec 030); against the HTTP
+    read. update_block makes that read itself; against the HTTP
     double answering null and writing nothing, it raises, and replace-text
     lists the block."""
 
     def _double(self, monkeypatch):
-        double = LogseqHttpDouble()
-        double.add_page("P", ["old here"])
-        return double.install(monkeypatch)
+        return LogseqHttpDouble.installed(monkeypatch, {"P": ["old here"]})
 
     def _unwritten(self, monkeypatch):
         double = self._double(monkeypatch)

@@ -1,12 +1,12 @@
 """No write changes a block open in Logseq's editor, and no insert moves the
-cursor (spec 030, Baustein 2 and E2).
+cursor.
 
-Measured (M8): a write to the block someone is typing in replaces the
+Measured (Logseq 0.10.15): a write to the block someone is typing in replaces the
 editor's text at once, and everything typed and not yet saved is gone;
 Logseq answers null, and a read right after still shows the old text, so no
 proof after the write can catch it. The gate asks ``checkEditing`` before the
 write and refuses. Inserts never refuse (Logseq saves the open block first,
-M10), but they go with ``focus: false`` so the cursor stays where it is.
+measured), but they go with ``focus: false`` so the cursor stays where it is.
 
 Against the HTTP double with the real ``LogseqAPI``: the tests that replace
 ``LogseqAPI`` method by method cannot see a gate that lives inside it.
@@ -23,10 +23,6 @@ from tests.logseq_http_double import LogseqHttpDouble
 from tests.test_write_proof_every_command import ROWS, _graph, _invoke
 
 UNKNOWN = "6a1d2e3f-4b5c-4d6e-8f70-8192a3b4c5d6"
-
-
-def _spec(task):
-    return pytest.mark.xfail(strict=True, reason=f"spec 030: {task}")
 
 
 @pytest.fixture
@@ -99,10 +95,10 @@ def _sent_options(double, method):
     return [a[position] if len(a) > position else None for a in double.sent(method)]
 
 
-# --- 030-B1: the cursor stays where it is ------------------------------------
+# --- The cursor stays where it is -------------------------------------------
 
 def test_inserts_send_focus_false(monkeypatch, double, api):
-    # M10: without focus: false the new block opens in the editor, on a
+    # Measured: without focus: false the new block opens in the editor, on a
     # visible page the cursor jumps into it. A caller's own focus is overridden.
     double.show_page("Probe Page")
     anchor = _uuid(double, "anchor block")
@@ -129,7 +125,7 @@ def test_inserts_send_focus_false(monkeypatch, double, api):
 
 
 def test_create_page_sends_redirect_false(monkeypatch, double, api):
-    # M13: createPage without options turns Logseq's view to the new page.
+    # Measured: createPage without options turns Logseq's view to the new page.
     api.create_page("New Page")
     api.create_page("Page With Properties", {"status": "a"})
     api.create_page("Page Written At Once", first_block=False)
@@ -147,7 +143,7 @@ def test_create_page_sends_redirect_false(monkeypatch, double, api):
     assert seen >= 5
 
 
-# --- 030-B3: the gate, method by method --------------------------------------
+# --- The gate, method by method ---------------------------------------------
 
 def test_gate_refuses_update_block(double, api):
     x = _uuid(double, "target block")
@@ -257,14 +253,14 @@ def test_gate_refuses_rename_page_block_on_page(double, api):
 
 def test_gate_refuses_rename_page_linking_block(double, api):
     # Logseq rewrites [[Probe Page]] in the open block; leaving the editor
-    # would save the old text back (M15: found through the block's refs).
+    # would save the old text back (found through the block's refs).
     open_block = _uuid(double, "see [[Probe Page]]")
     _assert_refused(double, lambda: api.rename_page("Probe Page", "New Name"), open_block)
 
 
 def test_gate_refuses_update_block_uppercase_target(double, api):
     # update-block passes --id through as typed; checkEditing answers in
-    # lower case. Compared as typed, the write would pass the gate (M8).
+    # lower case. Compared as typed, the write would pass the gate (measured).
     # A uuid with letters: the double's own are digits, the same in either case.
     double.add_page("Lettered Page", [{"content": "lettered block", "uuid": UNKNOWN}])
     x = UNKNOWN
@@ -279,7 +275,7 @@ def test_gate_refuses_update_block_uppercase_target(double, api):
 def test_gate_lets_unrelated_writes_through(double, api, write):
     """A block open elsewhere refuses nothing; neither does the anchor of a
     move (a block next to the open one changes nothing in it, as with an
-    insert, M10). A guard against a gate that refuses too much."""
+    insert, measured). A guard against a gate that refuses too much."""
     double.add_page("Props Page", ["body\nprio:: 1"])
     x, y = _uuid(double, "target block"), _uuid(double, "ref target")
     anchor = _uuid(double, "anchor block")
@@ -302,7 +298,7 @@ def test_gate_lets_unrelated_writes_through(double, api, write):
 
 
 def test_gate_never_asks_for_inserts(double, api):
-    # Inserts never refuse (M10: Logseq saves the open block first), so they
+    # Inserts never refuse (measured: Logseq saves the open block first), so they
     # do not ask; a text without a block ref has no id to store either.
     anchor = _uuid(double, "anchor block")
     double.editing = anchor
@@ -357,10 +353,10 @@ def test_insert_with_ref_to_open_block_that_has_its_id_goes_through(double, api)
     assert len(double.sent("insertBlock")) == 1
 
 
-# --- 030-B3: what checkEditing answers ---------------------------------------
+# --- What checkEditing answers ---------------------------------------------
 
 @pytest.mark.parametrize("form,editing", [
-    ("raw", UNKNOWN),       # M8: the uuid as raw text
+    ("raw", UNKNOWN),       # measured: the uuid as raw text
     ("json", UNKNOWN),      # the same as a JSON string
     ("raw", None),          # false; as JSON it is the same four letters
     ("json", None),
@@ -415,7 +411,7 @@ def test_check_editing_http_error_is_http_error(monkeypatch, double):
     assert error["status_code"] == 401
 
 
-# --- 030-B3: through the command ---------------------------------------------
+# --- Through the command ---------------------------------------------------
 
 def test_update_block_command_open_in_editor_json(double):
     x = _uuid(double, "target block")
@@ -449,15 +445,15 @@ def test_copy_block_remove_open_source_reports_landed_copies(double):
     assert ("parent block", [("kid block", [])]) in double.tree("Probe Page")
 
 
-# --- 030-B4: batches and an open editor (E2) ---------------------------------
+# --- Batches and an open editor --------------------------------------------
 
 MULTI_BLOCK = ["insert-block", "--child-of", "@parent block", "--content", "new one\n\t- kid"]
 KEEP_IDS = ["insert-block", "--after", "@alpha block", "--content", "new one", "--keep-ids"]
 
 
 def test_batch_goes_block_by_block_while_editing(monkeypatch):
-    # insertBatchBlock opens its last block in the editor (editor.cljs:1998,
-    # M16); with someone typing, the tree goes block by block, focus: false.
+    # insertBatchBlock opens its last block in the editor (editor.cljs:1998;
+    # measured); with someone typing, the tree goes block by block, focus: false.
     graph = _graph().install(monkeypatch)
     graph.editing = graph.uuid_of("other block")
     r = _invoke(graph, MULTI_BLOCK)
@@ -501,7 +497,7 @@ def test_insert_batch_block_refuses_while_editing(double, api):
 
 
 def test_keep_ids_refusal_names_the_cursor(monkeypatch):
-    # Inserting saves the open block first (M10): nothing typed is lost, the
+    # Inserting saves the open block first (measured): nothing typed is lost, the
     # cursor would move. The message says that, not "would discard".
     graph = _graph().install(monkeypatch)
     graph.editing = graph.uuid_of("other block")
@@ -530,7 +526,7 @@ def _batch(api, double):
 
 
 def test_batch_waits_for_the_editor_logseq_opens_late(monkeypatch, double, api):
-    # M16: Logseq opens the block 16–34 ms after it answered the batch. The
+    # Measured: Logseq opens the block 16–34 ms after it answered the batch. The
     # method asks again every 10 ms, up to 100 ms, and closes it once it shows.
     naps = []
     monkeypatch.setattr(LogseqAPI, "batch_editor_wait_s", 0.1)

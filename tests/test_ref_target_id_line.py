@@ -59,7 +59,7 @@ def _api():
     api = LogseqAPI(token="t")
     batches = []
     # OWN as written: an update and a property write read it back as their
-    # proof (spec 030), its text through getBlock, its properties through
+    # proof, its text through getBlock, its properties through
     # the datascript pull.
     own = {"content": BLOCKS[OWN]["content"], "texts": {}}
     # The blocks setBlocksId was asked for: its proof reads their id back.
@@ -92,7 +92,7 @@ def _api():
                 block = {**block, "content": own["content"]}
                 if batches:
                     # The anchor with the batch under it: insertBatchBlock's
-                    # proof reads it back (spec 030).
+                    # proof reads it back.
                     block["children"] = _read_back(batches, [])
             return block
         return {"uuid": "new"}

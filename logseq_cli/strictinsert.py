@@ -24,8 +24,8 @@ from logseq_cli.outlinetext import (
 from logseq_cli.pagenames import page_to_write
 from logseq_cli.writerefused import WriteNotVerified, WriteRefused, partial_state
 
-# Why a --keep-ids write is refused while a block is open (E2, spec 030).
-# Not "would discard": Logseq saves the open block before it inserts (M10).
+# Why a --keep-ids write is refused while a block is open.
+# Not "would discard": Logseq saves the open block before it inserts (measured).
 KEPT_IDS_MOVE_CURSOR = "a write with kept ids would move the cursor out of the block being edited"
 
 
@@ -102,7 +102,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, batch: bo
 
     While a block is open in Logseq's editor the tree goes block by block
     too: the batch would open its last block and move the cursor out of the
-    one being typed in (E2, spec 030); ``insertBlock`` goes with
+    one being typed in; ``insertBlock`` goes with
     ``focus: false`` and leaves it where it is.
     """
     if keep_ids:
@@ -230,19 +230,20 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
         return []
     # Before the first write, the page made for page_end included: a kept id
     # goes only through the batch (#31), and the batch would move the cursor
-    # out of the block being typed in (E2, spec 030).
+    # out of the block being typed in.
     editing = api.check_editing()
     if editing is not None:
         api.refuse_open(editing, why=KEPT_IDS_MOVE_CURSOR)
     if where == "page_end":
         # A missing page under the name Logseq creates it with, which the
         # reads below then find: a journal title in another format is the
-        # journal (M14).
+        # journal (measured).
         page_name, page = page_to_write(api, target)
         if page is None:
             # appendBlockInPage creates a missing page and writes to it; this
             # position does the same, without the empty block Logseq would
-            # otherwise put first (M18). The empty page takes the stand-in below.
+            # otherwise put first (measured). The empty page takes the
+            # stand-in below.
             api.create_page(page_name, first_block=False)
     else:
         # Logseq's uuids are lower-case; a target typed in capitals is the
@@ -297,7 +298,7 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
         raise
     if stand_in:
         # The batch landed: a stand-in left behind is an error of its own.
-        api.remove_block(stand_in)
+        _remove_uncounted(api, stand_in)
 
     expected = count_blocks(tree)
     after_tree = api.get_page_blocks_tree(page_name) or []
@@ -341,19 +342,26 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
     return new
 
 
+def _remove_uncounted(api, stand_in: str) -> None:
+    """Remove the stand-in, and take back its two writes from the call's
+    count: appended and removed, nothing of it remains, and a refusal that
+    counted them would tell a retry of writes that are gone. A removal that
+    fails raises before this, and the stand-in, which stays, counts."""
+    api.remove_block(stand_in)
+    api.writes_landed -= 2
+
+
 def _remove_stand_in(api, stand_in: str, failed: Exception) -> None:
     """Remove the stand-in after the batch raised ``failed``; a refusal of
     the removal is added to ``failed``'s message rather than raised over it,
     which would hide why the batch failed. Any WriteRefused: the removal can
     meet an error object, an open editor, or a removal that did not show."""
     try:
-        api.remove_block(stand_in)
+        _remove_uncounted(api, stand_in)
     except WriteRefused as refused:
         note = (f"The empty stand-in block {stand_in[:8]}... written for the batch "
                 f"stayed too: {refused}")
-        if isinstance(failed, click.ClickException):
-            failed.message = f"{failed.message} {note}"
-        elif failed.args:
+        if failed.args:
             failed.args = (f"{failed.args[0]} {note}", *failed.args[1:])
 
 

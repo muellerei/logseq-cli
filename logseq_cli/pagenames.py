@@ -173,7 +173,7 @@ def page_name_to_create(api, name: str) -> str:
     the graph's format.
 
     Sent as given, such a name is created all the same, and createPage
-    answers null for the journal (M14) while getPage finds nothing under the
+    answers null for the journal (measured) while getPage finds nothing under the
     name sent: a page that was made read as one that was not. Shared by
     LogseqAPI.create_page and the commands that name the page they write to
     or report, so the check for a page that exists, the write and the output
