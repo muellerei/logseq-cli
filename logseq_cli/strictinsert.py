@@ -16,6 +16,10 @@ from logseq_cli.blocktext import id_lines
 from logseq_cli.ids import collect_block_ids
 from logseq_cli.outlinetext import collect_child_uuids, count_blocks
 
+# Why a --keep-ids write is refused while a block is open (E2, spec 030).
+# Not "would discard": Logseq saves the open block before it inserts (M10).
+KEPT_IDS_MOVE_CURSOR = "a write with kept ids would move the cursor out of the block being edited"
+
 
 def _write_one_keeping_id(api, content, where, target, written_before):
     """One block through :func:`insert_tree_keeping_ids`, answered as the
@@ -173,6 +177,11 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
     batch path cannot say which nodes those were: the API reports neither an
     error nor UUIDs. Set ``batch=False`` to force the per-block path when the
     caller needs a UUID for every node as it is written.
+
+    While a block is open in Logseq's editor the tree goes block by block
+    too: the batch would open its last block and move the cursor out of the
+    one being typed in (E2, spec 030); ``insertBlock`` goes with
+    ``focus: false`` and leaves it where it is.
     """
     if keep_ids:
         return insert_tree_keeping_ids(api, tree, "last_child", parent_uuid,
@@ -184,7 +193,11 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
         # is why the batch path verifies by re-reading instead of trusting the
         # response. Single blocks keep the per-block path, which returns the
         # UUID directly and needs no verifying read.
-        return insert_block_tree_batched(api, tree, parent_uuid)
+        if api.check_editing() is None:
+            return insert_block_tree_batched(api, tree, parent_uuid)
+        # Someone is typing: block by block, the children too, without asking
+        # again.
+        batch = False
 
     uuids = []
     for block in tree:
@@ -197,7 +210,7 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, strict: b
         children = block.get("children") or []
         if new_uuid and children:
             uuids.extend(insert_block_tree_with_uuids(
-                api, children, new_uuid, strict=strict,
+                api, children, new_uuid, strict=strict, batch=batch,
                 _written=_written + len(uuids)))
     return uuids
 
@@ -341,6 +354,12 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str, *,
     """
     if not tree:
         return []
+    # Before the first write, the page made for page_end included: a kept id
+    # goes only through the batch (#31), and the batch would move the cursor
+    # out of the block being typed in (E2, spec 030).
+    editing = api.check_editing()
+    if editing is not None:
+        api.refuse_open(editing, why=KEPT_IDS_MOVE_CURSOR)
     earlier = (f" {written_before} block(s) written earlier by this command "
                "remain." if written_before else "")
     if where == "page_end":
