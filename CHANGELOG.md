@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--resolve-refs` puts what Logseq shows of a Block Ref in its place, on the
+  ref's line: the target's first line with its `SCHEDULED:` and `DEADLINE:`
+  dates, not its whole text. Logseq 0.10.15 draws a ref as the target's title
+  and shows the body only when there is no title (a block that opens with a
+  code block, math, a quote, a table, HTML, a rule, a `#+BEGIN_` block or
+  properties); such a body is joined into one line. The CLI inlined
+  everything. The target's property lines then read as the referencing
+  block's own, and so did its `id::` line: an id taken from the output for a
+  write edited the target instead (#58). Text after the ref landed behind the
+  target's last line, where after a closing fence Logseq drops it from view.
+  Properties no longer show, not even for a target that holds nothing else,
+  where Logseq shows them. The body is still one `get-block` away. See
+  [#98](https://github.com/muellerei/logseq-cli/issues/98).
+
 ### Fixed
 
 - `--resolve-refs` names the page each resolved ref came from, as documented

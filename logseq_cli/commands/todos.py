@@ -7,6 +7,7 @@ import click
 from logseq_cli.blocktext import BLOCK_REF_RE, property_line_mask, refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.dates import (
+    PLANNING_LINE_RE,
     journal_day_to_date,
     next_occurrence,
     parse_date_keyword,
@@ -223,7 +224,7 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                 continue
             if is_property:
                 continue
-            if re.match(r"^\s*(SCHEDULED|DEADLINE):\s*<", line):
+            if PLANNING_LINE_RE.match(line):
                 continue
             content_lines.append(line)
         clean_content = "\n".join(content_lines).strip()

@@ -14,29 +14,86 @@ them, and a helper three modules import is not private to any of them.
 """
 import re
 
-from logseq_cli.blocktext import BLOCK_REF_RE, PROPERTY_LINE_RE
+from logseq_cli.blocktext import (BLOCK_REF_RE, PROPERTY_LINE_RE, code_block_lines, is_fence,
+                                  property_line_mask)
+from logseq_cli.dates import PLANNING_LINE_RE
 from logseq_cli.headings import normalize_heading
 from logseq_cli.outlinetext import bullet_lines
 
 
+# What gives a block no title to mldoc 1.5.7, the parser of Logseq 0.10.15
+# (measured): a first line that is a quote, a table row (| at both ends), a
+# horizontal rule or HTML, or that opens math, a #+BEGIN_ block or a code
+# block closed further down; one nothing closes, or a one-line ```x```, is
+# text (as in blocktext.code_block_lines). So do property lines before any
+# text. A heading's #s are not part of its title.
+_UNTITLED = re.compile(r'(?:>|\|.*\|[ \t]*$|(?:-{3,}|\*{3,})[ \t]*$|<[a-z!/])', re.IGNORECASE)
+_HEADING = re.compile(r'^#+[ \t]+')
+
+
+def _has_title(text: list, fence_left_open: bool) -> bool:
+    """Whether the block whose lines, property lines taken out, are ``text``
+    has a title: its first line, unless that opens a body (_UNTITLED).
+    ``fence_left_open``: nothing closes a fence on the first line."""
+    first, rest = text[0].lstrip(" \t\f"), text[1:]
+    if _UNTITLED.match(first):
+        return False
+    if is_fence(first):
+        return fence_left_open
+    if first.startswith("$$"):
+        return "$$" not in first[2:] and not any("$$" in line for line in rest)
+    if first.lower().startswith("#+begin_"):
+        return not any(line.lstrip().lower().startswith("#+end_") for line in rest)
+    return True
+
+
+def ref_text(content: str) -> str:
+    """What Logseq shows of a block with ``content`` where a ref points at it,
+    on one line.
+
+    Logseq 0.10.15 shows the title, the first line, with the dates of its
+    SCHEDULED and DEADLINE lines; the body only for a block without a title;
+    its properties only for a block with neither, the id and the hidden ones
+    never (``block-content`` with ``:block-ref?``). The text takes the ref's
+    place inside a line of another block, so it keeps to that line: a body is
+    joined into one, and properties are left out, as on a line of their own
+    they would read as the other block's.
+    """
+    lines = [line for line in content.split("\n") if line.strip()]
+    mask = property_line_mask(lines)
+    text = [line for line, is_property in zip(lines, mask) if not is_property]
+    if not text:
+        return ""
+    code, opener = code_block_lines(text)
+    if mask[0] or not _has_title(text, opener == 0):
+        return " ".join(line.strip() for line in text)
+    dates = [line.strip() for line, is_code in zip(text[1:], code[1:])
+             if not is_code and PLANNING_LINE_RE.match(line)]
+    return " ".join([_HEADING.sub("", text[0].strip()), *dates])
+
+
 def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
-    """Resolve one block UUID to its content text; the UUID unchanged if the block is gone.
+    """What Logseq shows for the ref to ``uuid``, followed by ``↳ <page>``;
+    the ref unchanged if the block is gone.
 
     A lookup that answers ``null`` means the target is gone — Logseq answers
     that for a deleted block. So does one without a page: the placeholder
     Logseq keeps, as ``id:: <uuid>``, for a ref whose block does not exist
-    (#70). The fallback then renders the ref exactly as an
-    unresolved one, so two different things end up spelled the same way in the
-    output. ``dead`` collects those uuids so the caller can say which is which.
-    A lookup that raises is not caught: calling the ref dead would be a claim
-    about the graph made from a failed read (#93).
+    (#70). The fallback then renders the ref exactly as an unresolved one, so
+    two different things end up spelled the same way in the output. ``dead``
+    collects those uuids so the caller can say which is which. A lookup that
+    raises is not caught: calling the ref dead would be a claim about the
+    graph made from a failed read (#93).
     """
     block = api.get_block(uuid, include_children=False)
-    if isinstance((block or {}).get("page"), dict):
-        ref_content = (block.get("content") or "").strip()
-        page_name = api.page_name_of(block)
-        source = f" ↳ {page_name}" if page_name else ""
-        return f"{ref_content}{source}"
+    page = (block or {}).get("page")
+    if isinstance(page, dict):
+        text = ref_text(block.get("content") or "")
+        name = api.page_name_of(block)
+        if not name:
+            return text
+        # A target with nothing to show leaves the suffix alone, not a gap.
+        return f"{text} ↳ {name}" if text else f"↳ {name}"
     if dead is not None and uuid not in dead:
         dead.append(uuid)
     return f"(({uuid}))"

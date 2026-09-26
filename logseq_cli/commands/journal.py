@@ -165,7 +165,7 @@ Notes:
 """)
 @click.option("--from", "from_date", required=True, help="Start date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
 @click.option("--to", "to_date", required=True, help="End date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow', inclusive)")
-@click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
+@click.option("--resolve-refs", is_flag=True, help="Replace ((uuid)) block references with what Logseq shows, on one line: the target's first line (its body if it has none) and its page")
 @click.option("--tail", "tail", default=None, type=int, help="Only the newest N journal days of the range, 1 or greater (applied before fetching)")
 @click.option("--limit", "limit", default=None, type=int, help="Only the oldest N journal days of the range, 1 or greater (applied before fetching)")
 @click.option("--heading", default=None, help="Return only the section under this heading per day (e.g. '## Log')")
