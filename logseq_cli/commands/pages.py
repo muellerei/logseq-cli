@@ -136,7 +136,7 @@ Examples:
   logseq-cli --token TOKEN get-page --name "Project Alpha" --max-chars 20000
   logseq-cli --token TOKEN get-page --name A --name B    # batch read
 Notes:
-  --resolve-refs inlines ((uuid)) block-refs (saves N×get-block).
+  --resolve-refs puts what Logseq shows of each ((uuid)) block-ref, and its page, in its place.
   --with-ids prefixes each line with the block UUID (replaces --json | jq).
   --heading returns only the matching heading-block + its children.
   --outline lists the headings with their UUIDs, the page's table of contents;
@@ -154,7 +154,7 @@ Notes:
 """)
 @click.option("--page", "--name", required=True, multiple=True, help="Page name (repeatable for batch: --name A --name B)")
 @click.option("--no-backlinks", is_flag=True, help="Skip backlink computation")
-@click.option("--resolve-refs", is_flag=True, help="Inline ((uuid)) block references with their content")
+@click.option("--resolve-refs", is_flag=True, help="Replace ((uuid)) block references with what Logseq shows, on one line: the target's first line (its body if it has none) and its page")
 @click.option("--with-ids", "with_ids", is_flag=True, help="Prefix each block line with its UUID (format: <uuid>\\t<indent>\\t<content>)")
 @click.option("--heading", default=None, help="Return only the section under this heading (e.g. '## Focus Topics W17'). Searches recursively; fails when the page has no such heading.")
 @click.option("--outline", is_flag=True, help="Only the headings, one line each with its UUID, indented by how they nest: a heading inside another's section one tab deeper. A heading is what Logseq reads as one. No backlinks; not with --format markdown")

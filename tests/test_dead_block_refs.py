@@ -28,6 +28,7 @@ DEAD = "22222222-2222-2222-2222-222222222222"
 def api():
     mock = MagicMock()
     mock.get_page.return_value = {"name": "page"}
+    mock.page_name_of.return_value = "Source"
     mock.get_page_linked_references.return_value = []
     mock.get_page_blocks_tree.return_value = [
         {"uuid": "b1", "content": f"see (({LIVE})) and (({DEAD}))", "children": []},
@@ -36,7 +37,7 @@ def api():
     def get_block(uuid, include_children=True):
         if uuid == LIVE:
             return {"uuid": LIVE, "content": "the live one",
-                    "page": {"originalName": "Source"}}
+                    "page": {"id": 7}}
         return None  # deleted block: Logseq answers null
 
     mock.get_block.side_effect = get_block

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--resolve-refs` puts what Logseq shows of a Block Ref in its place, on the
+  ref's line: the target's first line with its `SCHEDULED:` and `DEADLINE:`
+  dates, not its whole text. Logseq 0.10.15 draws a ref as the target's title
+  and shows the body only when there is no title (a block that opens with a
+  code block, math, a quote, a table, HTML, a rule, a `#+BEGIN_` block or
+  properties); such a body is joined into one line. The CLI inlined
+  everything. The target's property lines then read as the referencing
+  block's own, and so did its `id::` line: an id taken from the output for a
+  write edited the target instead (#58). Text after the ref landed behind the
+  target's last line, where after a closing fence Logseq drops it from view.
+  Properties no longer show, not even for a target that holds nothing else,
+  where Logseq shows them. The body is still one `get-block` away. See
+  [#98](https://github.com/muellerei/logseq-cli/issues/98).
+
+### Fixed
+
+- `--resolve-refs` names the page each resolved ref came from, as documented
+  (`the actual text ↳ Meeting Notes`). The suffix never showed: asked without
+  children, `getBlock` answers the block's page as `{id}` alone (measured,
+  0.10.15), and asking with them reads the target's whole subtree. The name
+  now comes from `getPage` by that id, with the read cache on once per page.
+  The tests answered the page with a name, which Logseq does not, and passed.
+- A ref whose block does not exist stays `((uuid))` under `--resolve-refs`,
+  and `get-page` reports it as dead, also once Logseq has read the page
+  holding it from its file. Logseq then keeps a placeholder `id:: <uuid>`
+  without a page (#70), which was inlined as the ref's text.
+
 ## [0.16.0] - 2026-09-26
 
 Every write is now proven, and none overwrites a block you are editing.

@@ -14,6 +14,7 @@ def _api_with_blocks(blocks, ref_block=None):
     api = MagicMock()
     api.get_page_blocks_tree.return_value = blocks
     api.get_page_linked_references.return_value = []
+    api.page_name_of.return_value = "OtherPage"
     if ref_block is not None:
         api.get_block.return_value = ref_block
     return api
@@ -42,7 +43,7 @@ class TestGetPageResolveRefs:
         ]
         ref_block = {
             "content": "RESOLVED CONTENT",
-            "page": {"originalName": "OtherPage"},
+            "page": {"id": 42},
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
@@ -65,7 +66,7 @@ class TestGetPageResolveRefs:
         ]
         ref_block = {
             "content": "DEEP",
-            "page": {"originalName": "Z"},
+            "page": {"id": 42},
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
@@ -123,7 +124,7 @@ class TestGetPageWithIds:
         ]
         ref_block = {
             "content": "INNER",
-            "page": {"originalName": "OtherPage"},
+            "page": {"id": 42},
         }
         api = _api_with_blocks(blocks, ref_block=ref_block)
         runner = CliRunner()
@@ -258,7 +259,7 @@ class TestGetPageUnresolvedRefWarning:
 
     def test_silent_when_flag_resolves_them(self):
         blocks = [{"content": f"see (({self.UUID})) here", "uuid": "b1", "children": []}]
-        ref = {"content": "the target", "page": {"originalName": "Src"}}
+        ref = {"content": "the target", "page": {"id": 42}}
         api = _api_with_blocks(blocks, ref_block=ref)
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             result = split_runner().invoke(

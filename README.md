@@ -584,11 +584,18 @@ arrives as a page full of holes, and the caller has to spend one `get-block`
 per hole to find out what it said.
 
 `--resolve-refs` on `get-page` and `get-journal-range` replaces each reference
-with the text it points at, followed by the page it came from
+with what Logseq shows in its place, followed by the page it came from
 (`the actual text ↳ Meeting Notes`), and descends into child blocks so a nested
-quote resolves too. A reference whose target cannot be read is left as
-`((uuid))` rather than dropped or blanked: a hole you can see beats a sentence
-that silently lost a clause.
+quote resolves too. Logseq shows the target's first line, without a heading's
+`#`s and with the dates of its `SCHEDULED:` and `DEADLINE:` lines; a target
+that opens with something else (a code block, math, a quote, a table, HTML, a
+rule, a `#+BEGIN_` block or properties) has no such line and shows its body,
+here joined into one line. The resolved text stays on the line of the ref, so the target's
+properties stay out, its `id::` line included: on a line of their own they
+would read as the referencing block's. For the whole target, run `get-block`
+on the uuid. A reference whose target is gone is left as
+`((uuid))` rather than dropped or blanked, and `get-page` names it on stderr: a
+hole you can see beats a sentence that silently lost a clause.
 
 Without the flag both commands count what is left and say so on stderr —
 `3 unresolved block-ref(s) in output` — because the output otherwise looks
