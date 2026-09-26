@@ -144,8 +144,10 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
     itself is the anchor.
 
     Returns the new UUIDs in DFS pre-order. Raises ``ClickException`` for a
-    parent that is not there, before anything is written; the API method
-    raises WriteNotVerified for a batch that did not land in full.
+    parent that is not there, before the batch is written, naming what the
+    call wrote before (the page, the heading, the parent block of a tree that
+    went block by block); the API method raises WriteNotVerified for a batch
+    that did not land in full.
     """
     if not tree:
         return []
@@ -155,7 +157,7 @@ def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:
         raise click.ClickException(
             f"Cannot insert: block {parent_uuid[:8]}... not found "
             "(the target UUID does not exist, or the page is not loaded). "
-            "Nothing was written."
+            f"{partial_state(api.writes_landed)}"
         )
     existing = [c for c in (before.get("children") or []) if isinstance(c, dict)]
 
