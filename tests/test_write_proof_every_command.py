@@ -22,6 +22,7 @@ import json
 
 import pytest
 
+from logseq_cli.api import _MUTATING_METHODS, LogseqAPI, LogseqWriteError
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
@@ -35,14 +36,12 @@ PROOF_TASK = {
     "removeBlock": "030-C5", "deletePage": "030-C5", "renamePage": "030-C5",
     "createPage": "030-C5", "setBlocksId": "030-C5",
 }
-# An error object on a write fails in call() for every method alike.
-ERROR_OBJECT_TASK = "030-B5"
 
 # replace-text reads its blocks back itself since 0.8.0 and reports a write
 # that did not land with write_not_verified already (commands/edit.py), so
-# its noop row is a guard, not an expected failure. It reports through its
-# own fail() with a list of failed blocks, not through the error handler, so
-# the handler's fields (method, writes_landed) are not asked of it.
+# its noop row is a guard, not an expected failure. It reports that through
+# its own fail() with a list of failed blocks, not through the error handler,
+# so the handler's fields (method, writes_landed) are not asked of it.
 PROVEN_BY_THE_COMMAND = {"replace-text"}
 
 # Block texts in the graph below; an argument "@<text>" is that block's uuid.
@@ -251,9 +250,8 @@ def _spec(task):
 def _failure_params():
     for row_id, args, method in ROWS:
         for mode in ("noop", "error"):
-            if mode == "error":
-                task = ERROR_OBJECT_TASK
-            elif args[0] in PROVEN_BY_THE_COMMAND:
+            # An error object fails in call() for every method alike.
+            if mode == "error" or args[0] in PROVEN_BY_THE_COMMAND:
                 task = None
             else:
                 task = PROOF_TASK[method]
@@ -297,6 +295,30 @@ def test_a_write_logseq_did_not_do_fails_with_its_reason(monkeypatch, args, meth
     assert isinstance(error.get("writes_landed"), int), error
     if mode == "error":
         assert error.get("logseq_message") == f"{method} failed", error
+
+
+@pytest.mark.parametrize("method", sorted(_MUTATING_METHODS), ids=_short)
+def test_error_object_on_each_write_method(monkeypatch, method):
+    """Logseq answers a write it threw on with HTTP 200 and ``{"error": ...}``
+    (M1, M2, M6, M9). call() raises for every write in the registry, not only
+    for those the table above reaches."""
+    double = _graph().install(monkeypatch)
+    double.set_mode(_short(method), "error")
+    with pytest.raises(LogseqWriteError) as caught:
+        LogseqAPI(token="t").call(method, [double.uuid_of("alpha block"), "x"])
+    assert caught.value.reason == "logseq_error"
+    assert caught.value.fields == {"method": _short(method),
+                                   "logseq_message": f"{_short(method)} failed"}
+
+
+def test_a_write_answer_with_an_error_key_and_a_uuid_is_a_block(monkeypatch):
+    """The check is the one get_block makes: a block map carries a uuid, an
+    error object does not. A block with a key named error is no failure."""
+    block = {"uuid": "6500c0de-0000-4000-8000-000000000001", "error": "a value"}
+    double = _graph().install(monkeypatch)
+    monkeypatch.setitem(double._handlers, "logseq.Editor.insertBlock", lambda args: block)
+    anchor = double.uuid_of("alpha block")
+    assert LogseqAPI(token="t").call("logseq.Editor.insertBlock", [anchor, "x"]) == block
 
 
 @pytest.mark.parametrize("row_id,args", [pytest.param(i, a, id=i) for i, a, _ in ROWS])

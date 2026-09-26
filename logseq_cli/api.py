@@ -340,6 +340,19 @@ class LogseqAPI:
                 self._cache_set(key, data)
         elif isinstance(kind, Write):
             self.clear_cache()
+            # Logseq answers a write it threw on with HTTP 200 and
+            # {"error": ...} (M1, M2, M6, M9), which went on as the result and
+            # read as success. The test is get_block's: a block map carries a
+            # uuid, an error object does not. Writes only; a read's error
+            # object stays with the method that knows what it means.
+            if isinstance(data, dict) and "error" in data and "uuid" not in data:
+                short = method.rsplit(".", 1)[-1]
+                message = str(data["error"])
+                raise LogseqWriteError(
+                    f"Logseq refused {short}: {message.rstrip('.')}.",
+                    method=short,
+                    logseq_message=message,
+                )
 
         return data
 
