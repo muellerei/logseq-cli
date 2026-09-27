@@ -35,6 +35,35 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `set-todo-status --follow-refs` changes the task at the end of a chain of
+  refs, never a block on the way. It followed one ref and only when the
+  block held nothing else, so it missed the usual case: a block that is
+  itself a ref target carries an Id Line, and `((T))` with its `id::` line
+  was changed itself into `DONE ((T))`, a second task, while T stayed open.
+  A chain H → M → T turned M into that second task, and a block holding
+  only `{{embed ((T))}}` got the marker in front of the embed. Now a block
+  that holds only `((uuid))` or `{{embed ((uuid))}}`, property lines aside,
+  is followed through every such block, the embed with the spaces Logseq
+  allows in it (`{{embed  ((uuid)) }}`, measured on 0.10.15); a labelled ref `[text](((uuid)))`
+  is a link with text of its own and is changed itself, as before. Under
+  `--json` the result names the blocks passed in `followed`, and
+  `--dry-run` shows them. A chain that comes back to a block it passed is
+  refused (`reason: "ref_cycle"`); one that reaches a missing block, where
+  it used to write `DONE ((uuid))` into the reference with a warning or
+  send the marker to Logseq's placeholder, is refused too
+  (`reason: "dead_ref"`). Nothing is written either way. Found in reading
+  the code for block refs, reproduced with the test double, the missing
+  target measured on 0.10.15 (#106). Cost: one `getBlock` per link, as the
+  one step took before.
+
+- `set-todo-status --id` on a block Logseq holds only as the placeholder of
+  a missing ref target (content `id:: <uuid>`, no page) is refused as not
+  found, with `reason: "block_not_found"` under `--json`, as for a block
+  that does not exist. The marker went in front of the placeholder's line,
+  and the write proof then reported a write that did not show (#106).
+  A block that does not exist now also answers under `--json` with that
+  reason; the message is the same.
+
 - `get-block` prints the parent block's uuid as `Parent:`, ready for the
   next `--id`, and `Parent: (page)` when the block sits directly under its
   page, so a `Parent:` line in the block's own text does not come first.

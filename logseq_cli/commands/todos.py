@@ -4,7 +4,7 @@ import sys
 
 import click
 
-from logseq_cli.blocktext import BLOCK_REF_RE, property_line_mask, refuse_split_block
+from logseq_cli.blocktext import pointer_target, property_line_mask, refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.dates import (
     PLANNING_LINE_RE,
@@ -35,6 +35,40 @@ def _swap_todo_marker(content: str, new_status: str) -> str:
     else:
         first = f"{new_status} {first}"
     return first + newline + rest
+
+
+def follow_ref_chain(api, block: dict, as_json: bool):
+    """The block at the end of the refs ``block`` stands for, and the uuids
+    passed on the way there: ``(target, followed)``.
+
+    A block that holds only ``((uuid))`` or ``{{embed ((uuid))}}``, apart
+    from its property lines, stands for its target, and so may that target:
+    a task pulled forward twice. Followed one step only, the link in the
+    middle became ``DONE ((T))``, a second task, while T stayed open (#106).
+    ``followed`` runs from the first target to the last, without ``block``.
+
+    Refuses without a write when the chain comes back to a block it passed
+    (``ref_cycle``) or leads to one that is gone (``dead_ref``): a read
+    without a page, ``null`` or the placeholder Logseq keeps for a missing
+    block, as for --resolve-refs (#70). Either way no block on it is the
+    task the caller meant.
+    """
+    start = block["uuid"].lower()
+    followed, target = [], block
+    while (uuid := pointer_target(target.get("content"))):
+        if uuid == start or uuid in followed:
+            fail(f"The refs from block {start} come back to block {uuid}. "
+                 "Nothing was written.",
+                 as_json, reason="ref_cycle", id=uuid, followed=followed)
+        read = api.get_block(uuid, include_children=False)
+        if not isinstance((read or {}).get("page"), dict):
+            fail(f"The refs from block {start} lead to block {uuid}, which is gone "
+                 "(a dead ref). Nothing was written.",
+                 as_json, reason="dead_ref", id=uuid, followed=followed)
+        followed.append(uuid)
+        target = read
+    return target, followed
+
 
 def _fetch_todo_references(api, markers_str: str) -> dict:
     """Map each referenced todo's uuid to the pages its references sit on.
@@ -442,7 +476,9 @@ Examples:
   logseq-cli --token TOKEN set-todo-status --id JOURNAL-UUID --status DONE --follow-refs
 Notes:
   Status values: TODO, DOING, DONE, LATER, NOW, CANCELED.
-  --follow-refs: when block is a ((uuid)) ref to a project page, updates the original.
+  --follow-refs: when the block holds only a ((uuid)) ref or {{embed ((uuid))}},
+  follows it, and on through every such block, and updates the one at the end.
+  A chain that loops or reaches a missing block is refused, nothing written.
   Prefer this over replace-text for marker changes — 1 call, deterministic.
 """)
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
@@ -452,7 +488,8 @@ Notes:
               type=click.Choice(["TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED"]),
               help="New task status")
 @click.option("--follow-refs", is_flag=True,
-              help="If the block content is a ((uuid)) reference, follow it and update the original block instead.")
+              help="If the block holds only a ((uuid)) ref or an embed of one, follow it, "
+                   "through every such block, and update the block at the end instead.")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show the marker change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
@@ -462,7 +499,8 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
 
     Identify the block either by UUID (--id) or by content substring + page (--content + --page).
     Use --follow-refs when the block is a ((uuid)) reference in a journal and the original block
-    lives on a project page.
+    lives on a project page. A block holding only {{embed ((uuid))}} counts as a reference too,
+    and a chain of such references is followed to its end.
 
     Examples:
       logseq-cli set-todo-status --id UUID --status DONE
@@ -504,33 +542,27 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
                 f"to guess which one to update. Narrow --content or pass --id:\n"
                 f"{listing}{more}", err=True)
             sys.exit(1)
-        block_id = candidates[0].get("uuid")
-        old_content = candidates[0].get("content", "")
+        block = candidates[0]
     else:
         block_id = block_id.strip("()")
         block = api.get_block(block_id, include_children=False)
-        if not block:
-            click.echo(f"Block {block_id} not found.", err=True)
-            sys.exit(1)
-        old_content = block.get("content", "")
+        # A read without a page is Logseq's placeholder for a block that is
+        # gone, content "id:: <uuid>"; the marker went in front of that line.
+        if not isinstance((block or {}).get("page"), dict):
+            fail(f"Block {block_id} not found.", as_json, reason="block_not_found", id=block_id)
 
-    # --follow-refs: if block content is just a ((uuid)) reference, update the referenced block
+    # With --follow-refs every JSON result says which blocks it went through.
+    chain = {}
     if follow_refs:
-        stripped = old_content.strip()
-        ref_match = BLOCK_REF_RE.fullmatch(stripped)
-        if ref_match:
-            ref_uuid = ref_match.group(1)
-            ref_block = api.get_block(ref_uuid, include_children=False)
-            if ref_block:
-                block_id = ref_uuid
-                old_content = ref_block.get("content", "")
-            else:
-                print_note(f"Warning: referenced block {ref_uuid} not found, updating original.")
+        block, chain["followed"] = follow_ref_chain(api, block, as_json)
+    block_id = block.get("uuid")
+    old_content = block.get("content", "")
 
     new_content = _swap_todo_marker(old_content, status)
     if new_content == old_content:
         if as_json:
-            output({"uuid": block_id, "status": "unchanged", "content": old_content}, True)
+            output({"uuid": block_id, "status": "unchanged", "content": old_content, **chain},
+                   True)
         else:
             click.echo("No change (block already has status or no marker found).")
         return
@@ -552,9 +584,11 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
         if as_json:
             output({"uuid": block_id, "old_marker": old_marker, "new_marker": status,
                     "old": old_content, "new": new_content, "status": status,
-                    "dry_run": True}, True)
+                    "dry_run": True, **chain}, True)
         else:
             click.echo(f"[DRY RUN] Would set status on block {block_id}")
+            if chain.get("followed"):
+                click.echo(f"  followed: {' -> '.join(chain['followed'])}")
             click.echo(f"  marker: {old_marker or '(none)'} -> {status}")
             preview = old_content[:60] + ("..." if len(old_content) > 60 else "")
             click.echo(f"  was: {preview}")
@@ -566,7 +600,8 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     api.update_block(block_id, new_content, replacing=old_content)
 
     if as_json:
-        output({"uuid": block_id, "old": old_content, "new": new_content, "status": status}, True)
+        output({"uuid": block_id, "old": old_content, "new": new_content, "status": status,
+                **chain}, True)
     else:
         click.echo(f"Updated: {old_content[:60]}{'...' if len(old_content) > 60 else ''}")
         click.echo(f"      → {new_content[:60]}{'...' if len(new_content) > 60 else ''}")

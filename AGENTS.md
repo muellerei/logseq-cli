@@ -189,6 +189,11 @@ logseq-cli set-todo-status --content "Task" --page "Page" --status DONE
 logseq-cli set-todo-status --id JOURNAL-REF-UUID --status DONE --follow-refs
 ```
 
+`--follow-refs` follows a block that holds only `((uuid))` or
+`{{embed ((uuid))}}`, and on through every such block, and changes the block
+at the end; `followed` in `--json` lists the blocks it passed. A chain that
+loops or reaches a missing block is refused and nothing is written.
+
 Do not use `replace-text` to change a marker: it rewrites by text match, so it
 also hits the word elsewhere on the page and silently retypes the rest of the
 line. `set-todo-status` swaps only the marker, in one call.
@@ -436,6 +441,9 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
+| `block_not_found` | The block the command names does not exist; for `set-todo-status --id` also when Logseq holds it only as the placeholder of a missing ref target | `id` |
+| `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
+| `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
 
 `set-property` and `remove-property --name` check the page themselves and
 name `page` and `property` instead.
