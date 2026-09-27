@@ -62,7 +62,9 @@ def get_block(ctx, block_id, no_children, as_json):
 
         content = block.get("content", "")
         click.echo(content)
-        children = block.get("children", [])
+        # Asked without children, Logseq answers each as a ["uuid", <uuid>]
+        # pair, not a block (measured, 0.10.15): only blocks are rendered.
+        children = [c for c in block.get("children") or [] if isinstance(c, dict)]
         if children:
             click.echo(process_blocks(children, indent=1))
 

@@ -35,6 +35,16 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-block --no-children` no longer crashes on a block that has children.
+  Asked without children, Logseq answers each as a `["uuid", <uuid>]` pair
+  rather than a block, and the text output rendered the pairs as blocks:
+  `AttributeError` and a traceback, in exactly the case the option exists
+  for. Found while checking the `Parent:` fix below and reproduced
+  against Logseq. Present since the first import; the test double answered
+  `[]` there, so no test ran against Logseq's form. Both doubles now answer
+  it, and a shape test holds them to the measured forms (#104). Costs no
+  extra request.
+
 - `--resolve-refs` names the page each resolved ref came from, as documented
   (`the actual text ↳ Meeting Notes`). The suffix never showed: asked without
   children, `getBlock` answers the block's page as `{id}` alone (measured,
