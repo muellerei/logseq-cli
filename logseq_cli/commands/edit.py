@@ -710,10 +710,10 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     source_id = source_id.strip().strip("()").strip()
     # A ref to no block renders as nothing, and the TODO it carries over looks
     # linked and is not (#70). Asked before the page or the heading is written.
-    # For the uuid of a dead ref Logseq keeps a placeholder once the file is
-    # read again, a block without a page; a page's uuid gets null (measured).
+    # get_block answers None for the placeholder of a dead ref and for a
+    # page's uuid too (api.block_or_none).
     source_block = api.get_block(source_id, include_children=False)
-    if not (source_block and source_block.get("page")):
+    if not source_block:
         # repr: an invisible character copied along shows, as does a line break.
         fail(f"No block has the uuid {source_id!r}: a ref to it would render as "
              "nothing. Nothing was written.", as_json=as_json, source_id=source_id)

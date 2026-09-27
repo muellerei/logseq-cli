@@ -50,9 +50,14 @@ def _json_payload(result):
 # ---------------------------------------------------------------------------
 # set-todo-status
 # ---------------------------------------------------------------------------
+# As Logseq answers getBlock without children: the page as its id.
+TASK_BLOCK = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report",
+              "page": {"id": 1}}
+
+
 class TestSetTodoStatusDryRun:
     def test_dry_run_shows_marker_change_and_does_not_write(self, api):
-        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        api.get_block.return_value = TASK_BLOCK
         result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DONE", "--dry-run"])
         assert result.exit_code == 0
@@ -62,7 +67,7 @@ class TestSetTodoStatusDryRun:
         _assert_no_mutation(api)
 
     def test_json_reports_both_markers(self, api):
-        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        api.get_block.return_value = TASK_BLOCK
         result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DOING", "--dry-run", "--json"])
         assert result.exit_code == 0
@@ -74,7 +79,7 @@ class TestSetTodoStatusDryRun:
         _assert_no_mutation(api)
 
     def test_without_dry_run_writes(self, api):
-        api.get_block.return_value = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report"}
+        api.get_block.return_value = TASK_BLOCK
         result = CliRunner().invoke(cli, ["set-todo-status", "--id", "00000000-0000-4000-8000-0000000000a1",
                                           "--status", "DONE"])
         assert result.exit_code == 0

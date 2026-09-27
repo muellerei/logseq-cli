@@ -417,6 +417,23 @@ def _under_its_page(block) -> bool:
     return parent_id is not None and parent_id == ((block or {}).get("page") or {}).get("id")
 
 
+def block_or_none(answer):
+    """Logseq's getBlock ``answer`` if it is a block, else ``None``.
+
+    Three answers mean "no such block" (measured, 0.10.15): ``null`` for an
+    unknown uuid, a page's uuid or a page's db id; HTTP 200 with
+    ``{"error": "... is not a valid UUID string."}`` for a malformed one; and
+    a map without a page, content ``id:: <uuid>``, the placeholder Logseq
+    keeps for a ref whose block does not exist once it reads the file again
+    (#70). Passed on, the last two looked like a block to every
+    ``if not block`` guard: a write went to the placeholder, and
+    ``get-block`` printed it. Every block has its page.
+    """
+    if isinstance(answer, dict) and not isinstance(answer.get("page"), dict):
+        return None
+    return answer
+
+
 class LogseqAPI:
     # After a batch, how long to watch for the block Logseq opens in its
     # editor: it opened 16–34 ms after the answer (measured, three runs), so
@@ -542,8 +559,8 @@ class LogseqAPI:
             # Logseq answers a write it threw on with HTTP 200 and
             # {"error": ...} (measured for updateBlock, removeBlock, the property
             # writes and an unknown method), which went on as the result and
-            # read as success. The test is get_block's: a block map carries a
-            # uuid, an error object does not. Writes only; a read's error
+            # read as success. An error object carries no uuid; a write's
+            # answer that does is Logseq's own. Writes only; a read's error
             # object stays with the method that knows what it means.
             if isinstance(data, dict) and "error" in data and "uuid" not in data:
                 short = method.rsplit(".", 1)[-1]
@@ -1042,20 +1059,12 @@ class LogseqAPI:
         return self.call("logseq.Editor.getPage", [page_name], cached=cached)
 
     def get_block(self, block_id: str, include_children: bool = True, *, cached: bool = True):
-        """The block, or ``None`` when Logseq has none under ``block_id``.
-
-        An unknown uuid comes back as ``null``, a malformed one as HTTP 200 with
-        ``{"error": "... is not a valid UUID string."}`` (measured, 0.10.15).
-        Both mean "no such block"; passing the error object on made it look
-        like one to every ``if not block`` guard.
-        """
-        result = self.call(
+        """The block, or ``None`` when Logseq has none under ``block_id``;
+        see :func:`block_or_none`."""
+        return block_or_none(self.call(
             "logseq.Editor.getBlock", [block_id, {"includeChildren": include_children}],
             cached=cached,
-        )
-        if isinstance(result, dict) and "error" in result and "uuid" not in result:
-            return None
-        return result
+        ))
 
     def create_page(self, page_name: str, properties: dict = None, *, first_block: bool = True):
         """Create a page. A name in the graph's date format is a journal.
@@ -1279,7 +1288,7 @@ class LogseqAPI:
             if uuid == (own or "").lower():
                 continue
             block = self.get_block(uuid, include_children=False)
-            if block and block.get("page") and not (block.get("properties") or {}).get("id") \
+            if block and not (block.get("properties") or {}).get("id") \
                     and not block.get("preBlock?"):
                 wanted.append(block["uuid"])
         return wanted

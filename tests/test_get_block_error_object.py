@@ -26,7 +26,7 @@ def test_get_block_turns_an_error_object_into_none():
 
 def test_get_block_passes_a_block_through():
     api = LogseqAPI(token="t")
-    block = {"uuid": "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70", "content": "x"}
+    block = {"uuid": "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70", "content": "x", "page": {"id": 1}}
     with patch.object(api, "call", return_value=block):
         assert api.get_block(block["uuid"]) == block
 

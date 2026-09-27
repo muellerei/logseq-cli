@@ -236,9 +236,42 @@ def block_text_matches(sent: str, read: str) -> bool:
 # id is what Logseq does on every copied ref. BLOCK_REF_RE is the one pattern
 # for a ref, which the reads that resolve and count refs use too; the code rule
 # is block_ref_uuids' alone, so those reads still take a ref in code for one.
-BLOCK_REF_RE = re.compile(
-    r'\(\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\)', re.IGNORECASE)
+_UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+BLOCK_REF_RE = re.compile(rf'\(\(({_UUID})\)\)', re.IGNORECASE)
 _INLINE_CODE_RE = re.compile(r'(`+)(?:(?!\1).)+?\1')
+
+# The three forms that point at a block in text, one alternative each, so a
+# match says which form it is: a Block Ref, a labelled ref, a block embed.
+# Measured, 0.10.15: the label holds no bracket and no line break, as Logseq
+# reads "[a ] b](((uuid)))" and "[[Page]](((uuid)))" as no labelled ref; an
+# embed takes spaces after "embed" and before "}}", not after "{{", and
+# "embed" in lower case only ("{{EMBED ((uuid))}}" holds no ref at all),
+# while the uuid may be in capitals. Python allows a group name once, hence
+# four names.
+REF_FORMS_RE = re.compile(
+    rf'\[(?P<label>[^\[\]\n]*)\]\(\(\((?P<label_uuid>{_UUID})\)\)\)'
+    rf'|\{{\{{(?-i:embed) +\(\((?P<embed_uuid>{_UUID})\)\) *\}}\}}'
+    rf'|\(\((?P<ref_uuid>{_UUID})\)\)',
+    re.IGNORECASE)
+
+
+def pointer_target(content: str):
+    """The uuid, lower-cased, a block points to when it holds nothing but
+    ``((uuid))`` or ``{{embed ((uuid))}}`` apart from its property lines;
+    ``None`` otherwise.
+
+    Such a block stands in for its target, as a task pulled into a journal
+    does. Its property lines do not count: a block that is itself the
+    target of a ref carries an Id Line (#95). A labelled ref is a link with
+    text of its own and points nowhere in this sense.
+    """
+    lines = (content or "").split("\n")
+    text = "\n".join(line for line, is_property in zip(lines, property_line_mask(lines))
+                     if not is_property).strip()
+    match = REF_FORMS_RE.fullmatch(text)
+    if not match or match["label_uuid"]:
+        return None
+    return (match["embed_uuid"] or match["ref_uuid"]).lower()
 
 
 def unwrap_block_id(value: str) -> str:

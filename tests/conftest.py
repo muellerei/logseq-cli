@@ -4,7 +4,7 @@ import re
 import pytest
 from click.testing import CliRunner
 
-from logseq_cli.api import _not_verified
+from logseq_cli.api import _not_verified, block_or_none
 
 
 @pytest.fixture(autouse=True)
@@ -453,7 +453,14 @@ class PageGraph:
         return next((p for p in self.pages if p["name"].lower() == str(name).lower()), None)
 
     def locate(self, uuid):
-        """``(page, siblings, index, parent)`` of the block, or ``None``."""
+        """``(page, siblings, index, parent)`` of the block, or ``None``.
+
+        Logseq finds a block by its uuid in capitals too, for getBlock and
+        updateBlock (measured, 0.10.15), as the HTTP double does.
+        """
+        if isinstance(uuid, str):
+            uuid = uuid.lower()
+
         def walk(page, blocks, parent):
             for i, b in enumerate(blocks):
                 if b["uuid"] == uuid:
@@ -518,6 +525,8 @@ class PageGraph:
     def get_block(self, uuid, include_children=True):
         if isinstance(uuid, int):       # getBlock takes a database id too
             uuid = next((u for u, i in self._block_ids.items() if i == uuid), None)
+        elif isinstance(uuid, str):     # and one in capitals (measured, 0.10.15)
+            uuid = uuid.lower()
         found = self.locate(uuid)
         if found:
             page, siblings, i, parent = found
@@ -724,11 +733,15 @@ class PageGraph:
 def page_graph_api(graph):
     """MagicMock whose page and block calls are answered by ``graph``."""
     api = mock_api()
-    for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
+    for name in ("get_page", "get_page_blocks_tree", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
                  "remove_block", "move_block", "datascript_query", "update_block",
                  "upsert_block_property"):
         getattr(api, name).side_effect = getattr(graph, name)
+    # LogseqAPI.get_block reads Logseq's answer through block_or_none; the
+    # graph answers as Logseq does, placeholders included.
+    api.get_block.side_effect = lambda uuid, include_children=True, **_: \
+        block_or_none(graph.get_block(uuid, include_children))
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []
     api.graph = graph
