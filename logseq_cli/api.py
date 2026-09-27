@@ -405,6 +405,18 @@ def _editor_unknown_after_batch(answer: str) -> EditorStateUnknown:
     )
 
 
+def _parent_id(block):
+    """The database id getBlock gives as ``block``'s parent, or ``None``."""
+    return ((block or {}).get("parent") or {}).get("id")
+
+
+def _under_its_page(block) -> bool:
+    """Whether ``block`` sits directly under its page: getBlock then reports
+    the page's id as the parent's (measured, 0.10.15; #23)."""
+    parent_id = _parent_id(block)
+    return parent_id is not None and parent_id == ((block or {}).get("page") or {}).get("id")
+
+
 class LogseqAPI:
     # After a batch, how long to watch for the block Logseq opens in its
     # editor: it opened 16–34 ms after the answer (measured, three runs), so
@@ -840,13 +852,31 @@ class LogseqAPI:
         id, and getPageBlocksTree refuses a number ("Expected string, got:
         number") and needs the page's name (measured, 0.10.15; #23).
         """
-        parent_id = (block.get("parent") or {}).get("id")
+        parent_id = _parent_id(block)
         if parent_id is None:
             return None
-        if parent_id == (block.get("page") or {}).get("id"):
+        if _under_its_page(block):
             page = self.get_page(parent_id) or {}
             return ("page", page["name"]) if page.get("name") else None
         return ("block", parent_id)
+
+    def parent_of(self, block):
+        """Where ``block`` sits: ``("page", None)`` directly under its page,
+        ``("block", <uuid>)`` under a block, ``None`` when the parent is gone
+        or not given.
+
+        getBlock reports the parent as a database id no command takes;
+        getBlock by that id answers the parent block with its uuid
+        (measured, 0.10.15).
+        """
+        parent_id = _parent_id(block)
+        if parent_id is None:
+            return None
+        if _under_its_page(block):
+            return ("page", None)
+        parent = self.get_block(parent_id, include_children=False)
+        uuid = parent.get("uuid") if isinstance(parent, dict) else None
+        return ("block", uuid) if uuid else None
 
     def _children_in(self, place) -> list:
         """The blocks directly at ``place``, each with its children."""
@@ -975,10 +1005,15 @@ class LogseqAPI:
 
         Asked without children, getBlock answers the page as ``{id}`` alone,
         and with its name only when asked with them, which reads the block's
-        whole subtree (measured, 0.10.15). getPage takes the id (measured);
-        with the read cache on, as by default, a page is read once.
+        whole subtree (measured, 0.10.15). A name in the answer is taken as
+        it stands; otherwise getPage takes the id (measured), and with the
+        read cache on, as by default, a page is read once.
         """
-        page_id = ((block or {}).get("page") or {}).get("id")
+        answered = (block or {}).get("page") or {}
+        name = answered.get("originalName") or answered.get("name")
+        if name:
+            return name
+        page_id = answered.get("id")
         page = self.get_page(page_id) if page_id is not None else None
         if not isinstance(page, dict):
             return ""
