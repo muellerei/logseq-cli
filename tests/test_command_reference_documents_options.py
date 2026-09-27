@@ -1,4 +1,4 @@
-"""The README's command tables must not fall behind the command registry.
+"""The command reference must not fall behind the command registry.
 
 Twenty options went undocumented for the life of the project — `--min-refs`,
 `--min-shared`, `--upsert-heading`, `--no-backlinks` and the `--date` of the
@@ -11,7 +11,8 @@ and is always complete, so the gap never hurt anyone enough to be noticed, and
 every later check *read* the table — which looks complete when you read it.
 Only a comparison shows what is not in it.
 
-So this compares. The registry is the source, the README a view on it, and a
+So this compares. The registry is the source, the command reference
+(`docs/commands.md`, in the README until 0.16) a view on it, and a
 view must not be able to disagree with its source.
 """
 import pathlib
@@ -21,7 +22,7 @@ import re
 from logseq_cli.cli import cli
 
 
-README = pathlib.Path(__file__).resolve().parent.parent / "README.md"
+REFERENCE = pathlib.Path(__file__).resolve().parent.parent / "docs" / "commands.md"
 
 # Present on nearly every command and documented once, in prose, rather than
 # repeated in forty table rows.
@@ -29,14 +30,14 @@ UBIQUITOUS = {"--json", "--help"}
 
 
 def _readme_text():
-    return README.read_text(encoding="utf-8")
+    return REFERENCE.read_text(encoding="utf-8")
 
 
 def _documented_forms(param):
     """Every spelling of an option a caller could type.
 
     A boolean flag has a positive and a negative form (``--create`` /
-    ``--no-create``), and the README lists the one a caller actually passes —
+    ``--no-create``), and the reference lists the one a caller actually passes —
     which for a default-on flag is the negative. Either spelling counts as
     documented; requiring a specific one would document a flag nobody uses.
     """
@@ -59,10 +60,10 @@ class TestEveryOptionIsDocumented:
         for expected in ("--dry-run", "--min-refs", "--resolve-refs", "--limit"):
             assert expected in found, (
                 f"{expected} exists but the scan missed it — the detection is "
-                "broken, not the README"
+                "broken, not the reference"
             )
 
-    def test_every_option_appears_in_the_readme(self):
+    def test_every_option_appears_in_the_reference(self):
         text = _readme_text()
         missing = [
             (command, "/".join(forms))
@@ -70,7 +71,7 @@ class TestEveryOptionIsDocumented:
             if not any(form in text for form in forms)
         ]
         assert not missing, (
-            "these options exist but the README never names them, in any of "
+            "these options exist but the command reference never names them, in any of "
             f"their forms: {missing}"
         )
 
@@ -92,7 +93,7 @@ class TestSectionCountersMatchTheRegistry:
 
     def test_counters_sum_to_the_number_of_commands(self):
         counters = [int(n) for n in re.findall(r"^### [A-Za-z][A-Za-z ]* \((\d+)\)", _readme_text(), re.M)]
-        assert counters, "no section counters found — the README layout changed"
+        assert counters, "no section counters found — the reference layout changed"
         expected = len(set(cli.commands) - self.ALIASES)
         assert sum(counters) == expected, (
             f"section counters sum to {sum(counters)} but the registry has "
@@ -105,11 +106,11 @@ class TestSectionCountersMatchTheRegistry:
             name for name in sorted(cli.commands)
             if name not in self.ALIASES and f"`{name}" not in text
         ]
-        assert not missing, f"commands with no README row: {missing}"
+        assert not missing, f"commands with no row in the reference: {missing}"
 
 
 class TestShippedExamplesAreListed:
-    """The README's example list is a view of the examples directory.
+    """The reference's example list is a view of the examples directory.
 
     A hand-maintained list of files drifts the moment someone adds one — the
     same defect this file already guards for the command tables. Deriving the
@@ -129,10 +130,10 @@ class TestShippedExamplesAreListed:
     def test_every_example_is_listed(self):
         missing = self._example_names() - self._listed_names()
         assert not missing, (
-            f"these scripts exist but the README never names them: {sorted(missing)}")
+            f"these scripts exist but the command reference never names them: {sorted(missing)}")
 
     def test_no_listed_example_is_missing(self):
         """The other direction: a removed script must leave the list too."""
         stale = self._listed_names() - self._example_names()
         assert not stale, (
-            f"the README lists scripts that are not in examples/: {sorted(stale)}")
+            f"the reference lists scripts that are not in examples/: {sorted(stale)}")

@@ -2,8 +2,8 @@
 
 The skill is read by agents that have not used the tool yet, so a command or
 an option it names that does not exist sends them off on a wrong call first
-thing. Like the README tables (test_readme_documents_options), it is a view
-on the command registry, and this compares the two.
+thing. Like the command tables (test_command_reference_documents_options), it
+is a view on the command registry, and this compares the two.
 
 The frontmatter follows the Agent Skills specification (agentskills.io):
 ``name`` is lower-case letters, digits and single hyphens, at most 64

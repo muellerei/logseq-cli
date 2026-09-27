@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 logseq-cli --version
 ```
 
-Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled (Settings → Advanced → Developer mode → API server).
+Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled (Settings → Features → HTTP APIs server, then start it from the API icon in the toolbar).
 
 ## Project Structure
 
@@ -124,14 +124,14 @@ logseq-cli/
    appears in:
    - `--help` — the option's own text, and the command epilog if the behaviour
      is not obvious from the flag name
-   - the command table in `README.md`
+   - the command table in `docs/commands.md`
    - `AGENTS.md`, if it affects a common workflow
    - `CHANGELOG.md` under `## [Unreleased]`
 
-   Both flags added in 0.10.0 went out without the README row and the
+   Both flags added in 0.10.0 went out without the command-table row and the
    `AGENTS.md` entry, and were caught the same evening. Twenty further options
-   had never been listed at all. `tests/test_readme_documents_options.py` now
-   holds the command table against the registry, which covers the README row
+   had never been listed at all. `tests/test_command_reference_documents_options.py` now
+   holds the command table against the registry, which covers that row
    and nothing else on this list.
 
    Relative links and anchors across the Markdown files, after any of those:
@@ -170,7 +170,7 @@ logseq-cli/
   copy.
 - **An error does not choose its exit code.** A command exits 0 when it did
   what it says and non-zero when it did not; the number carries no meaning
-  (see "Exit status: done or not done" in the README, and ADR 0004). So
+  (see [Exit status: done or not done](docs/design.md#exit-status-done-or-not-done-and-no-resume) and ADR 0004). So
   `fail()` is called with its default, never with `exit_code=`. The two
   places that set 2 predate the rule and stay, because changing them would
   change behaviour for nothing; `tests/test_exit_status_rule.py` keeps them

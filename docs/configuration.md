@@ -18,7 +18,7 @@ silently find nothing in a journal written in another language, which is why it
 is worth setting.
 
 Everything else is connection settings, and those live in environment
-variables or flags (see the table in [README.md](../README.md#configuration)).
+variables or flags (see [Environment variables and flags](#environment-variables-and-flags)).
 
 Three example files sit in the repository root:
 
@@ -29,6 +29,41 @@ Three example files sit in the repository root:
 | `config.example.minimal.toml` | Journal heading only |
 
 Copy one, delete what you do not need, keep what you do.
+
+
+## Environment variables and flags
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGSEQ_HOST` | `127.0.0.1` | Logseq API host |
+| `LOGSEQ_PORT` | `12315` | Logseq API port |
+| `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication; `--token` overrides it |
+| `LOGSEQ_API_URL` | auto | Full API URL override |
+| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for journal writes: `add-journal-block`, `add-journal-content`, `add-block-ref` (e.g. `## Log`) |
+| `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
+| `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
+| `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |
+
+All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`.
+
+### Journal heading
+
+By default, `add-journal-block` appends blocks at the top level of the journal page. Set `LOGSEQ_JOURNAL_HEADING` to automatically insert blocks under a specific heading:
+
+```bash
+# In your shell profile (~/.zshrc, ~/.bashrc, etc.)
+export LOGSEQ_JOURNAL_HEADING="## Log"
+```
+
+This can be overridden per call:
+
+```bash
+# Use a different heading
+logseq-cli add-journal-block --under-heading "## Notes" --content "..."
+
+# Force top-level (ignore env var)
+logseq-cli add-journal-block --top-level --content "..."
+```
 
 ## Where the file is looked for
 

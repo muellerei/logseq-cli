@@ -24,8 +24,9 @@ Logseq's database, which the files do not show:
   reports that as a failure, and the commands that add blocks print the
   UUIDs they made.
 
-So while Logseq runs, read and write through `logseq-cli`. When it is not
-running, the tool cannot work, and AGENTS.md says how to use the files.
+So while Logseq runs, read and write through `logseq-cli`, never the files.
+When it is not running, the tool cannot work: the files may be read, as
+AGENTS.md describes, but not written to; say that Logseq has to run.
 
 ## First: `logseq-cli doctor`
 

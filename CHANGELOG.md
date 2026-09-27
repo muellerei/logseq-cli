@@ -5,9 +5,19 @@ All notable changes to `logseq-cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Entries say what was wrong, how it was found and what the fix cost, so this
+file carries most of the reasoning behind the tool.
+
 ## [Unreleased]
 
 ### Changed
+
+- AGENTS.md and the agent skill no longer tell an agent to fall back to
+  editing the Markdown files when Logseq is not running. It may read them
+  then, and only then; it writes nothing and says that Logseq has to run.
+  The fallback dated from the first import and sent an agent that ran while
+  Logseq was closed, such as a scheduled one, to write exactly where nothing
+  checks the write or protects a reference.
 
 - `--resolve-refs` puts what Logseq shows of a Block Ref in its place, on the
   ref's line: the target's first line with its `SCHEDULED:` and `DEADLINE:`

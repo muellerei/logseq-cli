@@ -1,5 +1,9 @@
 # logseq-cli: Agent Reference
 
+Working on this repository rather than using the tool? See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the tests, the link check and the
+conventions a change follows.
+
 Instructions for any AI agent or automation tool driving logseq-cli from a
 shell. Nothing here is specific to one assistant: the CLI is a plain Python
 package (`click`, `requests`) with no vendor coupling.
@@ -52,7 +56,11 @@ are installed with the package; nothing else is needed at runtime.
 Both also surface on any other command as `{"error": ..., "reason":
 "connection_refused" | "http_error"}` on stderr, with a non-zero exit.
 
-If Logseq is not running, fall back to direct filesystem access on the graph's markdown files.
+While Logseq runs, read and write through the CLI, not the Markdown files:
+the files do not know aliases, backlinks or where a task was carried, and a
+write to them is not checked. If Logseq is not running, the files may be read
+(see "Connection Errors" below), but nothing is written: stop and say that
+Logseq has to run.
 
 ## The 5 Core Workflows
 
@@ -386,7 +394,7 @@ a code block or inline code is code and changes nothing.
 
 ### 6. Connection Errors
 
-If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. In this case, fall back to direct filesystem access:
+If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. Then the graph's files may be read, and only read, until Logseq runs again; do not write to them, since nothing would check the write or protect a reference:
 
 - Journals: `journals/YYYY_MM_DD.md`
 - Pages: `pages/Page Name.md`
@@ -457,15 +465,14 @@ refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 
 ## Environment Variables
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` and `add-journal-content` (e.g. `## Log`) |
-| `LOGSEQ_TOKEN` | (none) | Bearer token; the documented way to pass it. `--token` overrides it |
-| `LOGSEQ_HOST` | `127.0.0.1` | Logseq API host |
-| `LOGSEQ_PORT` | `12315` | Logseq API port |
-| `LOGSEQ_API_URL` | auto | Full API URL override |
+Two matter in agent work: `LOGSEQ_TOKEN`, the documented way to pass the
+token (`--token` overrides it), and `LOGSEQ_JOURNAL_HEADING`, the default
+heading for journal writes. Every variable, with its default, is in
+[docs/configuration.md](docs/configuration.md#environment-variables-and-flags).
 
 ## Command Summary
+
+Every command with all its options: [docs/commands.md](docs/commands.md).
 
 | Command | Use When |
 |---------|----------|
