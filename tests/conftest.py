@@ -411,6 +411,7 @@ class PageGraph:
 
     def __init__(self, pages=None, *, placeholders=(), blockless=(), aliases=None):
         self._ids = 0
+        self._block_ids = {}            # uuid -> database id, given on first read
         self.api = None                 # the mock whose writes_landed is counted
         self.pages = []                 # {"id", "uuid", "name", "blocks"}
         self.placeholders = set(placeholders)
@@ -479,13 +480,23 @@ class PageGraph:
             return [(b["content"].split("\n")[0], walk(b["children"])) for b in blocks]
         return walk(self.page_named(name)["blocks"])
 
+    def _db_id(self, uuid):
+        """The block's database id, apart from page ids (1000 up)."""
+        return self._block_ids.setdefault(uuid, 100000 + len(self._block_ids))
+
     def _out(self, block, page, parent, children=True):
-        return {"uuid": block["uuid"], "content": block["content"],
+        # Logseq's shapes, measured 0.10.15: parent and page by database id;
+        # without children the page as {id} alone and each direct child as a
+        # ["uuid", <uuid>] pair; with them the page named and children blocks.
+        return {"id": self._db_id(block["uuid"]),
+                "uuid": block["uuid"], "content": block["content"],
                 "preBlock?": bool(block.get("pre")),
-                "page": {"id": page["id"]},
-                "parent": {"id": parent["uuid"] if parent else page["id"]},
+                "page": ({"id": page["id"], "name": page["name"].lower(),
+                          "originalName": page["name"]} if children
+                         else {"id": page["id"]}),
+                "parent": {"id": self._db_id(parent["uuid"]) if parent else page["id"]},
                 "children": [self._out(c, page, block) for c in block["children"]]
-                            if children else []}
+                            if children else [["uuid", c["uuid"]] for c in block["children"]]}
 
     # --- API surface -------------------------------------------------------
     def get_page(self, name):
@@ -505,6 +516,8 @@ class PageGraph:
         return [self._out(b, page, None) for b in page["blocks"]]
 
     def get_block(self, uuid, include_children=True):
+        if isinstance(uuid, int):       # getBlock takes a database id too
+            uuid = next((u for u, i in self._block_ids.items() if i == uuid), None)
         found = self.locate(uuid)
         if found:
             page, siblings, i, parent = found

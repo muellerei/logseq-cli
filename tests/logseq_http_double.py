@@ -536,11 +536,16 @@ class LogseqHttpDouble:
         """getBlock's form: ``page`` and ``parent`` as ``{"id": <int>}``
         (a db id, no uuid), property keys camel-cased, property lines kept in
         ``content``; ``preBlock?``; ``refs`` with or without
-        children. Children only when asked for."""
+        children. Asked with children: the page named too, children as
+        blocks. Asked without: the page as ``{id}`` alone and each direct
+        child as a ``["uuid", <uuid>]`` pair, ``[]`` for a leaf (measured
+        0.10.15)."""
         texts = _property_texts(node["content"])
         out = {"id": node["id"], "uuid": node["uuid"], "content": node["content"],
                "format": "markdown",
-               "page": {"id": page["id"]},
+               "page": ({"id": page["id"], "name": _key(page["name"]),
+                         "originalName": page["name"]} if children
+                        else {"id": page["id"]}),
                "parent": {"id": parent["id"] if parent else page["id"]},
                "properties": {_camel(k): v for k, v in self._values(node).items()},
                "propertiesTextValues": {_camel(k): v for k, v in texts.items()},
@@ -549,8 +554,8 @@ class LogseqHttpDouble:
         marker = _marker(node["content"])
         if marker:
             out["marker"] = marker
-        if children:
-            out["children"] = [self._block_out(page, c, node, True) for c in node["children"]]
+        out["children"] = ([self._block_out(page, c, node, True) for c in node["children"]]
+                           if children else [["uuid", c["uuid"]] for c in node["children"]])
         return out
 
     def _page_out(self, page):

@@ -111,7 +111,7 @@ def test_get_block_children_only_when_asked(double):
     uuid = double.uuid_of("parent")
     flat = answer(double, "getBlock", uuid, {"includeChildren": False})
     deep = answer(double, "getBlock", uuid, {"includeChildren": True})
-    assert "children" not in flat
+    assert flat["children"] == [["uuid", double.uuid_of("child")]]
     assert deep["children"][0]["content"] == "child"
     assert deep["children"][0]["children"][0]["content"] == "grandchild"
 
