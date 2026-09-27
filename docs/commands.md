@@ -147,6 +147,101 @@ graph.
 |---------|-------------|
 | `query-pages-by-property --key KEY [--value VAL]` | Find pages by property value |
 
+## Previews and refusals
+
+Every command that writes takes `--dry-run`. What the previews show, and the
+checks that refuse a write, command by command:
+
+```bash
+# 1. --dry-run for the destructive commands (they cascade: children, source blocks)
+logseq-cli remove-block --id "$UUID" --dry-run
+#   [DRY RUN] Would remove block 6a76533e-...
+#     descendants that would be removed too: 2
+#     total blocks affected: 3
+logseq-cli update-block --id "$UUID" --content "new text" --dry-run
+logseq-cli copy-block --id "$UUID" --to-page "Target Page" --remove --dry-run
+logseq-cli delete-page --page "Old Page" --dry-run
+
+# 1b. --dry-run for the in-place writes too — they overwrite rather than cascade,
+#     so the preview's job is to show the state that would be replaced.
+logseq-cli set-todo-status --id "$UUID" --status DONE --dry-run
+#   [DRY RUN] Would set status on block 6a76533e-...
+#     marker: TODO -> DONE
+logseq-cli set-property --page "Alice" --key team --value "Platform" --dry-run
+#   [DRY RUN] Would set 'team::' on page 'Alice'
+#     was: Core
+#     now: Platform
+logseq-cli remove-property --page "Alice" --key typo --dry-run
+#   [DRY RUN] 'typo' is not set on page 'Alice'; nothing would be removed
+logseq-cli set-block-property --id "$UUID" --key prio --value 3 --dry-run
+logseq-cli add-block-ref --source-id "$UUID" --under-heading "## Tasks" --dry-run
+logseq-cli add-note-content --page "Project Alpha" --content "Body" --dry-run
+logseq-cli rename-page --page "Project Alpha" --new-name "Project Beta" --dry-run
+#   [DRY RUN] Would rename page
+#     from: Project Alpha
+#     to:   Project Beta
+#     pages with references that would be rewritten: 3
+
+# 2. delete-page asks for --force when nothing can prompt; --json is not a yes
+logseq-cli delete-page --page "Old Page" --json < /dev/null
+#   {"error": "Refusing to delete page 'Old Page' non-interactively without --force. ..."}
+#   non-zero exit
+
+# 3. get-page separates "missing" from "empty"
+logseq-cli get-page --page "Typo Page"     # (page does not exist) -> fails
+logseq-cli get-page --page "Empty Page"    # (empty page)          -> exit 0
+
+# 4. Bounded journal reads (see "Bounded output" below)
+logseq-cli get-journal-range --from 2026-07-08 --to 2026-08-07 \
+  --tail 7 --heading "## Log"
+logseq-cli get-journal-summary --range "this week" --no-content
+
+# 5. Errors go to stderr, never stdout; under --json mostly as a JSON object,
+#    some as a plain "Error:" line, so rely on the exit status
+logseq-cli get-properties --page "Missing Page" --json 2>err.json
+```
+
+## Bounding a read
+
+What each option that bounds a read does. The measurements behind them are in
+the [README](../README.md#bounded-output).
+
+- `--tail N` / `--limit N` pick the newest / oldest N journal days. They are
+  applied **before** fetching, so omitted days cost no API call. Mutually
+  exclusive.
+- `--heading "## Log"` returns only that section per day.
+- `--no-content` (summary only) drops the bodies but keeps date, character
+  count, topics and top concepts — enough for an overview, without the text.
+- `--max-chars N` (`get-page`, `get-journal-range`) cuts the blocks so the
+  output fits in N characters, measured in the format printed: a block in
+  `--json` is several times its text. The cut falls between blocks in reading
+  order, oldest day first; pages and days past it are not printed. `--json`
+  puts `withheld` and `cut` (`before`, `section`, `section_uuid`, `later`,
+  and `needs` when nothing fit) on
+  the page or day the cut fell in. Only blocks are cut: page headers and
+  backlinks always print, and when they alone exceed N the note says so.
+- `--from-block UUID` continues a cut read: the same command plus the uuid
+  the note names. Pages, days and blocks before it are skipped; its ancestors
+  come along as context. Following the notes reads every block once: a
+  repeated heading name, a heading rewritten by `--resolve-refs` or a section
+  larger than N cannot send it back. A block that does not fit in N, alone or
+  with its ancestors, ends the chain: the note names the `--max-chars` it
+  needs, and `--json` puts it in `cut.needs`. A page named twice is refused,
+  since its block uuids would be too.
+- `get-page --outline` prints only the headings, each with its uuid,
+  indented by how they nest (one tab per heading whose section holds it, not
+  per `#`), and reads no backlinks. Read the outline of a large page first,
+  then the section you need with `--heading`.
+
+Search has the same shape: a word that recurs across months of notes matches
+thousands of blocks, so `find-block --limit N` caps the output.
+
+Truncation is never silent: whenever anything is omitted, a note goes to
+**stderr** (`showing 3 of 20 journal day(s) ... 17 omitted`,
+`showing 10 of 1382 match(es) ... 1372 omitted`, `12 block(s) withheld on
+'...', cut in section '## Log' ... plus --from-block <uuid>`) while
+stdout stays pure payload. Without truncation there is no note.
+
 ## Round-trip reduction
 
 Seven changes focused on round-trip reduction and ergonomics. All read methods are cached in-memory for the duration of one process (60s TTL), and `get-journal-range` fetches in parallel.

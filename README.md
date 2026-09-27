@@ -3,94 +3,186 @@
 [![tests](https://github.com/muellerei/logseq-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/muellerei/logseq-cli/actions/workflows/tests.yml)
 [![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://github.com/muellerei/logseq-cli/actions/workflows/tests.yml)
 
-Read and write a Logseq graph from a shell — pages, journals, blocks,
-properties and graph analysis, without opening the app. It is built for a
-caller that is a script or an AI agent rather than a person at a prompt:
-`--json` on every command, payload on stdout, errors on stderr (mostly
-as JSON), non-zero exit on failure, `--dry-run` on everything that writes, and output
-bounded so it fits in a context window.
+Let your AI agent write into your Logseq graph without breaking it.
 
-No vendor coupling — a plain Python package with `click` and `requests`.
-See [AGENTS.md](AGENTS.md) for the workflows and gotchas, and the
-[design notes](#design-notes) for the decisions behind the above.
+Left to edit the Markdown files, an agent has to guess where an entry belongs
+and how it should look, and you correct it when it guesses wrong. With
+logseq-cli it asks Logseq instead: the tool works through the running Logseq
+app, so entries land in the right place and in Logseq's own format, and your
+notes stay plain Markdown files. Reads come back filtered, and the large ones
+cut to a size the agent asks for, which saves it tokens.
 
-An agent that has not met the tool yet finds it through the skill in
-[`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md): when to reach for
-it rather than the Markdown files, and the habits that prevent damage.
-It follows the [Agent Skills](https://agentskills.io) format, so
-`npx skills add muellerei/logseq-cli` installs it for most coding agents.
+You can keep typing in Logseq while your agent writes. Blocks it adds do not
+take your cursor, and a write that would change the block you are typing in is
+refused. Every write is checked: logseq-cli confirms with Logseq that it
+landed before it reports success, and it never overwrites the block you are
+typing in. [How that works](#writes-are-verified-not-assumed).
 
-> **Which Logseq.** This is a tool for **file-based (Markdown) graphs**, driven
-> over Logseq's local HTTP API — the 0.10.x line, tested against 0.10.15, and
-> Logseq OG, which continues it. The DB version (2.x) keeps graphs in SQLite
-> under a different data model and is **out of scope**; it answers the same API,
-> so it connects and then reads empty. `logseq-cli doctor` names which one it
-> found, so that is not something to work out by hand. Details under
-> [Requirements](#requirements).
+```text
+   You, in Logseq                          Your agent, through logseq-cli
+   ──────────────────────────────────────  ──────────────────────────────────
+1  typing "Call with Alex about the con|"  adds "**14:31** Decided to ship …"
+                                           → lands under ## Log, proven
+                                             written; your cursor stays put
+2  still typing "…the contract|"           changes the block you are in
+                                           → refused; nothing you typed
+                                             is lost
+3  your journal afterwards:
+   ## Log
+   - Call with Alex about the contract, ok
+   - **14:31** Decided to ship on Friday
+```
 
-## Installation
+Your agent needs to be one that can run commands on your computer, such as
+Claude Code, Codex or Cursor; it calls logseq-cli like any other command, with
+no MCP server or Logseq plugin to install. logseq-cli itself sends your notes nowhere but
+to Logseq, on your machine by default.
 
-### Requirements
+> **Which Logseq.** For **Markdown graphs**: Logseq 0.10.x (tested against
+> 0.10.15) and Logseq OG, which continues it. Not for the DB version (2.x);
+> `logseq-cli doctor` tells you which one you have.
+> [Why](#this-is-a-tool-for-file-based-graphs).
 
-| | |
+## What you can do with it
+
+You say what you want; your agent runs the command. Describe your style once
+in your agent's instructions, a timestamp before each log entry say, rather
+than in every request. Each example says what the tool does that editing the
+files would not.
+
+- **Keep a work log.** *"Log: we decided to ship on Friday."* It lands on
+  today's page, under your journal heading once you have set one, as
+  `**14:30** Decided to ship on Friday`, proven written, while you keep
+  typing. Dictated text with several lines goes in as one block, indented
+  `- ` lines as its children, and any other page works the same way.
+  `logseq-cli add-journal-block --content "**14:30** Decided to ship on Friday"`
+- **Find your tasks, wherever they stand.** *"What is still open from
+  yesterday and today?"* One call instead of reading every journal, and a
+  task you pulled into a later day's journal by referencing it is found on
+  that day too, and listed once.
+  `logseq-cli get-todos --from yesterday`
+- **Tick one off.** *"Mark the release task in Project Alpha as done."* The
+  marker changes on the block itself, and the agent can see the change before
+  it is made.
+  `logseq-cli set-todo-status --content "release" --page "Project Alpha" --status DONE --dry-run`
+- **Prepare a meeting.** *"What have I noted about Alex lately?"* Only the
+  blocks that link to Alex reach the agent, three per page unless it asks for
+  more, not the pages they sit on.
+  `logseq-cli get-backlinks --page "Alex" --with-context`
+- **Keep track of who owes what.** *"What am I waiting for from Alex?"* The
+  tasks marked WAITING or TODO that mention Alex, filtered before the agent
+  sees them.
+  `logseq-cli get-todos --status WAITING --status TODO --match "Alex"`
+- **Find where you wrote about something.** *"Where did I note the
+  migration plan?"* The matching blocks, ten at most, with a note when there
+  are more, instead of the agent opening page after page.
+  `logseq-cli find-block --content "migration plan" --limit 10`
+- **Run it on a schedule.** A morning cron job running
+  `examples/carry-todos-to-today.sh 7 --write`
+  ([the script](examples/carry-todos-to-today.sh)) carries every TODO, DOING,
+  NOW or LATER journal task older than a week into today's journal as a ref, with no agent and no
+  tokens involved (without `--write` it only previews). A scheduled agent run
+  can start from an overview of the last month without its full text, and
+  write a briefing or a summary of your mood into today's journal.
+  `logseq-cli get-journal-summary --range "last 30 days" --no-content`
+
+## What it will and won't do
+
+| Your agent asks to… | logseq-cli |
 |---|---|
-| Python | 3.10 or newer (tested on 3.10-3.13 in CI) |
-| `click` | >= 8.0 — command-line interface |
-| `requests` | >= 2.28 — HTTP calls to Logseq |
-| `tomli` | >= 2.0, installed only on Python 3.10; 3.11+ has `tomllib` built in |
-| Logseq | Desktop app running, with the HTTP API server enabled |
+| add to a page while you type in Logseq | does it; your cursor stays where it is |
+| change the block you are typing in | refuses |
+| delete a block or page that `((block refs))` elsewhere point into | refuses, unless told to go ahead |
+| rename a page onto a name that already exists | refuses; Logseq would merge the two |
+| report a write that did not land as done | never; every write is proven |
+| show a change before making it | does it: `--dry-run` on every command that writes |
+| undo a change | cannot; a deletion is final, so preview first |
+| read more than fits in its context | cuts page and journal reads and searches to a size it asks for, and says what it left out |
 
-Dependencies are installed for you by `pip`; nothing else is needed at runtime.
-`pytest` comes with the `dev` extra and is only used for the test suite.
+A call that fails exits non-zero and says why; [AGENTS.md](AGENTS.md) is the
+reference for an agent using the tool, including the reasons a write is
+refused. The previews and refusals command by command are in
+[docs/commands.md](docs/commands.md#previews-and-refusals).
 
-```bash
-# Use it
-pip install git+https://github.com/muellerei/logseq-cli.git
+### Bounded output
 
-# Or work on it
-git clone https://github.com/muellerei/logseq-cli.git
-cd logseq-cli
-pip install -e ".[dev]"
-```
+Reads grow with the graph. On a real one (nearly four years of daily entries)
+the unbounded commands produce far more text than an agent can take in at once:
 
-Developed and tested against Logseq Desktop 0.10.15 with a file-based
-(Markdown) graph. Logseq split in 2026: the Markdown line continues as
-Logseq OG (1.x) with an unchanged HTTP API, but this CLI is untested there.
+| Call (measured with 0.16.0 on 2026-09-27) | Output |
+|------|--------|
+| `get-journal-range` over 30 days | 134,410 chars |
+| `get-journal-range --tail 7` | 91,618 chars |
+| `get-journal-range --tail 7 --heading "## Log"` | 72,672 chars |
+| `get-journal-range --max-chars 20000` | 19,981 chars, and a note on how to go on |
+| `get-journal-summary --range "this week"` | 91,785 chars |
+| `get-journal-summary --range "this week" --no-content` | 899 chars |
 
-The DB version (2.x) is **not supported**. It answers the same HTTP API, so
-connecting to one succeeds — but it keeps the graph in SQLite under a
-different data model, where `:block/original-name` and `:block/content` are
-now `:block/title`. The fields these commands read are simply absent, so reads
-come back empty rather than failing. `logseq-cli doctor` reports the graph
-kind for exactly this reason, so an empty result does not have to be told
-apart from an empty graph by hand.
+For scale: Claude Code passes on about 30,000 characters of a shell command's
+output; past that the agent gets a 2,000-character preview and a file to read
+in parts.
 
-## Quickstart
+`get-journal-range` can skip days before fetching them (`--tail`, `--limit`)
+and keep one section per day (`--heading`); `get-journal-summary` can drop the
+bodies (`--no-content`); `get-page` and `get-journal-range` can be cut to a
+number of characters and continued where the cut fell (`--max-chars`,
+`--from-block`), and `find-block` and `get-backlinks` capped (`--limit`). A
+cut is never silent. What each option does in detail:
+[Bounding a read](docs/commands.md#bounding-a-read).
 
-The CLI talks to Logseq's HTTP API, which is off by default. Two things to do
-in the Logseq desktop app, both behind the **API** button in the toolbar:
+## Get started
 
-1. **Start the server.** The menu shows the address it listens on —
-   `http://127.0.0.1:12315` by default, which is what this CLI assumes. If the
-   menu says *Stop server*, it is already running.
-2. **Create a token** under *Authorization tokens*, and copy the value.
+Three steps, two of them in Logseq:
 
-Then check the whole chain in one call:
+1. **Switch on Logseq's API server**, under *Settings → Features → HTTP APIs
+   server*. An **API** icon appears at the top right. In its menu, under
+   *Server configurations*, tick *Auto start server with the app launched*,
+   so the server is back after a restart, then choose *Start server*. Under
+   *Authorization tokens*, *+ Add new token* with a name and a value you make
+   up; that value is your token.
+2. **Put the token in your shell profile**, so neither you nor your agent has
+   to pass it (a `--token` argument would show in `ps` and your shell
+   history):
 
-```bash
-logseq-cli --token "TOKEN" doctor
-```
+   ```bash
+   export LOGSEQ_TOKEN="TOKEN"
+   ```
+
+   Open a new terminal and start your agent again afterwards; one started
+   before sees no token.
+
+3. **Tell your agent:** *"Install logseq-cli from
+   github.com/muellerei/logseq-cli, run `logseq-cli doctor`, and add its
+   skill."* Then ask for something: *"Log that I set this up."*
+
+**To try it safely,** make an empty graph in Logseq, open it, and start
+there; and ask your agent to show you every change as a preview
+(`--dry-run`) before it makes it.
 
 `doctor` tests each step separately — Python, packages, port, token, API,
 graph kind, graph — and names the one that broke rather than leaving you to
-guess. Exit 0 means everything is ready. Once it is:
+guess, including whether it could read your graph. Exit 0 means everything
+is ready.
+
+The skill, [`skills/logseq-cli/SKILL.md`](skills/logseq-cli/SKILL.md), tells
+an agent when to use the tool rather than the Markdown files, and the habits
+that prevent damage. It follows the [Agent Skills](https://agentskills.io)
+format; `npx skills add muellerei/logseq-cli` installs it (it needs Node.js).
+
+### By hand
+
+It needs Python 3.10 or newer (tested on 3.10–3.13) and two packages,
+`click` and `requests` (plus `tomli` on 3.10), which the install pulls in. With
+[pipx](https://pipx.pypa.io), which keeps it apart from your system Python:
 
 ```bash
-export LOGSEQ_TOKEN="TOKEN"          # so you can drop --token from here on
-logseq-cli get-all-pages | head
+pipx install git+https://github.com/muellerei/logseq-cli.git
 ```
 
-If that lists your pages, you are set. Everything below is detail.
+or with plain `pip install git+https://github.com/muellerei/logseq-cli.git`.
+Then run `logseq-cli doctor`. The server listens on `http://127.0.0.1:12315`
+by default, which is what the CLI assumes. To work on the code, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
 
@@ -99,7 +191,7 @@ Two settings cover most setups:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication; `--token` overrides it |
-| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for journal writes: `add-journal-block`, `add-journal-content`, `add-block-ref` (e.g. `## Log`) |
+| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for journal writes: `add-journal-block`, `add-journal-content`, `add-block-ref` (e.g. `## Log`); overrides `[journal] default_heading` in the config file |
 
 Every variable, the `--host`/`--port`/`--token` flags and the journal heading
 in detail are in
@@ -114,11 +206,11 @@ called. Those live in an optional file:
 
 ```bash
 # Suggest one from your own graph (counts included, writes nothing with --dry-run)
-logseq-cli --token "TOKEN" init --dry-run
-logseq-cli --token "TOKEN" init
+logseq-cli init --dry-run
+logseq-cli init
 
 # Or start from the commented example
-cp config.example.toml ~/.config/logseq-cli/config.toml
+mkdir -p ~/.config/logseq-cli && cp config.example.toml ~/.config/logseq-cli/config.toml
 ```
 
 A command that needs a setting you have not made says which one, and exits
@@ -132,115 +224,6 @@ The full reference — every command with its options, usage examples,
 parameter and page aliases, the round-trip shortcuts and the scripting
 examples — is in [docs/commands.md](docs/commands.md). `logseq-cli --help`
 lists the commands, `logseq-cli <command> --help` a command's options.
-
-## Safety and output size
-
-Safety and output-size work from an audit against common CLI conventions
-(clig.dev, POSIX/grep, agent tool-design guidance). **Defaults are
-unchanged** — without the new flags every command behaves exactly as before.
-
-```bash
-# 1. --dry-run for the destructive commands (they cascade: children, source blocks)
-logseq-cli remove-block --id "$UUID" --dry-run
-#   [DRY RUN] Would remove block 6a76533e-...
-#     descendants that would be removed too: 2
-#     total blocks affected: 3
-logseq-cli update-block --id "$UUID" --content "new text" --dry-run
-logseq-cli copy-block --id "$UUID" --to-page "Target Page" --remove --dry-run
-logseq-cli delete-page --page "Old Page" --dry-run
-
-# 1b. --dry-run for the in-place writes too — they overwrite rather than cascade,
-#     so the preview's job is to show the state that would be replaced.
-logseq-cli set-todo-status --id "$UUID" --status DONE --dry-run
-#   [DRY RUN] Would set status on block 6a76533e-...
-#     marker: TODO -> DONE
-logseq-cli set-property --page "Alice" --key team --value "Platform" --dry-run
-#   [DRY RUN] Would set 'team::' on page 'Alice'
-#     was: Core
-#     now: Platform
-logseq-cli remove-property --page "Alice" --key typo --dry-run
-#   [DRY RUN] 'typo' is not set on page 'Alice'; nothing would be removed
-logseq-cli set-block-property --id "$UUID" --key prio --value 3 --dry-run
-logseq-cli add-block-ref --source-id "$UUID" --under-heading "## Tasks" --dry-run
-logseq-cli add-note-content --page "Project Alpha" --content "Body" --dry-run
-logseq-cli rename-page --page "Project Alpha" --new-name "Project Beta" --dry-run
-#   [DRY RUN] Would rename page
-#     from: Project Alpha
-#     to:   Project Beta
-#     pages with references that would be rewritten: 3
-
-# 2. delete-page: --json is no longer an implicit --force
-logseq-cli delete-page --page "Old Page" --json < /dev/null
-#   {"error": "Refusing to delete page 'Old Page' non-interactively without --force. ..."}
-#   non-zero exit — the output format no longer doubles as a confirmation.
-
-# 3. get-page separates "missing" from "empty"
-logseq-cli get-page --page "Typo Page"     # (page does not exist) -> fails
-logseq-cli get-page --page "Empty Page"    # (empty page)          -> exit 0
-
-# 4. Bounded journal reads (see "Bounded output" below)
-logseq-cli get-journal-range --from 2026-07-08 --to 2026-08-07 \
-  --tail 7 --heading "## Log"
-logseq-cli get-journal-summary --range "this week" --no-content
-
-# 5. delete-block works as an alias for remove-block
-logseq-cli delete-block --id "$UUID" --dry-run
-
-# 6. Errors go to stderr, never stdout; under --json mostly as a JSON object,
-#    some as a plain "Error:" line, so rely on the exit status
-logseq-cli get-properties --page "Missing Page" --json 2>err.json
-```
-
-## Bounded output
-
-Reads grow with the graph. On a real one (four years of daily entries) the
-unbounded commands produce far more text than an LLM agent can hold:
-
-| Call | Output |
-|------|--------|
-| `get-journal-range` over 30 days | 431,996 chars (~108k tokens) |
-| `get-journal-range --tail 7` | 188,149 chars |
-| `get-journal-range --tail 7 --heading "## Log"` | 136,289 chars |
-| `get-journal-summary --range "this week"` | 143,733 chars |
-| `get-journal-summary --range "this week" --no-content` | 793 chars |
-
-For scale: Claude Code caps tool responses at 25,000 tokens by default.
-
-- `--tail N` / `--limit N` pick the newest / oldest N journal days. They are
-  applied **before** fetching, so omitted days cost no API call. Mutually
-  exclusive.
-- `--heading "## Log"` returns only that section per day.
-- `--no-content` (summary only) drops the bodies but keeps date, character
-  count, topics and top concepts — enough for an overview, without the text.
-- `--max-chars N` (`get-page`, `get-journal-range`) cuts the blocks so the
-  output fits in N characters, measured in the format printed: a block in
-  `--json` is several times its text. The cut falls between blocks in reading
-  order, oldest day first; pages and days past it are not printed. `--json`
-  puts `withheld` and `cut` (`before`, `section`, `section_uuid`, `later`,
-  and `needs` when nothing fit) on
-  the page or day the cut fell in. Only blocks are cut: page headers and
-  backlinks always print, and when they alone exceed N the note says so.
-- `--from-block UUID` continues a cut read: the same command plus the uuid
-  the note names. Pages, days and blocks before it are skipped; its ancestors
-  come along as context. Following the notes reads every block once: a
-  repeated heading name, a heading rewritten by `--resolve-refs` or a section
-  larger than N cannot send it back. A block that does not fit in N, alone or
-  with its ancestors, ends the chain: the note names the `--max-chars` it
-  needs, and `--json` puts it in `cut.needs`. A page named twice is refused,
-  since its block uuids would be too.
-- `get-page --outline` prints only the headings, each with its uuid,
-  indented by how they nest (one tab per heading whose section holds it, not
-  per `#`), and reads no backlinks. Read the outline of a large page first,
-  then the section you need with `--heading`.
-
-Search has the same shape: a word that recurs across months of notes matches
-thousands of blocks, so `find-block --limit N` caps the output.
-
-Truncation is never silent: whenever anything is omitted, a note goes to
-**stderr** (`showing 3 of 20 journal day(s) ... 17 omitted`,
-`showing 10 of 1382 match(es) ... 1372 omitted`, `12 block(s) withheld on
-'...', cut in section '## Log' ... plus --from-block <uuid>`) while
-stdout stays pure payload. Without truncation there is no note.
 
 ## Design notes
 
@@ -357,9 +340,11 @@ See [0.9.0, Fixed](CHANGELOG.md#090---2026-09-14).
 
 ### Output is bounded because the consumer has a context limit
 
-An agent reading a month of journals gets 431,996 characters, against a tool
-response cap of roughly 25,000 tokens — the call does not fail, it truncates
-somewhere and the agent reasons on a fragment without knowing it. So `--tail`
+An agent reading a month of journals gets 431,996 characters, against about
+30,000 that Claude Code passes on from a shell command — past that, the agent
+gets a 2,000-character preview and a file it would have to read in parts, so
+either the answer is a fragment or the reading costs the context it was meant
+to save. So `--tail`
 and `--limit` filter **before** fetching rather than after, which keeps the
 omitted days from costing API calls as well. Truncation is never silent: the
 count of omitted days goes to stderr while stdout stays pure payload.
@@ -523,11 +508,12 @@ graph answers the same API on the same port, so it connects, and then returns
 empty results that read exactly like an empty graph. Being told which Logseq is
 on the other end beats inferring it from nothing.
 
-## Architecture
+## Contributing and credits
 
 The package layout, one line per module, and how commands are registered are
 in [CONTRIBUTING.md](CONTRIBUTING.md#project-structure); the decisions behind
 them are in [docs/adr](docs/adr/).
 
-The CLI communicates with Logseq's built-in HTTP API (Fastify server on port 12315).
 The core commands are inspired by [joelhooks/logseq-mcp-tools](https://github.com/joelhooks/logseq-mcp-tools), extended with property management, page operations, and property-based queries.
+
+MIT licensed, see [LICENSE](LICENSE).

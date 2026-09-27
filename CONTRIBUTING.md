@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 logseq-cli --version
 ```
 
-Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled (Settings → Advanced → Developer mode → API server).
+Requires Python 3.10+ and a running Logseq Desktop app with the HTTP API enabled (Settings → Features → HTTP APIs server, then start it from the API icon in the toolbar).
 
 ## Project Structure
 
