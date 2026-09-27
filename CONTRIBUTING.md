@@ -170,7 +170,7 @@ logseq-cli/
   copy.
 - **An error does not choose its exit code.** A command exits 0 when it did
   what it says and non-zero when it did not; the number carries no meaning
-  (see "Exit status: done or not done" in the README, and ADR 0004). So
+  (see [Exit status: done or not done](docs/design.md#exit-status-done-or-not-done-and-no-resume) and ADR 0004). So
   `fail()` is called with its default, never with `exit_code=`. The two
   places that set 2 predate the rule and stay, because changing them would
   change behaviour for nothing; `tests/test_exit_status_rule.py` keeps them
