@@ -453,7 +453,14 @@ class PageGraph:
         return next((p for p in self.pages if p["name"].lower() == str(name).lower()), None)
 
     def locate(self, uuid):
-        """``(page, siblings, index, parent)`` of the block, or ``None``."""
+        """``(page, siblings, index, parent)`` of the block, or ``None``.
+
+        Logseq finds a block by its uuid in capitals too, for getBlock and
+        updateBlock (measured, 0.10.15), as the HTTP double does.
+        """
+        if isinstance(uuid, str):
+            uuid = uuid.lower()
+
         def walk(page, blocks, parent):
             for i, b in enumerate(blocks):
                 if b["uuid"] == uuid:
@@ -518,6 +525,8 @@ class PageGraph:
     def get_block(self, uuid, include_children=True):
         if isinstance(uuid, int):       # getBlock takes a database id too
             uuid = next((u for u, i in self._block_ids.items() if i == uuid), None)
+        elif isinstance(uuid, str):     # and one in capitals (measured, 0.10.15)
+            uuid = uuid.lower()
         found = self.locate(uuid)
         if found:
             page, siblings, i, parent = found
