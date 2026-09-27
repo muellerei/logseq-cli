@@ -97,6 +97,7 @@ files would not.
 | report a write that did not land as done | never; every write is proven |
 | show a change before making it | does it: `--dry-run` on every command that writes |
 | undo a change | cannot; a deletion is final, so preview first |
+| write while Logseq is closed | cannot; your agent is told to stop rather than edit the files |
 | read more than fits in its context | cuts page and journal reads and searches to a size it asks for, and says what it left out |
 
 A call that fails exits non-zero and says why; [AGENTS.md](AGENTS.md) is the

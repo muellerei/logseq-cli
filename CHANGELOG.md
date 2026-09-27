@@ -12,6 +12,13 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- AGENTS.md and the agent skill no longer tell an agent to fall back to
+  editing the Markdown files when Logseq is not running. It may read them
+  then, and only then; it writes nothing and says that Logseq has to run.
+  The fallback dated from the first import and sent an agent that ran while
+  Logseq was closed, such as a scheduled one, to write exactly where nothing
+  checks the write or protects a reference.
+
 - `--resolve-refs` puts what Logseq shows of a Block Ref in its place, on the
   ref's line: the target's first line with its `SCHEDULED:` and `DEADLINE:`
   dates, not its whole text. Logseq 0.10.15 draws a ref as the target's title

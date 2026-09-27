@@ -56,7 +56,11 @@ are installed with the package; nothing else is needed at runtime.
 Both also surface on any other command as `{"error": ..., "reason":
 "connection_refused" | "http_error"}` on stderr, with a non-zero exit.
 
-If Logseq is not running, fall back to direct filesystem access on the graph's markdown files.
+While Logseq runs, read and write through the CLI, not the Markdown files:
+the files do not know aliases, backlinks or where a task was carried, and a
+write to them is not checked. If Logseq is not running, the files may be read
+(see "Connection Errors" below), but nothing is written: stop and say that
+Logseq has to run.
 
 ## The 5 Core Workflows
 
@@ -390,7 +394,7 @@ a code block or inline code is code and changes nothing.
 
 ### 6. Connection Errors
 
-If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. In this case, fall back to direct filesystem access:
+If Logseq is not running, the CLI will print "Cannot connect to Logseq API" and exit non-zero. Then the graph's files may be read, and only read, until Logseq runs again; do not write to them, since nothing would check the write or protect a reference:
 
 - Journals: `journals/YYYY_MM_DD.md`
 - Pages: `pages/Page Name.md`
