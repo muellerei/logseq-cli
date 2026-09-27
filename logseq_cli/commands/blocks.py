@@ -41,17 +41,18 @@ def get_block(ctx, block_id, no_children, as_json):
     if as_json:
         output(block, True)
     else:
-        # Metadata
-        page_info = block.get("page")
-        if isinstance(page_info, dict):
-            click.echo(f"Page: {page_info.get('name') or page_info.get('id', '?')}")
-        elif page_info is not None:
-            click.echo(f"Page: {page_info}")
-        parent_info = block.get("parent")
-        if isinstance(parent_info, dict):
-            click.echo(f"Parent: {parent_info.get('name') or parent_info.get('id', '?')}")
-        elif parent_info is not None:
-            click.echo(f"Parent: {parent_info}")
+        # Logseq answers page and parent as database ids no command takes:
+        # print the page's name and the parent block's uuid instead. Directly
+        # under the page the line says so rather than going missing, so the
+        # first Parent line does not come from the content; "(page)" is no
+        # block uuid, so it cannot pass for the parent's.
+        page_name = api.page_name_of(block)
+        if page_name:
+            click.echo(f"Page: {page_name}")
+        parent = api.parent_of(block)
+        if parent:
+            kind, uuid = parent
+            click.echo(f"Parent: {uuid}" if kind == "block" else "Parent: (page)")
         created = block.get("createdAt") or block.get("created-at")
         updated = block.get("updatedAt") or block.get("updated-at")
         if created:

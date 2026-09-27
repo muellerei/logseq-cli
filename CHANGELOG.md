@@ -35,6 +35,20 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-block` prints the parent block's uuid as `Parent:`, ready for the
+  next `--id`, and `Parent: (page)` when the block sits directly under its
+  page, so a `Parent:` line in the block's own text does not come first.
+  It printed Logseq's internal database id, which no command takes, and
+  `Page:` printed that id too under `--no-children`. Found in the output
+  of a real `get-block` call. Logseq answers
+  both as database ids; the output took `name` or else `id`, and a block
+  has no `name`. `Page:` now shows the page's name as Logseq writes it,
+  with or without children. Present since the first import; the test
+  double answered the parent's uuid there (#104). Cost: one `getBlock`
+  for a nested block's parent, and one `getPage` under `--no-children`,
+  where the answer does not name the page; a block directly under its
+  page with children needs the one request it always did.
+
 - `get-block --no-children` no longer crashes on a block that has children.
   Asked without children, Logseq answers each as a `["uuid", <uuid>]` pair
   rather than a block, and the text output rendered the pairs as blocks:
