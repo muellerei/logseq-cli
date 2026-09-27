@@ -4,7 +4,7 @@ import re
 import pytest
 from click.testing import CliRunner
 
-from logseq_cli.api import _not_verified
+from logseq_cli.api import _not_verified, block_or_none
 
 
 @pytest.fixture(autouse=True)
@@ -733,11 +733,15 @@ class PageGraph:
 def page_graph_api(graph):
     """MagicMock whose page and block calls are answered by ``graph``."""
     api = mock_api()
-    for name in ("get_page", "get_page_blocks_tree", "get_block", "create_page",
+    for name in ("get_page", "get_page_blocks_tree", "create_page",
                  "insert_batch_block", "insert_block", "append_block_in_page",
                  "remove_block", "move_block", "datascript_query", "update_block",
                  "upsert_block_property"):
         getattr(api, name).side_effect = getattr(graph, name)
+    # LogseqAPI.get_block reads Logseq's answer through block_or_none; the
+    # graph answers as Logseq does, placeholders included.
+    api.get_block.side_effect = lambda uuid, include_children=True, **_: \
+        block_or_none(graph.get_block(uuid, include_children))
     api.get_user_configs.return_value = {"preferredDateFormat": "yyyy-MM-dd"}
     api.get_page_linked_references.return_value = []
     api.graph = graph

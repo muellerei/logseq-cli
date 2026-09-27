@@ -22,7 +22,7 @@ def _answering_writes(payload):
     with ``null``, and getBlock with the block as last written, for the
     read that proves the update. Everything else answers ``payload``."""
     idle = MagicMock(status_code=200, text="false")
-    block = {"uuid": "uuid-x", "content": ""}
+    block = {"uuid": "uuid-x", "content": "", "page": {"id": 1}}
 
     def post(url, json=None, **kwargs):
         method, args = json["method"], json["args"]

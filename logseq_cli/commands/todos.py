@@ -48,10 +48,9 @@ def follow_ref_chain(api, block: dict, as_json: bool):
     ``followed`` runs from the first target to the last, without ``block``.
 
     Refuses without a write when the chain comes back to a block it passed
-    (``ref_cycle``) or leads to one that is gone (``dead_ref``): a read
-    without a page, ``null`` or the placeholder Logseq keeps for a missing
-    block, as for --resolve-refs (#70). Either way no block on it is the
-    task the caller meant.
+    (``ref_cycle``) or leads to one that is gone (``dead_ref``), which
+    includes the placeholder Logseq keeps for it (api.block_or_none). Either
+    way no block on it is the task the caller meant.
     """
     start = block["uuid"].lower()
     followed, target = [], block
@@ -61,7 +60,7 @@ def follow_ref_chain(api, block: dict, as_json: bool):
                  "Nothing was written.",
                  as_json, reason="ref_cycle", id=uuid, followed=followed)
         read = api.get_block(uuid, include_children=False)
-        if not isinstance((read or {}).get("page"), dict):
+        if not read:
             fail(f"The refs from block {start} lead to block {uuid}, which is gone "
                  "(a dead ref). Nothing was written.",
                  as_json, reason="dead_ref", id=uuid, followed=followed)
@@ -546,9 +545,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     else:
         block_id = block_id.strip("()")
         block = api.get_block(block_id, include_children=False)
-        # A read without a page is Logseq's placeholder for a block that is
-        # gone, content "id:: <uuid>"; the marker went in front of that line.
-        if not isinstance((block or {}).get("page"), dict):
+        if not block:
             fail(f"Block {block_id} not found.", as_json, reason="block_not_found", id=block_id)
 
     # With --follow-refs every JSON result says which blocks it went through.

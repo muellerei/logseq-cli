@@ -441,7 +441,7 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
-| `block_not_found` | The block the command names does not exist; for `set-todo-status --id` also when Logseq holds it only as the placeholder of a missing ref target | `id` |
+| `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id` |
 | `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
 

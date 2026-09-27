@@ -61,7 +61,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
     def _api(self):
         api = LogseqAPI(token="t")
         # A block, as an insert answers: its proof reads the uuid.
-        api.call = MagicMock(return_value={"uuid": TARGET})
+        api.call = MagicMock(return_value={"uuid": TARGET, "page": {"id": 1}})
         return api
 
     @pytest.mark.parametrize("write", [
@@ -102,7 +102,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
         """An API whose Logseq holds ``text`` once written: the update is
         read back as its proof."""
         api = LogseqAPI(token="t")
-        api.call = MagicMock(return_value={"uuid": TARGET, "content": text})
+        api.call = MagicMock(return_value={"uuid": TARGET, "content": text, "page": {"id": 1}})
         return api
 
     @staticmethod
@@ -142,7 +142,7 @@ class TestTheApiRefusesAnUndecidedIdLine:
                 return None
             # The anchor, with the kept block under it once the batch is in:
             # the batch's proof reads it before and after.
-            return {"uuid": TARGET, "children": [
+            return {"uuid": TARGET, "page": {"id": 1}, "children": [
                 {"uuid": FOREIGN, "content": n["content"]} for b in sent for n in b]}
         api.call.side_effect = call
         assert api.insert_batch_block(

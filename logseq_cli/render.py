@@ -76,18 +76,16 @@ def _resolve_single_ref(api, uuid: str, dead: list = None) -> str:
     """What Logseq shows for the ref to ``uuid``, followed by ``↳ <page>``;
     the ref unchanged if the block is gone.
 
-    A lookup that answers ``null`` means the target is gone — Logseq answers
-    that for a deleted block. So does one without a page: the placeholder
-    Logseq keeps, as ``id:: <uuid>``, for a ref whose block does not exist
-    (#70). The fallback then renders the ref exactly as an unresolved one, so
-    two different things end up spelled the same way in the output. ``dead``
-    collects those uuids so the caller can say which is which. A lookup that
-    raises is not caught: calling the ref dead would be a claim about the
-    graph made from a failed read (#93).
+    A lookup that answers no block means the target is gone: a deleted
+    block, or the placeholder Logseq keeps for a ref whose block does not
+    exist (#70, api.block_or_none). The fallback then renders the ref
+    exactly as an unresolved one, so two different things end up spelled
+    the same way in the output. ``dead`` collects those uuids so the caller
+    can say which is which. A lookup that raises is not caught: calling the
+    ref dead would be a claim about the graph made from a failed read (#93).
     """
     block = api.get_block(uuid, include_children=False)
-    page = (block or {}).get("page")
-    if isinstance(page, dict):
+    if block:
         text = ref_text(block.get("content") or "")
         name = api.page_name_of(block)
         if not name:
