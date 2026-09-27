@@ -1,5 +1,9 @@
 # logseq-cli: Agent Reference
 
+Working on this repository rather than using the tool? See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the tests, the link check and the
+conventions a change follows.
+
 Instructions for any AI agent or automation tool driving logseq-cli from a
 shell. Nothing here is specific to one assistant: the CLI is a plain Python
 package (`click`, `requests`) with no vendor coupling.
@@ -457,13 +461,10 @@ refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 
 ## Environment Variables
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` and `add-journal-content` (e.g. `## Log`) |
-| `LOGSEQ_TOKEN` | (none) | Bearer token; the documented way to pass it. `--token` overrides it |
-| `LOGSEQ_HOST` | `127.0.0.1` | Logseq API host |
-| `LOGSEQ_PORT` | `12315` | Logseq API port |
-| `LOGSEQ_API_URL` | auto | Full API URL override |
+Two matter in agent work: `LOGSEQ_TOKEN`, the documented way to pass the
+token (`--token` overrides it), and `LOGSEQ_JOURNAL_HEADING`, the default
+heading for journal writes. Every variable, with its default, is in
+[docs/configuration.md](docs/configuration.md#environment-variables-and-flags).
 
 ## Command Summary
 

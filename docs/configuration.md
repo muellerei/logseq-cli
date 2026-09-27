@@ -37,9 +37,9 @@ Copy one, delete what you do not need, keep what you do.
 |----------|---------|-------------|
 | `LOGSEQ_HOST` | `127.0.0.1` | Logseq API host |
 | `LOGSEQ_PORT` | `12315` | Logseq API port |
-| `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication |
+| `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication; `--token` overrides it |
 | `LOGSEQ_API_URL` | auto | Full API URL override |
-| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` (e.g. `## Log`) |
+| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for journal writes: `add-journal-block`, `add-journal-content`, `add-block-ref` (e.g. `## Log`) |
 | `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
 | `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
 | `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |

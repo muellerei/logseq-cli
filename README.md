@@ -98,8 +98,8 @@ Two settings cover most setups:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication |
-| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for `add-journal-block` (e.g. `## Log`) |
+| `LOGSEQ_TOKEN` | (empty) | Bearer token for authentication; `--token` overrides it |
+| `LOGSEQ_JOURNAL_HEADING` | (none) | Default heading for journal writes: `add-journal-block`, `add-journal-content`, `add-block-ref` (e.g. `## Log`) |
 
 Every variable, the `--host`/`--port`/`--token` flags and the journal heading
 in detail are in
