@@ -12,6 +12,14 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `init` without `--output` writes to the config file that is in use, not to
+  the first search path. With the config in `~/.logseq-cli.toml` and nothing
+  under `~/.config/logseq-cli/`, it used to create a second file there
+  without `--force`; that file is found first, so every setting in the old
+  one stopped applying, silently. Now the target exists, so `--force` is
+  needed. Reproduced on `main`. Not filed under Fixed because the old
+  behaviour was what the help text said.
+
 - AGENTS.md and the agent skill no longer tell an agent to fall back to
   editing the Markdown files when Logseq is not running. It may read them
   then, and only then; it writes nothing and says that Logseq has to run.

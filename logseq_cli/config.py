@@ -56,6 +56,14 @@ def config_search_paths() -> list[Path]:
     ]
 
 
+def active_config_path() -> Path | None:
+    """The config file that is in use: the first search path that exists."""
+    for candidate in config_search_paths():
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """Read the config file, or return an empty dict when there is none.
 

@@ -340,6 +340,10 @@ It looks at the most recent journals only (120 by default, `--days` to change
 that). A section you stopped using years ago still sits in hundreds of old
 files and would otherwise outrank the one you use now.
 
+It writes to the config file that is in use, so a config in `~/.logseq-cli.toml`
+gets no second file under `~/.config/logseq-cli/` that would be found first and
+hide it. `--output PATH` writes there instead.
+
 Two things it will not do: overwrite an existing config without `--force`, and
 guess `[analysis]` — which words carry mood in your journal is not something a
 count can tell.

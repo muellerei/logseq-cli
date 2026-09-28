@@ -8,7 +8,9 @@ from pathlib import Path
 import click
 import requests
 
-from logseq_cli.config import ConfigError, config_search_paths, get, load_config
+from logseq_cli.config import (
+    ConfigError, active_config_path, config_search_paths, get, load_config,
+)
 from logseq_cli.group import cli, resolve_version
 from logseq_cli.headings import normalize_heading
 from logseq_cli.output import fail, handle_connection_error, output
@@ -75,7 +77,7 @@ Note:
   section you abandoned years ago does not end up in your config.
 """)
 @click.option("--output", "out_path", default=None,
-              help="Where to write (default: the first config search path)")
+              help="Where to write (default: the config file in use, else the first config search path)")
 @click.option("--days", default=120, show_default=True, type=int,
               help="How many of the most recent journals to look at (1 or greater)")
 @click.option("--force", is_flag=True, help="Overwrite an existing config file")
@@ -96,7 +98,11 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
     if days < 1:
         fail("--days must be 1 or greater.", as_json)
 
-    target = Path(out_path).expanduser() if out_path else config_search_paths()[0]
+    # The file in use, not the first search path: with the config in
+    # ~/.logseq-cli.toml, a new file under ~/.config/ would be found first and
+    # silently hide every setting of the old one.
+    target = (Path(out_path).expanduser() if out_path
+              else active_config_path() or config_search_paths()[0])
     if target.exists() and not (force or dry_run):
         fail(f"{target} already exists. Pass --force to overwrite it, "
              "or --dry-run to see what would be written.",
