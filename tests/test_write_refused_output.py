@@ -28,6 +28,7 @@ TYPES = [
      {"method": "upsertBlockProperty", "logseq_message": "foo is not a valid UUID string."}),
     ("PageExists", "page_exists", {"page": "Probe Page"}),
     ("RenameRefused", "rename_refused", {"old": "Old Page", "new": "Taken Page", "why": "exists"}),
+    ("ReadOnly", "read_only", {"source": ["config"], "config_path": "/x/config.toml"}),
     ("WriteNotVerified", "write_not_verified",
      {"method": "upsertBlockProperty", "target": "block 1f7fab12", "expected": "k:: v",
       "got": "k not set"}),

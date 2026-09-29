@@ -45,6 +45,17 @@ logseq-cli get-all-pages --json | jq length
 logseq-cli --version
 ```
 
+### Global options
+
+Given before the command name (`logseq-cli --read-only add-journal-block …`):
+
+| Option | Effect |
+|--------|--------|
+| `--host`, `--port`, `--token` | Where Logseq's HTTP API is and how to authenticate; each has an environment variable ([configuration.md](configuration.md#environment-variables-and-flags)) |
+| `--no-cache` | Bypass the in-memory read cache for this call |
+| `--read-only` | Refuse every command that writes, `--dry-run` included, for this call. Can only tighten: nothing loosens a `[safety] read_only = true` in the config. See [safety.md](safety.md) |
+| `--version` | Print the version |
+
 ### Parameter aliases
 
 All commands that take a page name accept both `--page` and `--name`:
@@ -123,8 +134,8 @@ graph.
 |---------|-------------|
 | `get-todos [--page NAME] [--status S] [--tag TAG] [--match REGEX] [--from DATE] [--to DATE] [--due-from DATE] [--due-to DATE] [--include-done] [--refs-limit N] [--no-follow-refs]` | List tasks (page name shown inline in plain-text output). `--from/--to` date a task by every journal it stands in, the page its block lives on and the ones it was carried into by `((block-ref))` alike; `references` names the latter, `--refs-limit` caps that list (0 lifts the cap) and `references_withheld` counts what was left out — with a range that includes occurrences outside it, so lifting the cap does not make the count zero. `--no-follow-refs` reports only where blocks live. `--due-from/--due-to` filter by `SCHEDULED`/`DEADLINE` instead. For a repeating task the next occurrence is derived (the date in its text moves on only when the task is ticked off by its checkbox in Logseq) and the range is applied to it; it is reported as `next_due`, and a repeater whose interval cannot be read is left out, counted in `repeating_excluded` and named on stderr. `--match` filters by what the task says (regex, case-insensitive, properties excluded). `--match` runs over the text as stored: `((refs))` are not resolved, and `^`/`$` anchor the whole text unless the pattern starts with `(?m)`. `--json` gives `{"todos": [...], "count": N}`, plus `repeating_excluded` when a due range left out repeaters it could not place; each task has `marker`, `content` (the text without marker, properties, `SCHEDULED`/`DEADLINE` and `LOGBOOK`), `page`, `uuid`, and `journal_day` when the page its block lives on is a journal. `scheduled`, `deadline`, `next_due` (all dates YYYY-MM-DD), `repeating`, `references` and `references_withheld` appear where they apply; a key that does not apply is absent, not null |
 | `get-properties --page NAME [--property KEY]` | Get page properties, keyed as Logseq stores them (`due-date`, not the API's `dueDate`), with the original text alongside the parsed value |
-| `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config. Exit 0 = ready |
-| `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on |
+| `doctor` | Health-check: Python, packages, connectivity, token, API, graph kind, graph, config, and whether writes are off (`read_only`). Exit 0 = ready to read |
+| `init [--dry-run] [--force] [--output PATH]` | Write a config file suggested from your graph, with the counts each suggestion rests on. Writes to the config file in use (else the first search path), so a config in `~/.logseq-cli.toml` gets no second file; that file exists, so `--force` is needed, and it keeps `[safety]`. Allowed under `read_only` |
 
 ### Properties (3)
 
@@ -150,7 +161,9 @@ graph.
 ## Previews and refusals
 
 Every command that writes takes `--dry-run`. What the previews show, and the
-checks that refuse a write, command by command:
+checks that refuse a write, command by command. With `read_only` on, a preview
+is refused too (`reason: read_only`): one that says "would write" when the real
+run cannot would lie about it.
 
 ```bash
 # 1. --dry-run for the destructive commands (they cascade: children, source blocks)

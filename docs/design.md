@@ -87,6 +87,40 @@ confirmation Logseq's own UI asks for; measured on 0.10.15, it answered
 renamed page was gone. `rename-page` refuses such a name, and an empty one,
 before anything is sent.
 
+## Writes can be switched off, checked twice
+
+`[safety] read_only = true` makes every command that writes refuse, and the
+place it is checked is not the obvious one. The obvious one is the single
+method every write goes through, `LogseqAPI.call`. A check there is too late:
+`--dry-run` never calls a write method, so a switch checked only there would
+let a preview say "would write" and then refuse the real run; and without
+`--dry-run` it fires only after the command has read the graph, resolved
+aliases and asked the editor. So each command that writes asks first. It says
+so where it is registered (`cls=WriteCommand`, a mark on the command, not a
+second decorator whose order could go wrong), and the error handler every
+command that writes runs inside asks for the mark after the options are parsed (so `--help`
+and usage errors come as before) and before the command's first request. The preview is refused with the rest,
+because a preview that cannot be followed by the real run misleads.
+
+The second check is in `_post`, the one place a request leaves the process. It
+is there for a write that reaches the network by a path the first check does
+not cover, such as a command registered without the mark; a test compares the
+commands that carry it with the commands that write, and fails when they
+differ. The second check was added as a second line, not after a write got
+through.
+
+Both ask one function, which decides whether writes are off and from where
+(config file, environment, flag), once per call. The switch only tightens: an
+environment value of `false` or a missing flag never loosens a config that
+says `true`, since a way to loosen it is a way for whoever is being limited to
+do so. An unknown environment value switches writes off, and says so; and
+`[safety]` alone is checked strictly, because a misspelt limit does nothing
+and nothing would say so. Commands that only read stay tolerant of a config
+they cannot use.
+
+What it does not do is stated in [safety.md](safety.md): an agent with the
+token or write access to the files is not stopped by a refusal in this CLI.
+
 ## Query values are escaped in one place
 
 Values entering datalog queries were interpolated with f-strings: one call site

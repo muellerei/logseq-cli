@@ -27,6 +27,7 @@ from logseq_cli.blocktext import (
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
 from logseq_cli.pagenames import js_trim, page_name_to_create, title_as_created
+from logseq_cli.safety import guard_write
 # Raised by the writes below; imported here too so that callers can take them
 # from the API they call. They live in a leaf module, so that
 # strictinsert and output need not import the HTTP client for them.
@@ -446,7 +447,8 @@ class LogseqAPI:
     batch_editor_wait_s = 0.1
     _sleep = staticmethod(time.sleep)
 
-    def __init__(self, host=None, port=None, token=None):
+    def __init__(self, host=None, port=None, token=None, *, guard_write=guard_write):
+        self._guard_write = guard_write
         self.host = host or os.getenv("LOGSEQ_HOST", "127.0.0.1")
         port_source = "--port" if port else "LOGSEQ_PORT"
         self.port = port or os.getenv("LOGSEQ_PORT", "12315")
@@ -515,6 +517,13 @@ class LogseqAPI:
         """
         if method not in _METHODS:
             raise UnknownMethod(method)
+        if method in _MUTATING_METHODS:
+            # The second check, behind the one every writing command makes: a
+            # writer the command scan missed still stops here, before the
+            # request. It asks when the first write is sent, not when the
+            # client is built, because the group builds the client ahead of
+            # --help and would load the config for every read.
+            self._guard_write()
         resp = requests.post(
             self.base_url,
             json={"method": method, "args": args},

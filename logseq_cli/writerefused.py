@@ -58,6 +58,12 @@ class RenameRefused(WriteRefused):
     reason = "rename_refused"
 
 
+class ReadOnly(WriteRefused):
+    """Writes are switched off. Fields: source (a list of "config", "env",
+    "flag"), config_path (None when no config file was found)."""
+    reason = "read_only"
+
+
 class WriteNotVerified(WriteRefused):
     """The write did not show in Logseq. Fields: method, target, expected, got."""
     reason = "write_not_verified"

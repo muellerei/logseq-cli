@@ -39,6 +39,7 @@ from logseq_cli.outlinetext import (
     parse_hierarchical_content,
 )
 from logseq_cli.output import fail, handle_connection_error, json_text, output, uuid_fields
+from logseq_cli.safety import WriteCommand
 from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
     blocks_to_markdown,
@@ -342,7 +343,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
              f"{', '.join(unread)}.", as_json,
              reason="partial_read", days=unread)
 
-@cli.command("add-journal-entry", epilog="""\b
+@cli.command("add-journal-entry", cls=WriteCommand, epilog="""\b
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
 --under-heading / --upsert-heading.
 An id:: line in --content is dropped with a Note, as in add-journal-block.
@@ -426,7 +427,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     else:
         click.echo(f"Added {blocks_added} block(s) to journal: {page_name}")
 
-@cli.command("add-journal-block", epilog="""\b
+@cli.command("add-journal-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting with [[Bob]]"
   logseq-cli --token TOKEN add-journal-block --date 2026-05-07 --content "**14:30** Nachtrag"
@@ -819,7 +820,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         click.echo(f"  uuid: {_u}")
         click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
 
-@cli.command("add-journal-content", epilog="""\b
+@cli.command("add-journal-content", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN add-journal-content \\
     --content "- ## Log\\n\\t- 14:30 Meeting [[Bob]]" --date $(date +%Y-%m-%d)

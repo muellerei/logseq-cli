@@ -12,6 +12,7 @@ from logseq_cli.blockprops import (
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
+from logseq_cli.safety import WriteCommand
 from logseq_cli.render import is_properties_block
 
 
@@ -244,7 +245,7 @@ def _check_page_took(api, page, page_uuid, key, value, as_json):
          reason="write_not_verified", page=page, property=key)
 
 
-@cli.command("set-property", epilog="""\b
+@cli.command("set-property", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN set-property --name "Alice" --key "team" --value "[[Platform]]"
   logseq-cli --token TOKEN set-property --name "X" --key "type" --value "Person"
@@ -342,7 +343,7 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     else:
         click.echo(f"Set '{key}:: {value}' on page '{page}'")
 
-@cli.command("remove-property", epilog="""\b
+@cli.command("remove-property", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN remove-property --name "X" --key "deprecated_key"
   logseq-cli --token TOKEN remove-property --id UUID --key "prio"
@@ -462,7 +463,7 @@ def _remove_page_property(api, ref, blocks, key, dry_run, as_json):
         click.echo(f"'{key}' is not set on page '{page}'; nothing was removed")
 
 
-@cli.command("set-block-property", epilog="""\b
+@cli.command("set-block-property", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN set-block-property --id UUID --key "status" --value "done"
 Note:

@@ -10,7 +10,70 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Added
+
+- `[safety] read_only = true` in the config file, the environment variable
+  `LOGSEQ_CLI_READ_ONLY` and the global option `--read-only` switch writes
+  off: every command that writes refuses before its first request, reads and
+  the editor check included, and so does its `--dry-run`. A preview that says
+  "would write" when the real run cannot would lie about it. The refusal is
+  `reason: read_only` with `source` (a list of `config`, `env`, `flag`) and
+  `config_path`. The switch only tightens: an environment value of `false` or
+  a missing option leaves a config that says `true` in force, and there is no
+  `--no-read-only`. An unknown environment value switches writes off and
+  says so. A test fails when a command that writes is added without the
+  check, and `LogseqAPI._post` refuses any write method a second time, so a
+  writer the scan misses still stops before the request.
+- `[safety]` is checked strictly: an unknown key (`readonly = true`), a
+  `[safety]` key outside `[safety]` (top level, another section, a misspelt
+  `[saftey]`, nested as `[journal.safety]`) and a value that is not `true` or `false` are errors that name
+  the key and suggest the right one. The other sections stay as tolerant as
+  they were, and commands that only read run, with a warning where they look at the config.
+- `doctor` always shows the state of `read_only` and where it comes from
+  (`on (env)`, `off (no [safety] in …)`, `off (no config file found)`, or
+  `unknown` with the reason when the config cannot be used), and
+  says "Ready to read; writes are off." when it is on. The line does not turn
+  a healthy check red: the common failure is a switch that is off without
+  anyone noticing, another file or another `HOME`, which a line shown only
+  when it is on would not reveal. A section the CLI does not read
+  (`[jurnal]`) is named as a note.
+- `init` keeps the `[safety]` section of the file it overwrites, and of the
+  config in use when it writes a new file at any path the config is looked
+  for (`--output ~/.config/logseq-cli/config.toml` with the config in
+  `~/.logseq-cli.toml` would hide it; a file behind it takes over once the
+  one in front goes), and says so on stderr.
+  Refusing would make `init` unusable under `read_only`; dropping it would lift the limit through a command that writes no graph.
+  It refuses a file it cannot parse (`reason: config_error`), since it could
+  not keep what is in it.
+
+- `docs/safety.md`: what `read_only` protects against and what it does not, how
+  binding each way of setting it is, how to keep the config file out of an
+  agent's reach, and what to check when it seems not to apply. The README
+  gets a short section with the recipe.
+
 ### Changed
+
+- `doctor` no longer advises removing a config file that does not parse:
+  "Fix the config file." Once the file carries a limit, removing it lifts the
+  limit.
+
+- A command that writes now reads the config file and refuses when it cannot
+  be parsed. Most of them never read it, so a broken file went unnoticed. With
+  a limit in the file, running on without it would lift the limit.
+
+- A command that writes refuses when `LOGSEQ_CLI_CONFIG` points at a file that
+  does not exist (`reason: config_error`, `--dry-run` included). It used to
+  warn and go on without a config, which for a read is right and for a write
+  lifts every limit the file may hold. Commands that only read keep the
+  warning.
+
+- `init` without `--output` writes to the config file that is in use, not to
+  the first search path. With the config in `~/.logseq-cli.toml` and nothing
+  under `~/.config/logseq-cli/`, it used to create a second file there
+  without `--force`; that file is found first, so every setting in the old
+  one stopped applying, silently. Now the target exists, so `--force` is
+  needed. Reproduced on `main`. Not filed under Fixed because the old
+  behaviour was what the help text said.
 
 - AGENTS.md and the agent skill no longer tell an agent to fall back to
   editing the Markdown files when Logseq is not running. It may read them

@@ -51,6 +51,8 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
   their UUIDs, `get-page --heading "## X"` returns one section, and
   `get-page --max-chars N` cuts the output to size and names how to go on.
   `find-block --limit N` caps what is printed.
+- **When asked to only read, pass `--read-only`** before the command name: it
+  refuses every write, `--dry-run` too, and nothing after it loosens it.
 - **Trust the exit status**: 0 means the call did what it says, anything
   else means it did not, and the error says why. Read the error, not the
   number: 1 and 2 carry no meaning. With `--json`, stdout holds only data;
@@ -65,6 +67,7 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
   - `write_not_verified`: read the block before retrying. Someone writing
     there at the same time can make a write that landed look missing.
   - `rename_refused`, `page_exists`: nothing was written.
+  - `read_only`: writes are off on purpose. Do not retry or go around it; tell the user.
 
   Every reason is listed in AGENTS.md, section "A Write Refused or Not Proven".
 

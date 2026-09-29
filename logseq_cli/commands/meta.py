@@ -8,9 +8,16 @@ from pathlib import Path
 import click
 import requests
 
-from logseq_cli.config import ConfigError, config_search_paths, get, load_config
+from logseq_cli.config import (
+    KNOWN_SECTIONS, ConfigError, active_config_path, config_search_paths,
+    get, read_config,
+)
+from logseq_cli.safety import (
+    decide, describe, refuse_missing_named_config, render_safety, safety_to_keep,
+)
 from logseq_cli.group import cli, resolve_version
 from logseq_cli.headings import normalize_heading
+from logseq_cli.notes import print_note
 from logseq_cli.output import fail, handle_connection_error, output
 
 
@@ -75,7 +82,7 @@ Note:
   section you abandoned years ago does not end up in your config.
 """)
 @click.option("--output", "out_path", default=None,
-              help="Where to write (default: the first config search path)")
+              help="Where to write (default: the config file in use, else the first config search path)")
 @click.option("--days", default=120, show_default=True, type=int,
               help="How many of the most recent journals to look at (1 or greater)")
 @click.option("--force", is_flag=True, help="Overwrite an existing config file")
@@ -96,11 +103,26 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
     if days < 1:
         fail("--days must be 1 or greater.", as_json)
 
-    target = Path(out_path).expanduser() if out_path else config_search_paths()[0]
+    # The file in use, not the first search path: with the config in
+    # ~/.logseq-cli.toml, a new file under ~/.config/ would be found first and
+    # silently hide every setting of the old one.
+    active = active_config_path()
+    target = (Path(out_path).expanduser() if out_path
+              else active or config_search_paths()[0])
     if target.exists() and not (force or dry_run):
         fail(f"{target} already exists. Pass --force to overwrite it, "
              "or --dry-run to see what would be written.",
              as_json=as_json, reason="config_exists")
+
+    # A file written here keeps the [safety] of the config it replaces or
+    # hides; a preview of a file that cannot be read would show a write the
+    # real run refuses.
+    try:
+        safety_from, kept_safety = safety_to_keep(target, active)
+    except ConfigError as e:
+        fail(f"{e} Fix it first: init would have to drop its [safety] "
+             "section, and could not tell what that holds.",
+             as_json=as_json, reason="config_error")
 
     pages = api.get_all_pages() or []
     journals = [p for p in pages
@@ -143,6 +165,9 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
         "person_values": prop_values.most_common(5),
     }
     toml_text = _render_config(heading_counts, namespaces, prop_values, total)
+    if kept_safety:
+        toml_text += "\n" + render_safety(kept_safety)
+        print_note(f"{'Would keep' if dry_run else 'Kept'} [safety] from {safety_from}.")
 
     if as_json:
         output({"target": str(target), "written": False if dry_run else None,
@@ -292,7 +317,8 @@ Examples:
   logseq-cli --token TOKEN doctor
   logseq-cli --token TOKEN doctor --json
 Note:
-  Read-only. Exits 0 when ready to read and write, non-zero otherwise.
+  Read-only. Exits 0 when ready to read, non-zero otherwise. Says whether
+  writes are switched off (read_only) and by what; that does not fail it.
   Distinguishes "Logseq not running" from "running but HTTP API off" and
   from "API up but token rejected" - each needs a different fix.
 """)
@@ -436,8 +462,10 @@ def doctor(ctx, as_json):
     # reported with ok=None and cannot turn a working setup into a failed one.
     # Without it most commands are fine; the point is to name the few that are
     # not, before the user hits one and wonders why it found nothing.
+    cfg = {}
+    config_broken = None
     try:
-        cfg = load_config()
+        cfg = read_config()
         configured = [
             key for section, key in (
                 ("graph", "projects_namespace"),
@@ -455,11 +483,37 @@ def doctor(ctx, as_json):
             add("config", None,
                 f"{cfg['_path']} carries no [graph] settings; "
                 "smart-query for projects or people will report them missing")
+        unknown = [f"[{name}]" for name, value in cfg.items()
+                   if isinstance(value, dict) and name not in KNOWN_SECTIONS]
+        if unknown:
+            add("config sections", None,
+                f"{', '.join(unknown)} is not read; check the spelling")
     except ConfigError as e:
+        config_broken = e
         # A broken config is worth failing on: the user meant to configure
-        # something and it is not being applied.
+        # something and it is not being applied. Not "or remove it": with a
+        # limit in the file, removing it lifts the limit.
         add("config", False, str(e).split("\n")[0])
-        remedy = remedy or "Fix the config file, or remove it to run without one."
+        remedy = remedy or ("Fix the config file; the parser's message is in "
+                            "the config line above.")
+
+    # The state of read_only is always shown, and never turns a healthy check
+    # red: the most common way for it to fail is being off without anyone
+    # noticing (another file, another HOME), which a line shown only when it is
+    # on would not reveal.
+    decision, problem = None, config_broken
+    if problem is None:
+        try:
+            refuse_missing_named_config()
+            decision = decide(cfg)
+        except ConfigError as e:
+            problem = e
+    if decision is not None:
+        add("read_only", None, describe(decision))
+    else:
+        add("read_only", None,
+            f"unknown, commands that write refuse until this is fixed: "
+            f"{str(problem).splitlines()[0]}")
 
     healthy = all(c["ok"] for c in checks if c["ok"] is not None)
 
@@ -484,7 +538,11 @@ def doctor(ctx, as_json):
         if graph:
             click.echo(f"  graph: {graph}")
         click.echo()
-        if healthy:
+        if healthy and decision is None:
+            click.echo("Ready to read; commands that write refuse until the config is fixed.")
+        elif healthy and decision.read_only:
+            click.echo("Ready to read; writes are off.")
+        elif healthy:
             click.echo("Ready: reads and writes should work.")
         else:
             click.echo("Not ready.")

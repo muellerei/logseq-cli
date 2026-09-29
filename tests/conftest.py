@@ -8,15 +8,20 @@ from logseq_cli.api import _not_verified, block_or_none
 
 
 @pytest.fixture(autouse=True)
-def isolate_environment(monkeypatch):
+def isolate_environment(monkeypatch, tmp_path_factory):
     """Keep the developer's own environment out of every test.
 
     A shell with LOGSEQ_CLI_CONFIG or LOGSEQ_JOURNAL_HEADING set would
     otherwise change what commands do here — silently, and differently on
-    each machine. Tests that want either one set it themselves.
+    each machine. So would a real config file under HOME or XDG_CONFIG_HOME:
+    the search paths start there. Both point at an empty directory. Tests
+    that want a setting set it themselves.
     """
-    for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING"):
+    for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING", "LOGSEQ_CLI_READ_ONLY"):
         monkeypatch.delenv(var, raising=False)
+    empty_home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty_home / ".config"))
     yield
 
 

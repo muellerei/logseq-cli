@@ -8,6 +8,8 @@ overwriting a config the user already wrote.
 """
 
 import json
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -132,6 +134,34 @@ class TestWriting:
         payload = json.loads(result.stdout)
         assert "config" in payload
         assert payload["suggestions"]["journals_examined"] == 120
+
+
+class TestTargetIsTheConfigInUse:
+    """Without --output, init must not create a second file that hides the first."""
+
+    @staticmethod
+    def home():
+        return Path(os.environ["HOME"])  # conftest points it at an empty directory
+
+    def test_config_in_home_is_the_target_not_the_xdg_path(self):
+        old = self.home() / ".logseq-cli.toml"
+        old.write_text("# mine\n", encoding="utf-8")
+        result = run(graph(["## Log"]))
+        assert result.exit_code != 0
+        assert "--force" in (result.stderr or "") + result.stdout
+        assert str(old) in (result.stderr or "") + result.stdout
+        assert old.read_text(encoding="utf-8") == "# mine\n"
+        assert not (self.home() / ".config" / "logseq-cli" / "config.toml").exists()
+
+    def test_reason_is_config_exists(self):
+        (self.home() / ".logseq-cli.toml").write_text("# mine\n", encoding="utf-8")
+        result = run(graph(["## Log"]), "--json")
+        assert json.loads(result.stderr)["reason"] == "config_exists"
+
+    def test_no_config_at_all_writes_the_first_search_path(self):
+        result = run(graph(["## Log"]))
+        assert result.exit_code == 0
+        assert (self.home() / ".config" / "logseq-cli" / "config.toml").exists()
 
 
 class TestEmptyGraph:

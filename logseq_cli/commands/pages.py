@@ -35,6 +35,7 @@ from logseq_cli.output import (
     output,
     uuid_fields,
 )
+from logseq_cli.safety import WriteCommand
 from logseq_cli.pagenames import (
     AmbiguousAliasError,
     js_trim,
@@ -506,7 +507,7 @@ def get_backlinks(ctx, page, with_context, limit, as_json):
             fields["ambiguous"] = ambiguous
         fail(" ".join(messages), as_json, **fields)
 
-@cli.command("create-page", epilog="""\b
+@cli.command("create-page", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN create-page --name "Alice Example"
 Note:
@@ -614,7 +615,7 @@ def create_page(ctx, page, content, as_json, dry_run):
         if content:
             click.echo(f"Added content: {content[:60]}{'...' if len(content) > 60 else ''}")
 
-@cli.command("add-note-content", epilog="""\b
+@cli.command("add-note-content", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN add-note-content --page "Alice" --content "Body text"
   logseq-cli --token TOKEN add-note-content --page "Project Alpha" \\
@@ -749,7 +750,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")
 
-@cli.command("rename-page", epilog="""\b
+@cli.command("rename-page", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN rename-page --name "Old Name" --new-name "New Name"
 Note:
@@ -826,7 +827,7 @@ def rename_page(ctx, page, new_name, dry_run, as_json):
     else:
         click.echo(f"Renamed '{page}' -> '{sent}'")
 
-@cli.command("delete-page", epilog="""\b
+@cli.command("delete-page", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN delete-page --name "Obsolete Page" --dry-run
   logseq-cli --token TOKEN delete-page --name "Obsolete Page" --force

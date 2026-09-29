@@ -17,6 +17,7 @@ from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
+from logseq_cli.safety import WriteCommand
 
 
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
@@ -467,7 +468,7 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                 elif t.get("references_withheld"):
                     click.echo(f"      also on {t['references_withheld']} other page(s)")
 
-@cli.command("set-todo-status", epilog="""\b
+@cli.command("set-todo-status", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN set-todo-status --id UUID --status DONE
   logseq-cli --token TOKEN set-todo-status --content "ship the parser" \\
