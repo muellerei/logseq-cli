@@ -442,7 +442,7 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
 | `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
-| `config_error` | The config file cannot be used: it does not parse, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
+| `config_error` | The config file cannot be used: it does not parse, `LOGSEQ_CLI_CONFIG` names a file that is not there, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
 | `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id` |
 | `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |

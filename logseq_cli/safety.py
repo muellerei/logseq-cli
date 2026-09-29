@@ -26,7 +26,8 @@ from typing import NamedTuple
 import click
 
 from logseq_cli.config import (
-    check_safety, config_search_paths, read_config,
+    CONFIG_ENV_VAR, ConfigError, check_safety, config_search_paths, named_config_missing,
+    read_config,
 )
 from logseq_cli.notes import print_note
 from logseq_cli.writerefused import ReadOnly
@@ -71,6 +72,20 @@ def _env_on() -> bool:
     return True
 
 
+def refuse_missing_named_config() -> None:
+    """A command that writes does not carry on without the file it was pointed at.
+
+    ``read_config`` warns and goes on for a stale ``LOGSEQ_CLI_CONFIG``, which
+    suits a read. For a write the file may hold the limit, and the variable
+    is the one way to name it: a deleted or mistyped path would lift it.
+    """
+    if named := named_config_missing():
+        raise ConfigError(
+            f"{CONFIG_ENV_VAR} points at {named}, which does "
+            "not exist. Commands that write do not run without the limits that "
+            "file may hold; fix the path or unset the variable.")
+
+
 def decide(config: dict) -> WriteDecision:
     """Are writes off, from a loaded config, the environment and the flag.
 
@@ -100,6 +115,7 @@ def write_decision() -> WriteDecision:
     obj = _obj()
     if obj is not None and _CACHE in obj:
         return obj[_CACHE]
+    refuse_missing_named_config()
     decision = decide(read_config())
     if obj is not None:
         obj[_CACHE] = decision

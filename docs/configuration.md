@@ -70,7 +70,9 @@ logseq-cli add-journal-block --top-level --content "..."
 
 In this order, first hit wins:
 
-1. `$LOGSEQ_CLI_CONFIG` — when set, **only** this path is considered.
+1. `$LOGSEQ_CLI_CONFIG` — when set, **only** this path is considered. A
+   missing file at that path is an error for a command that writes and a
+   warning for one that only reads (see below).
 2. `$XDG_CONFIG_HOME/logseq-cli/config.toml`, or
    `~/.config/logseq-cli/config.toml` when `XDG_CONFIG_HOME` is unset.
 3. `~/.logseq-cli.toml`.
@@ -84,14 +86,15 @@ stderr, a non-zero exit, and with `--json` a `"reason": "config_error"` so a scr
 tell a broken setting apart from a broken connection.
 
 If `LOGSEQ_CLI_CONFIG` is set but the file it names is gone — deleted, renamed,
-or a typo in the path — a command that looks at the config prints a warning to
-stderr and carries on without it (commands that never read a setting do not
-look, and say nothing). A stale variable should not stop commands that need no
-settings, and a command that does need one still fails loudly, naming the
-setting. A file that does not parse is different: a command that writes
-refuses (`reason: config_error`), because the file may hold the limit in
-[`[safety]`](#safety-read_only); one that only reads reports it where it needs
-a setting.
+or a typo in the path — a command that only reads and looks at the config
+prints a warning to stderr and carries on without it (commands that never read
+a setting do not look, and say nothing): a stale variable should not stop commands that
+need no settings, and a command that does need one still fails loudly, naming
+the setting. A command that writes refuses (`reason: config_error`, `--dry-run`
+included): the file may hold the limit in [`[safety]`](#safety-read_only), and
+the variable is the one way to name it. The same holds for a file that does not
+parse: a command that writes refuses, one that only reads reports it where it
+needs a setting.
 
 Passing a path explicitly is different: that is an instruction, so a file that
 is not there is an error.

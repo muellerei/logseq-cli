@@ -160,6 +160,7 @@ file is not writable by the process the agent runs in.
 | `Error: … `read_only` is at the top level, where it does nothing; `read_only` belongs under [safety].` (or `is in [journal]`, `is in [saftey]`) | The key is outside `[safety]`: at the top level, in another section, under a misspelt `[saftey]`, or as `[journal.safety]` (a `safety` table nested in another section: `[safety] is a top-level section`) |
 | `Error: … [safety] read_only must be true or false, got 'yes'.` | The value is a string, not a TOML boolean |
 | `Error: … is not valid TOML` | The file does not parse. Commands that write refuse (`reason: config_error`) rather than run without what the file may hold. Fix it; removing it lifts the limit |
+| `Error: LOGSEQ_CLI_CONFIG points at …, which does not exist` | The variable names a file that is not there. Commands that write refuse; commands that only read warn and go on |
 | `init` refuses with `reason: config_exists` | It writes to the config in use, which exists. `init --force` overwrites it and keeps `[safety]`; it refuses a file it cannot parse |
 
 Only `[safety]` is checked strictly. A misspelt key in another section is

@@ -61,6 +61,12 @@ file carries most of the reasoning behind the tool.
   be parsed. Most of them never read it, so a broken file went unnoticed. With
   a limit in the file, running on without it would lift the limit.
 
+- A command that writes refuses when `LOGSEQ_CLI_CONFIG` points at a file that
+  does not exist (`reason: config_error`, `--dry-run` included). It used to
+  warn and go on without a config, which for a read is right and for a write
+  lifts every limit the file may hold. Commands that only read keep the
+  warning.
+
 - `init` without `--output` writes to the config file that is in use, not to
   the first search path. With the config in `~/.logseq-cli.toml` and nothing
   under `~/.config/logseq-cli/`, it used to create a second file there

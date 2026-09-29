@@ -256,6 +256,31 @@ class TestABrokenConfigStopsWriters:
         assert sent == []
 
 
+class TestAMissingNamedFile:
+    @pytest.mark.parametrize("dry_run", [False, True], ids=["run", "dry-run"])
+    def test_a_writer_refuses(self, dry_run, tmp_path, monkeypatch, sent):
+        gone = tmp_path / "gone.toml"
+        monkeypatch.setenv("LOGSEQ_CLI_CONFIG", str(gone))
+        result = invoke("add-journal-block", "--content", "x", "--json",
+                        *(["--dry-run"] if dry_run else []))
+        error = error_of(result)
+        assert result.exit_code != 0
+        assert error["reason"] == "config_error"
+        assert str(gone) in error["error"]
+        assert sent == []
+
+    def test_a_reader_runs(self, tmp_path, monkeypatch, double):
+        double.add_page("Probe Page", ["alpha block"])
+        monkeypatch.setenv("LOGSEQ_CLI_CONFIG", str(tmp_path / "gone.toml"))
+        result = invoke("get-page", "--page", "Probe Page")
+        assert result.exit_code == 0
+
+    def test_no_variable_and_no_file_is_a_normal_run(self, sent):
+        result = invoke("add-journal-block", "--content", "x")
+        assert "config" not in result.stderr.lower()
+        assert sent, "the command should have reached the network"
+
+
 class TestSafetyIsCheckedStrictly:
     @pytest.mark.parametrize("text,hint", [
         ("[safety]\nreadonly = true\n", "did you mean `read_only`"),
@@ -436,6 +461,12 @@ class TestDoctorDoesNotClaimOffWhenItCannotTell:
         config("[safety\n")
         line = read_only_line(invoke("doctor", "--json"))["detail"]
         assert line.startswith("unknown, commands that write refuse")
+
+    def test_a_named_file_that_is_not_there(self, healthy_doctor, tmp_path, monkeypatch):
+        monkeypatch.setenv("LOGSEQ_CLI_CONFIG", str(tmp_path / "gone.toml"))
+        result = invoke("doctor", "--json")
+        assert result.exit_code == 0
+        assert read_only_line(result)["detail"].startswith("unknown, commands that write refuse")
 
 
 class TestABrokenConfigIsNotAdvisedAway:

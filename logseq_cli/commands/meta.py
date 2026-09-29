@@ -13,7 +13,7 @@ from logseq_cli.config import (
     get, read_config,
 )
 from logseq_cli.safety import (
-    decide, describe, render_safety, safety_to_keep,
+    decide, describe, refuse_missing_named_config, render_safety, safety_to_keep,
 )
 from logseq_cli.group import cli, resolve_version
 from logseq_cli.headings import normalize_heading
@@ -504,6 +504,7 @@ def doctor(ctx, as_json):
     decision, problem = None, config_broken
     if problem is None:
         try:
+            refuse_missing_named_config()
             decision = decide(cfg)
         except ConfigError as e:
             problem = e
