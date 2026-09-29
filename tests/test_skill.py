@@ -86,7 +86,7 @@ def test_every_option_named_with_its_command_exists():
 
 
 def test_every_option_named_alone_exists_somewhere():
-    every = set().union(*OPTIONS.values())
+    every = set().union(*OPTIONS.values()) | {o for p in cli.params for o in p.opts}
     alone = {words[0] for words in _spans(BODY) if words[0].startswith("--")}
     assert alone, "the scan found no option named on its own"
     assert alone <= every, alone - every

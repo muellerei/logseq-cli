@@ -16,6 +16,7 @@ from logseq_cli.datalog import InvalidKeywordError
 from logseq_cli.headings import TitleHeadingOnly
 from logseq_cli.blocktext import IdLineError, SplitBlockError
 from logseq_cli.notes import hold_notes, release_notes, take_notes
+from logseq_cli.safety import guard_write
 from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page, resolve_page_to_write
 from logseq_cli.writerefused import WriteRefused, partial_state
 
@@ -73,6 +74,12 @@ def handle_connection_error(func):
         if as_json:
             hold_notes()
         try:
+            # After click has parsed the options, before the command's first
+            # request: a command that writes (WriteCommand) refuses here when
+            # writes are off.
+            ctx = click.get_current_context(silent=True)
+            if ctx is not None and getattr(ctx.command, "writes", False):
+                guard_write()
             return func(*args, **kwargs)
         # The four failures of the connection can come after writes of the
         # call landed, or with one sent and not proven: _after_writes adds

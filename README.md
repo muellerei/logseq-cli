@@ -95,7 +95,8 @@ files would not.
 | delete a block or page that `((block refs))` elsewhere point into | refuses, unless told to go ahead |
 | rename a page onto a name that already exists | refuses; Logseq would merge the two |
 | report a write that did not land as done | never; every write is proven |
-| show a change before making it | does it: `--dry-run` on every command that writes |
+| show a change before making it | does it: `--dry-run` on every command that writes (not under `read_only`, below) |
+| write when it was told to only read | refuses: `[safety] read_only = true` switches every write off, before the first request |
 | undo a change | cannot; a deletion is final, so preview first |
 | write while Logseq is closed | cannot; your agent is told to stop rather than edit the files |
 | read more than fits in its context | cuts page and journal reads and searches to a size it asks for, and says what it left out |
@@ -104,6 +105,27 @@ A call that fails exits non-zero and says why; [AGENTS.md](AGENTS.md) is the
 reference for an agent using the tool, including the reasons a write is
 refused. The previews and refusals command by command are in
 [docs/commands.md](docs/commands.md#previews-and-refusals).
+
+### Limiting what an agent can do
+
+To let an agent read your graph but not change it, put this in your config
+file:
+
+```toml
+[safety]
+read_only = true
+```
+
+and run `logseq-cli doctor`: it shows `read_only: on (config …)` when the
+switch is in force, and where it comes from when it is not. Every command that
+writes then refuses before its first request, with `reason: read_only`.
+
+It protects against an agent that makes a mistake, not against one that sets
+out to get around it: an agent with the API token can still send requests
+itself, and one that can write files can edit the config or the Markdown files.
+[docs/safety.md](docs/safety.md) covers how binding each way of setting it is
+(config file, environment variable, `--read-only`), how to keep the config file
+out of an agent's reach, and what to check when it seems not to apply.
 
 ### Bounded output
 
@@ -219,6 +241,9 @@ non-zero rather than returning an empty result. See
 [docs/configuration.md](docs/configuration.md) for every option, what happens
 without it, and how to read the right values out of your own graph.
 
+The same file can switch writes off for an agent (`[safety] read_only`, see
+[Limiting what an agent can do](#limiting-what-an-agent-can-do)).
+
 ## Commands
 
 The full reference — every command with its options, usage examples,
@@ -235,6 +260,9 @@ causes. Each is written up in [docs/design.md](docs/design.md):
 - [Writes are verified, not assumed](docs/design.md#writes-are-verified-not-assumed):
   Logseq answers almost every write with `null`, whether it wrote or not, so
   each write is proven, and none overwrites the block open in the editor.
+- [Writes can be switched off, checked twice](docs/design.md#writes-can-be-switched-off-checked-twice):
+  a limit that only tightens, refused before the first request and again
+  where a request leaves the process.
 - [Query values are escaped in one place](docs/design.md#query-values-are-escaped-in-one-place):
   values entering datalog queries go through one layer rather than being
   escaped at each call site.

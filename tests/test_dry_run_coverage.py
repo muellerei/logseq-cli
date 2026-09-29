@@ -25,7 +25,8 @@ from tests.conftest import answer_property_pulls, mock_api, split_runner
 
 MUTATING = ("update_block", "remove_block", "delete_page", "rename_page",
             "insert_block", "append_block_in_page", "insert_batch_block",
-            "create_page", "upsert_block_property", "remove_block_property")
+            "create_page", "upsert_block_property", "remove_block_property",
+            "move_block", "set_blocks_id")
 
 
 def _assert_no_mutation(api):

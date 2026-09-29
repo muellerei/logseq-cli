@@ -46,6 +46,12 @@ def _documented_forms(param):
 
 
 def _all_options():
+    # The group's own options (--read-only, --no-cache, ...) belong to no
+    # command; reading only cli.commands would leave a missing one green.
+    for param in cli.params:
+        forms = _documented_forms(param)
+        if forms:
+            yield "(global)", forms
     for name, command in sorted(cli.commands.items()):
         for param in command.params:
             forms = _documented_forms(param)
@@ -57,7 +63,7 @@ class TestEveryOptionIsDocumented:
     def test_the_scan_sees_the_options(self):
         """Guards the guard: a scan that finds nothing would pass silently."""
         found = {opt for _, forms in _all_options() for opt in forms}
-        for expected in ("--dry-run", "--min-refs", "--resolve-refs", "--limit"):
+        for expected in ("--dry-run", "--min-refs", "--resolve-refs", "--limit", "--read-only"):
             assert expected in found, (
                 f"{expected} exists but the scan missed it — the detection is "
                 "broken, not the reference"

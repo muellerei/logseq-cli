@@ -48,6 +48,7 @@ from logseq_cli.output import (
     output,
     uuid_fields,
 )
+from logseq_cli.safety import WriteCommand
 from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
     append_in_page,
@@ -64,7 +65,7 @@ from logseq_cli.strictinsert import (
 from logseq_cli.writerefused import WriteRefused, partial_state
 
 
-@cli.command("update-block", epilog="""\b
+@cli.command("update-block", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN update-block --id 12345678-... --content "New text"
   logseq-cli --token TOKEN update-block --where-content "**14:22**" --page "2026-08-21, friday" --content "New text"
@@ -174,7 +175,7 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
         preview = content[:60] + ("..." if len(content) > 60 else "")
         click.echo(f"  now: {preview}")
 
-@cli.command("remove-block", epilog="""\b
+@cli.command("remove-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN remove-block --id 12345678-... --dry-run
   logseq-cli --token TOKEN remove-block --id 12345678-...
@@ -239,7 +240,7 @@ def remove_block_cmd(ctx, block_id, ignore_refs, dry_run, as_json):
         if refs:
             click.echo(f"  {len(refs)} incoming block ref(s) now point at nothing")
 
-@cli.command("replace-text", epilog="""\b
+@cli.command("replace-text", cls=WriteCommand, epilog="""\b
 Example:
   logseq-cli --token TOKEN replace-text --page "X" --find "old" --replace "new" --dry-run
   logseq-cli --token TOKEN replace-text --page "X" --find "old" --replace "new"
@@ -373,7 +374,7 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
              reason=common.pop() if len(common) == 1 else "write_not_verified",
              failed=failed, failed_reasons=reasons, writes_landed=api.writes_landed)
 
-@cli.command("insert-block", epilog="""\b
+@cli.command("insert-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN insert-block --child-of UUID --content "Sub-Block"
   logseq-cli --token TOKEN insert-block --after UUID --content "Sibling block"
@@ -677,7 +678,7 @@ def refuse_missing_anchor(api, anchor, as_json):
              as_json=as_json, reason="block_not_found", id=uuid)
 
 
-@cli.command("add-block-ref", epilog="""\b
+@cli.command("add-block-ref", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN add-block-ref --source-id UUID --under-heading "## Tasks"
   logseq-cli --token TOKEN add-block-ref --source-id UUID --journal-date 2026-04-23 \\
@@ -804,7 +805,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         click.echo(f"  {ref_content}")
         click.echo(f"  uuid: {new_uuid}")
 
-@cli.command("copy-block", epilog="""\b
+@cli.command("copy-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page"
   logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page" --remove
@@ -910,7 +911,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         if refs:
             click.echo(f"  {len(refs)} block ref(s) into the source now point at nothing")
 
-@cli.command("move-block", epilog="""\b
+@cli.command("move-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN move-block --id UUID --under UUID
   logseq-cli --token TOKEN move-block --id UUID --before UUID

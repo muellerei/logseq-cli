@@ -16,6 +16,7 @@ file, built-in default.
 
 from __future__ import annotations
 
+import difflib
 import os
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
 
 
 CONFIG_ENV_VAR = "LOGSEQ_CLI_CONFIG"
+
+# The sections the CLI reads. Only doctor uses this, to say that another one
+# is ignored: a section with a slip in its name does nothing, and nothing says
+# so. Tests hold the example files to it.
+KNOWN_SECTIONS = ("journal", "graph", "analysis", "safety")
+
+# The keys `[safety]` knows. Grows with every limit that gets built.
+SAFETY_KEYS = ("read_only",)
 
 
 class ConfigError(Exception):
@@ -64,8 +73,77 @@ def active_config_path() -> Path | None:
     return None
 
 
-def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+def _norm(name: str) -> str:
+    return name.lower().replace("-", "").replace("_", "")
+
+
+def _safety_key(name: str) -> str | None:
+    """The ``[safety]`` key ``name`` is, or is a spelling of (``read-only``)."""
+    for key in SAFETY_KEYS:
+        if _norm(name) == _norm(key):
+            return key
+    return None
+
+
+def _misplaced(where: str, name: str, place: str, key: str) -> ConfigError:
+    return ConfigError(f"{where}: `{name}` is {place}, where it does nothing; "
+                       f"`{key}` belongs under [safety].")
+
+
+def check_safety(config: dict) -> None:
+    """Refuse a config whose ``[safety]`` cannot be trusted to mean what it says.
+
+    Strict here and nowhere else: an unknown key elsewhere is ignored, but a
+    limit that is misspelt or in the wrong section does nothing, and nothing
+    would say so. ``load_config`` only warns, so a slip in ``[safety]``
+    stops the commands that write and not the ones that only read.
+    """
+    where = config.get("_path", "the config file")
+    section = config.get("safety")
+    if section is not None and not isinstance(section, dict):
+        raise ConfigError(f"{where}: `safety` must be a table, as in [safety].")
+    section = section or {}
+    # A key of [safety] outside it wins over the unknown-key rule: `[saftey]`
+    # holding read_only is a misplaced key, not an unknown section.
+    for name, value in config.items():
+        if not isinstance(value, dict) and (key := _safety_key(name)):
+            raise _misplaced(where, name, "at the top level", key)
+    for section_name, table in config.items():
+        if not isinstance(table, dict) or section_name == "safety":
+            continue
+        for name in table:
+            if _norm(name) == "safety":
+                raise ConfigError(
+                    f"{where}: `{name}` is nested in [{section_name}], where it does "
+                    "nothing; [safety] is a top-level section.")
+            if key := _safety_key(name):
+                raise _misplaced(where, name, f"in [{section_name}]", key)
+    for name in section:
+        if name not in SAFETY_KEYS:
+            close = difflib.get_close_matches(_norm(name), [_norm(k) for k in SAFETY_KEYS], n=1)
+            hint = f", did you mean `{_safety_key(close[0])}`?" if close else ""
+            raise ConfigError(f"{where}: unknown key `{name}` in [safety]{hint}")
+    value = section.get("read_only", False)
+    if not isinstance(value, bool):
+        raise ConfigError(
+            f"{where}: [safety] read_only must be true or false, got {value!r}.")
+
+
+def named_config_missing() -> Path | None:
+    """The file ``LOGSEQ_CLI_CONFIG`` names when it is set and is not there."""
+    if not os.environ.get(CONFIG_ENV_VAR):
+        return None
+    named = config_search_paths()[0]
+    return None if named.is_file() else named
+
+
+def read_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """Read the config file, or return an empty dict when there is none.
+
+    Only reads: ``[safety]`` is not checked, and nothing is said about it. The
+    commands that write, ``doctor`` and ``init`` take it from here and decide
+    for themselves (``check_safety``); a command that only reads goes through
+    :func:`load_config`.
 
     Not having a config file is normal and silent. A file that exists but is
     unreadable or malformed raises: the user meant to configure something, so
@@ -80,10 +158,8 @@ def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """
     if path is not None:
         candidates = [Path(path).expanduser()]
-        explicit = True
     else:
         candidates = config_search_paths()
-        explicit = bool(os.environ.get(CONFIG_ENV_VAR))
 
     for candidate in candidates:
         if not candidate.is_file():
@@ -110,17 +186,32 @@ def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         # file, so not finding it is an error, not a fallback.
         raise ConfigError(f"No config file at {candidates[0]}")
 
-    if explicit:
+    if named_config_missing():
         # LOGSEQ_CLI_CONFIG points somewhere that does not exist: a deleted,
         # renamed or mistyped path. Warn, but carry on without a config — most
         # commands need none, and taking the whole CLI down over a stale
         # variable helps nobody. A command that does need a setting still
         # fails loudly through require(), naming the setting.
         print_note(
-            f"warning: {CONFIG_ENV_VAR} points at {candidates[0]}, "
+            f"warning: {CONFIG_ENV_VAR} points at {config_search_paths()[0]}, "
             "which does not exist; continuing without a config file",
         )
     return {}
+
+
+def load_config(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    """:func:`read_config`, for a command that only reads.
+
+    A slip in ``[safety]`` stops the commands that write, which check it
+    themselves. A command that only reads goes on, but says so: the limit the
+    user meant is not in force.
+    """
+    data = read_config(path)
+    try:
+        check_safety(data)
+    except ConfigError as exc:
+        print_note(f"warning: {exc}")
+    return data
 
 
 def get(config: dict[str, Any], section: str, key: str, default: Any = None) -> Any:

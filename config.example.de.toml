@@ -65,3 +65,15 @@ mood_labels = ["mood", "feeling", "stimmung", "laune"]
 
 # Projects as a namespace; matches the tag and the link form.
 project_tag_prefix = "#vorhaben/"
+
+
+[safety]
+
+# Switches off every command that writes, --dry-run included, so an agent that
+# may read the graph cannot change it. Commands that only read are unaffected.
+# The environment variable LOGSEQ_CLI_READ_ONLY and the option --read-only can
+# switch it on too, but nothing switches a `true` here off.
+#
+# Keep this file out of the agent's reach, or it is only a request:
+# docs/safety.md. Check that it applies with `logseq-cli doctor`.
+# read_only = true

@@ -43,8 +43,9 @@ Copy one, delete what you do not need, keep what you do.
 | `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
 | `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
 | `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |
+| `LOGSEQ_CLI_READ_ONLY` | (none) | `1`, `true`, `yes` or `on` switches every command that writes off; `0`, `false`, `no`, `off` and empty do nothing; any other value switches it on with a warning. Only tightens (see [`[safety] read_only`](#safety-read_only)) |
 
-All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`.
+All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`. `--read-only` is a flag too, not a connection setting: see [`[safety] read_only`](#safety-read_only).
 
 ### Journal heading
 
@@ -69,9 +70,7 @@ logseq-cli add-journal-block --top-level --content "..."
 
 In this order, first hit wins:
 
-1. `$LOGSEQ_CLI_CONFIG` — when set, **only** this path is considered. A
-   missing file at that path is an error, not a fallback: you asked for it by
-   name.
+1. `$LOGSEQ_CLI_CONFIG` — when set, **only** this path is considered.
 2. `$XDG_CONFIG_HOME/logseq-cli/config.toml`, or
    `~/.config/logseq-cli/config.toml` when `XDG_CONFIG_HOME` is unset.
 3. `~/.logseq-cli.toml`.
@@ -85,11 +84,17 @@ stderr, a non-zero exit, and with `--json` a `"reason": "config_error"` so a scr
 tell a broken setting apart from a broken connection.
 
 If `LOGSEQ_CLI_CONFIG` is set but the file it names is gone — deleted, renamed,
-or a typo in the path — the CLI prints a warning to stderr and carries on
-without a config. A stale variable should not stop commands that need no
+or a typo in the path — a command that looks at the config prints a warning to
+stderr and carries on without it (commands that never read a setting do not
+look, and say nothing). A stale variable should not stop commands that need no
 settings, and a command that does need one still fails loudly, naming the
-setting. Passing a path explicitly is different: that is an instruction, so a
-file that is not there is an error.
+setting. A file that does not parse is different: a command that writes
+refuses (`reason: config_error`), because the file may hold the limit in
+[`[safety]`](#safety-read_only); one that only reads reports it where it needs
+a setting.
+
+Passing a path explicitly is different: that is an instruction, so a file that
+is not there is an error.
 
 
 ## Precedence
@@ -106,6 +111,11 @@ none of them set, entries go to the top level of the page.
 
 `LOGSEQ_JOURNAL_HEADING` predates the config file and stays authoritative, so
 existing shell profiles keep working unchanged after you add a config file.
+
+One rule breaks the order: [`[safety] read_only`](#safety-read_only) only
+tightens. A config that says `true` is not switched off by an environment
+value of `false` or by leaving out `--read-only`; the flag or the environment
+can switch it on when the config says nothing.
 
 ## The options
 
@@ -239,6 +249,42 @@ write a mood line, the counts stay at zero, which is the honest answer.
 **Without it:** the English defaults apply and `#project/` is assumed. Measured
 against a German journal of 120 days: 3 mood hits with the defaults, 148 with a
 German list.
+
+### `[safety] read_only`
+
+```toml
+[safety]
+read_only = true
+```
+
+| | |
+|---|---|
+| Values | `true` or `false` (a TOML boolean); default `false` |
+| Effect | every command that writes refuses before its first request, `--dry-run` included, with `reason: read_only`; commands that only read, `--help` and `init` run as before |
+| Also set by | `LOGSEQ_CLI_READ_ONLY` and `--read-only`; all three only tighten, there is no way to switch a `true` off from outside the file |
+| Shown by | `logseq-cli doctor`, every run: `read_only: on (config …)` or `off (no [safety] in …)` or `off (no config file found)`, and `unknown, commands that write refuse until this is fixed: …` when the config cannot be used; it does not turn a healthy check red |
+
+`[safety]` is the one section checked strictly. An unknown key
+(`readonly = true`), a `[safety]` key outside `[safety]` (at the top level, in
+another section, nested as `[journal.safety]`, or under a misspelt `[saftey]`) and a value that is not a
+boolean are errors that name the key and, where there is one, the key meant:
+
+```text
+Error: …/config.toml: unknown key `readonly` in [safety], did you mean `read_only`?
+```
+
+A command that writes refuses with `reason: config_error`; one that only
+reads runs, mostly without a word about it (`doctor` shows it every time), so a slip in `[safety]` does not stop your reads. Other
+sections stay tolerant: an unknown key in them is ignored, and `doctor` names a
+section it does not read.
+
+`init` writes to the config file that is in use, so with your config in
+`~/.logseq-cli.toml` it does not create a second file under `~/.config/` that
+would be found first. Since that file exists, `init --force` is needed, and it
+keeps the `[safety]` section; it refuses a file it cannot parse.
+
+How binding each way of setting it is, and what it does not stop, is in
+[safety.md](safety.md).
 
 ## When a section does not exist in your graph
 
@@ -419,7 +465,11 @@ logseq-cli --token "TOKEN" doctor
 `doctor` is read-only and checks the connection end to end: is anything
 listening on the port, is a token supplied, does the API answer, is a graph
 loaded. Each step is reported separately, so a failure names which one broke.
-Exit 0 means ready to read and write.
+Exit 0 means ready to read. It also says whether writes are switched off
+(`read_only`) and by what; that does not fail it, and the closing line says
+"Ready to read; writes are off." when they are. A config file that does not
+parse fails it, and the advice is to fix the file, never to remove it: removing
+a file that holds a limit lifts the limit.
 
 Once your config is in place, the fastest functional check is the query that
 needs it:

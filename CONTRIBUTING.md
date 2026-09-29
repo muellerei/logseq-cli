@@ -39,6 +39,7 @@ logseq-cli/
 │   ├── output.py       # Results on stdout, failures on stderr, --json
 │   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under
 │   ├── render.py       # Blocks to text; finding and resolving references
+│   ├── safety.py       # What keeps a command from writing: [safety] read_only, the gate every writing command carries
 │   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible
 │   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
 │   ├── commands/       # One module per group of commands
@@ -70,6 +71,10 @@ logseq-cli/
    - Include `--json` output support via the `output()` helper
    - Use `@handle_connection_error` decorator
    - Support `--dry-run` for write operations
+   - Be registered with `cls=WriteCommand` (`@cli.command("name", cls=WriteCommand)`)
+     if it writes: that mark is what makes the command refuse under
+     `[safety] read_only`. `tests/test_read_only.py` fails by comparing the
+     commands that carry it with the commands that write
 
    A Logseq method the client has not sent before goes into `_METHODS` in
    `api.py` first, a write with its editor rule and its proof: `call()`

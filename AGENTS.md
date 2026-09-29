@@ -441,6 +441,8 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
+| `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
+| `config_error` | The config file cannot be used: it does not parse, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
 | `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id` |
 | `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
@@ -453,6 +455,15 @@ A connection that fails after writes of the call landed (`connection_refused`,
 failed between a write and its proof, `unproven_write` names that write: it
 may have landed or not. Read the target before retrying; a retry of the whole
 command writes again what landed.
+
+On `read_only`: the user switched writes off. Do not retry, do not edit the
+config file, unset `LOGSEQ_CLI_READ_ONLY`, change `HOME` or `LOGSEQ_CLI_CONFIG`,
+write the Markdown files, or call the HTTP API yourself; each of those goes
+around a limit the user set. Tell the user the write was refused and what you
+would have written, and stop. `config_error` on a write is the same kind of
+stop: the config may hold that limit and cannot be read; report it, do not
+remove the file. When you are asked to only read, pass `--read-only` on every
+call. [docs/safety.md](docs/safety.md) describes the switch.
 
 On `open_in_editor`: the refused write did not happen; earlier writes of the
 same call may have (the message says how many). Ask the user to leave the

@@ -20,6 +20,7 @@ from pathlib import Path
 import click
 
 from logseq_cli.api import LogseqAPI, InvalidPortError
+from logseq_cli.safety import FLAG_KEY
 
 
 def resolve_version() -> str:
@@ -50,8 +51,9 @@ def resolve_version() -> str:
 @click.option("--port", default=None, help="Logseq API port (default: 12315)")
 @click.option("--token", default=None, help="Logseq API Bearer token")
 @click.option("--no-cache", "no_cache", is_flag=True, help="Bypass the in-memory read cache for this invocation")
+@click.option("--read-only", "read_only", is_flag=True, help="Refuse every command that writes, for this invocation. Can only tighten: nothing loosens a [safety] read_only = true")
 @click.pass_context
-def cli(ctx, host, port, token, no_cache):
+def cli(ctx, host, port, token, no_cache, read_only):
     """CLI for Logseq knowledge graph - pages, journals, blocks, search, and graph analysis."""
     ctx.ensure_object(dict)
     try:
@@ -64,3 +66,4 @@ def cli(ctx, host, port, token, no_cache):
     if no_cache:
         api.cache_enabled = False
     ctx.obj["api"] = api
+    ctx.obj[FLAG_KEY] = read_only
