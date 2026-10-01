@@ -12,8 +12,14 @@ from logseq_cli.blockprops import (
 )
 from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
 from logseq_cli.cliinput import content_or_file
+from logseq_cli.config import keep_empty_blocks_last, load_config
 from logseq_cli.group import cli
-from logseq_cli.headings import find_heading, find_or_create_heading, strip_title_heading
+from logseq_cli.headings import (
+    first_empty_under,
+    find_heading,
+    find_or_create_heading,
+    strip_title_heading,
+)
 from logseq_cli.ids import (
     BlockIdError,
     check_block_ids,
@@ -27,6 +33,7 @@ from logseq_cli.outlinetext import count_blocks, note_quote_breaks, parse_hierar
 from logseq_cli.output import (
     ambiguous_message,
     fail,
+    before_empty_fields,
     follow_page,
     follow_page_to_write,
     follow_pages,
@@ -34,6 +41,7 @@ from logseq_cli.output import (
     json_text,
     output,
     uuid_fields,
+    would_go_before_fields,
 )
 from logseq_cli.safety import WriteCommand
 from logseq_cli.pagenames import (
@@ -59,7 +67,9 @@ from logseq_cli.render import (
     resolve_refs_in_blocks,
 )
 from logseq_cli.strictinsert import (
+    BEFORE_EMPTY_SUFFIX,
     create_missing_page,
+    before_empty_or_append,
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
 )
@@ -635,6 +645,9 @@ Note:
   content, and a second id:: line in one block.
   --content-file FILE is --content read from a file ('-' reads stdin), with
   the same rules; no shell quoting stands between the text and the command.
+  [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
+  a section goes before the empty blocks that end it, so they stay last, and
+  nothing is overwritten.
 """)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Content to add; this or --content-file is required")
@@ -658,6 +671,7 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     except ValueError as e:
         fail(str(e), as_json=as_json)
     refuse_split_heading(under_heading, command="add-note-content")
+    keep_on = keep_empty_blocks_last(load_config())
 
     # Check if page exists. Not caught: Logseq answers null for a page that
     # does not exist, so an exception is a failed read, and taking it for
@@ -700,15 +714,20 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
         heading_exists = (find_heading(api, page, under_heading) is not None
                           if under_heading and existing else False)
         parsed_properties = dict(parse_property_pairs(properties))
+        would_anchor = (first_empty_under(api, tree, page, under_heading)
+                      if keep_on and existing else None)
 
         if as_json:
             output({**ref.fields(), "would_create_page": existing is None,
                     "blocks_added": planned, "under_heading": under_heading,
                     "would_create_heading": bool(under_heading) and not heading_exists,
                     "properties": parsed_properties, "position": where,
+                    **would_go_before_fields(would_anchor),
                     "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would add {planned} block(s) to {where}")
+            if would_anchor:
+                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
             if existing is None:
                 click.echo(f"  page: {page} (would be created)")
             if under_heading and not heading_exists:
@@ -720,10 +739,15 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     create_missing_page(api, target)
 
     if under_heading:
-        heading_uuid = find_or_create_heading(api, page, under_heading)
-        uuids = insert_block_tree_with_uuids(api, tree, heading_uuid, keep_ids=keep_ids)
+        heading_uuid = find_or_create_heading(api, page, under_heading, keep_last=keep_on)
+        uuids, ahead_of = before_empty_or_append(
+            api, tree, lambda: insert_block_tree_with_uuids(
+                api, tree, heading_uuid, keep_ids=keep_ids),
+            keep_last=keep_on, parent_uuid=heading_uuid, keep_ids=keep_ids)
     else:
-        uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
+        uuids, ahead_of = before_empty_or_append(
+            api, tree, lambda: insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids),
+            keep_last=keep_on, page_name=page, keep_ids=keep_ids)
 
     # The tree is not empty (text only of the title heading or of id:: lines
     # is refused above), and every insert is proven, so there is a first block.
@@ -741,11 +765,12 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
             **uuid_fields(uuids),
             "properties": applied,
             "position": where,
+            **before_empty_fields(ahead_of),
         }, True)
     else:
         if existing is None:
             click.echo(f"Created page: {page}")
-        click.echo(f"Added {n} block(s) to {where}")
+        click.echo(f"Added {n} block(s) to {where}{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
         click.echo(f"  uuid: {root_uuid}")
         for key, value in applied.items():
             click.echo(f"  {key}:: {value}")

@@ -5,10 +5,12 @@ value can still be overridden by a flag or an environment variable. What the
 file carries is the knowledge the code cannot have — how *your* graph marks
 projects and people, what your journal sections are called.
 
-No graph-specific value has a built-in default. A query that needs one says so
-and exits non-zero rather than returning an empty result, because an empty
-result is indistinguishable from "nothing matched" and that is exactly the kind
-of silent failure the rest of this CLI exists to avoid.
+No value that carries knowledge of the user's graph has a built-in default. A
+query that needs one says so and exits non-zero rather than returning an empty
+result, because an empty result is indistinguishable from "nothing matched" and
+that is exactly the kind of silent failure the rest of this CLI exists to avoid.
+A behaviour switch is not such a value and has a default: ``[graph]
+keep_empty_blocks_last`` is off, so a write behaves as it always has.
 
 Precedence, highest first: command-line flag, environment variable, config
 file, built-in default.
@@ -220,6 +222,42 @@ def get(config: dict[str, Any], section: str, key: str, default: Any = None) -> 
     if isinstance(value, dict):
         return value.get(key, default)
     return default
+
+
+KEEP_LAST_ENV_VAR = "LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST"
+_ON = ("1", "true", "yes", "on")
+_OFF = ("0", "false", "no", "off")
+
+
+def keep_empty_blocks_last(config: dict[str, Any]) -> bool:
+    """Whether a write at the end of a section goes before the empty blocks
+    that end it, so they stay last.
+
+    ``[graph] keep_empty_blocks_last``, off without it. A behaviour switch with a
+    default, not a fact about the graph the CLI cannot know: it describes how
+    the user keeps the graph (an empty last block as a place to click), and
+    stays off so a write behaves as it always has.
+    ``LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST`` wins over the file in both directions,
+    since nothing here tightens a limit.
+    An empty variable is not set; a value it does not know counts as off, with
+    a warning. A value in the file that is no bool is a ConfigError.
+    """
+    raw = os.environ.get(KEEP_LAST_ENV_VAR)
+    if raw is not None and raw.strip():
+        value = raw.strip().lower()
+        if value in _ON:
+            return True
+        if value in _OFF:
+            return False
+        print_note(f"warning: {KEEP_LAST_ENV_VAR}={raw!r} is not a value it knows; "
+                   "treating it as off.")
+        return False
+    value = get(config, "graph", "keep_empty_blocks_last", False)
+    if not isinstance(value, bool):
+        where = config.get("_path", "the config file")
+        raise ConfigError(
+            f"{where}: [graph] keep_empty_blocks_last must be true or false, got {value!r}.")
+    return value
 
 
 def resolve_heading(config: dict[str, Any], heading: str | None) -> str | None:

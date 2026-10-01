@@ -3,12 +3,16 @@
 A heading is found by its text, not by a uuid, so two spellings of one heading
 have to compare equal, and normalize_heading decides when they do. The
 renderer asks the same question when it cuts out a section, which is why this
-stands apart from the commands. find_or_create_heading writes: it appends,
-and the API proves the append.
+stands apart from the commands. find_or_create_heading writes: it appends, or
+with ``keep_last`` goes before the empty blocks that end the page, and the API
+proves the write. That is why this module imports strictinsert, and render and output,
+which import this one, reach it too (no cycle: tests/test_package_layering.py).
 """
 
 import re
 import textwrap
+
+from logseq_cli.strictinsert import before_first_empty, first_empty_at_end
 
 
 class TitleHeadingOnly(Exception):
@@ -90,7 +94,7 @@ def find_heading(api, page_name: str, heading: str) -> str | None:
     return None
 
 
-def find_or_create_heading(api, page_name: str, heading: str) -> str:
+def find_or_create_heading(api, page_name: str, heading: str, *, keep_last: bool = False) -> str:
     """Find heading block UUID on page, create if missing.
 
     Matches existing headings tolerantly via :func:`normalize_heading` so that
@@ -99,8 +103,29 @@ def find_or_create_heading(api, page_name: str, heading: str) -> str:
     Returns the UUID of the heading block. A heading Logseq does not create
     raises WriteNotVerified from the API; the callers once wrote to the top of
     the page instead, with a warning (removed once every write was proven).
+
+    A heading that is missing is a write at the end of the page like any
+    other, so with ``keep_last`` (``[graph] keep_empty_blocks_last``) it goes
+    directly before the empty blocks that end the page (#110).
     """
     found = find_heading(api, page_name, heading)
     if found:
         return found
+    if keep_last:
+        uuids, _ = before_first_empty(api, [{"content": heading, "children": []}],
+                                      page_name=page_name)
+        if uuids:
+            return uuids[0]
     return api.append_block_in_page(page_name, heading)["uuid"]
+
+
+def first_empty_under(api, nodes: list, page_name: str, heading: str | None):
+    """The empty block a write of ``nodes`` under ``heading`` (or at the end of
+    the page, with no heading) would go before, for a preview: it reads, and
+    never creates the heading. With the heading missing there is none to name:
+    the heading would go before the empty blocks at the end of the page, and a
+    write reports where its content went, not that (#110)."""
+    if not heading:
+        return first_empty_at_end(api, nodes, page_name=page_name)
+    found = find_heading(api, page_name, heading)
+    return first_empty_at_end(api, nodes, parent_uuid=found) if found else None

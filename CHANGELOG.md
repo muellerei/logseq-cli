@@ -12,6 +12,45 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `[graph] keep_empty_blocks_last = true` (or `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST`)
+  makes a write that ends a section go before the empty blocks that end it, so
+  they stay last and no empty line is left in front of the entry (#110). Found by
+  asking why a journal had an empty line before every entry the CLI wrote: not
+  the template, and not the CLI, which writes no empty block (measured with test
+  entries, CLI 0.16.0, Logseq 0.10.15), but an empty last block the user keeps as
+  a place to click. `insert-block --child-of`, `add-journal-block` and
+  `add-note-content` appended behind it and left it standing.
+  - With it on, the write goes directly before the first of the empty blocks at
+    the end, the other blocks of the same command follow in order, and the empty
+    blocks stay last. Nothing is deleted and nothing is written over. A block is
+    empty with no text, no properties and no children, so an empty block with an
+    empty child is not empty, and empty blocks in the middle of a section are left
+    alone.
+  - It applies to `insert-block --child-of` and `--page`, `add-note-content`,
+    `add-journal-block` (an upsert that adds a block too), `add-journal-content`,
+    `add-block-ref`, the root of `copy-block` and a heading that has to be
+    created. Not to `--after`, `--before`, `--first` or `add-journal-entry`.
+    `--keep-ids` keeps its ids and goes before the empty blocks as it does for
+    `--before`. A block of nothing but `key::` lines is not put before the first
+    block of a page, where Logseq would read it as the page's properties (`title::`
+    renames the page), but appended as without the setting.
+  - A first version wrote into the empty block with `updateBlock`. An adversarial
+    pass found that a second writer, or the user typing there between the CLI's
+    read and its write, would be overwritten without a word, which appending
+    never could; the editor gate refuses only an open block. Going before the
+    empty block loses nothing and needs no gate: the cursor can stay in the block
+    the user clicked (`updateBlock` on it ends in `open_in_editor`, measured), but
+    not with `--keep-ids`, which refuses any write while a block is open.
+  - `--dry-run` names the block it would go before (`would_go_before_empty_block`)
+    and a write that did says `before_empty_block`. Off by default, because an
+    empty last block can be a spacer or a template's placeholder: with it off a
+    write behaves as it always has, and the existing tests pass unchanged. With it
+    on, a write at the end reads the children of its target, not from the cache,
+    before and after: the anchor is read a moment before the insert, so the write
+    is proven to stand directly before it, and one that landed elsewhere because
+    the block moved in between is reported as `write_not_verified`. A
+    test finds every function that writes at the end of a section and fails for
+    one that ignores the setting.
 - `[safety] read_only = true` in the config file, the environment variable
   `LOGSEQ_CLI_READ_ONLY` and the global option `--read-only` switch writes
   off: every command that writes refuses before its first request, reads and

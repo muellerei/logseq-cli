@@ -111,6 +111,11 @@ graph.
 | `add-journal-content (--content TEXT \| --content-file FILE) [--date DATE] [--keep-ids]` | Add hierarchical content to journal (`--under-heading`, `--top-level`, `--dry-run`). `--date` defaults to today |
 | `add-note-content --page NAME (--content TEXT \| --content-file FILE) [--under-heading "## X"] [--no-create] [--property K=V] [--keep-ids] [--dry-run]` | Add content to any page; optionally under a heading (created if missing). The page is created when missing unless `--no-create` is given. `--property` sets `key:: value` on the root block, repeatable. `--dry-run` reports the target, the block count and whether page or heading would be created |
 
+A write that ends a section (`add-journal-block`, `add-journal-content`,
+`add-note-content`, `add-block-ref`, `copy-block`, `insert-block --child-of` and
+`--page`) goes before the empty blocks that end it, when
+[`[graph] keep_empty_blocks_last`](configuration.md#graph-keep_empty_blocks_last) is on.
+
 ### Edit (8)
 
 | Command | Description |

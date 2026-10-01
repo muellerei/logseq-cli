@@ -1060,8 +1060,8 @@ class LogseqAPI:
     def get_all_pages(self):
         return self.call("logseq.Editor.getAllPages")
 
-    def get_page_blocks_tree(self, page_name: str):
-        return self.call("logseq.Editor.getPageBlocksTree", [page_name])
+    def get_page_blocks_tree(self, page_name: str, *, cached: bool = True):
+        return self.call("logseq.Editor.getPageBlocksTree", [page_name], cached=cached)
 
     def get_page(self, page_name, *, cached: bool = True):
         """The page by its name, or by its db id as a number (measured, 0.10.15)."""

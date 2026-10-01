@@ -10,12 +10,13 @@ code cannot guess them:
 - short names for headings you write under often,
 - the namespace that marks your project pages,
 - the property that marks a person page,
-- the words and tags `analyze-journal-patterns` looks for.
+- the words and tags `analyze-journal-patterns` looks for,
+- whether a write at the end of a section goes before the empty blocks that end it.
 
 The first four have no defaults: a command that needs one and does not find it
-says so and exits non-zero. The last has English defaults that work out of the box and
+says so and exits non-zero. The fifth has English defaults that work out of the box and
 silently find nothing in a journal written in another language, which is why it
-is worth setting.
+is worth setting. The last is off until you turn it on.
 
 Everything else is connection settings, and those live in environment
 variables or flags (see [Environment variables and flags](#environment-variables-and-flags)).
@@ -43,6 +44,7 @@ Copy one, delete what you do not need, keep what you do.
 | `LOGSEQ_CLI_CACHE_TTL` | `60` | In-memory read-cache TTL in seconds (0 = disabled). Per process, not shared between invocations |
 | `LOGSEQ_CLI_RANGE_WORKERS` | `5` | Parallel workers for `get-journal-range` (1–16) |
 | `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |
+| `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST` | (none) | `1`, `true`, `yes` or `on` turns on, `0`, `false`, `no` or `off` turns off, over `[graph] keep_empty_blocks_last` (see [`[graph] keep_empty_blocks_last`](#graph-keep_empty_blocks_last)); empty is not set, any other value counts as off with a warning |
 | `LOGSEQ_CLI_READ_ONLY` | (none) | `1`, `true`, `yes` or `on` switches every command that writes off; `0`, `false`, `no`, `off` and empty do nothing; any other value switches it on with a warning. Only tightens (see [`[safety] read_only`](#safety-read_only)) |
 
 All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`. `--read-only` is a flag too, not a connection setting: see [`[safety] read_only`](#safety-read_only).
@@ -209,6 +211,54 @@ property name alone does not identify a person page.
 
 **Without them:** same as above, the query names the missing setting and exits
 non-zero. Nothing else changes.
+
+### `[graph] keep_empty_blocks_last`
+
+Whether a write at the end of a section goes before the empty blocks that end
+it, so they stay last.
+
+```toml
+[graph]
+keep_empty_blocks_last = true
+```
+
+Many Logseq users keep an empty block at the end of a section as a place to
+click and type. The CLI appends as the last child, so every entry it writes
+lands behind that block and an empty line stays in front of it. With this on,
+the write goes directly before the empty blocks at the end. Given `TODO a` and
+an empty block, `insert-block --child-of <section> --content "TODO b"` leaves
+`TODO a`, `TODO b` and the empty block.
+
+- **Nothing is overwritten or deleted.** The empty block is never written to,
+  so one you are typing in, or one another writer has just filled, is untouched;
+  the cursor can stay in it, except with `--keep-ids`, which refuses any write
+  while a block is open, as it always did. The empty blocks stay last.
+- **One command is one write.** Every block of a command (a second `--content`,
+  the second root of a tree) goes in order directly before the empty blocks.
+- **What counts as empty:** no text, no properties and no children. An empty
+  block with an empty child is not empty: the child was put there on purpose.
+  Empty blocks in the middle of a section are left alone.
+- **Which writes:** the ones that end a section, a last child or the end of a
+  page: `insert-block --child-of` (not `--first`) and `--page`, `add-note-content`,
+  `add-journal-block`, `add-journal-content`, `add-block-ref`, the root of
+  `copy-block`, and a heading that has to be created. Not `--after`, `--before`,
+  `--first`, and not the deprecated `add-journal-entry`.
+- **`--keep-ids`** works as it does for `--before`: the ids are kept and the
+  blocks go before the empty blocks.
+- **Page properties.** A block of nothing but `key::` lines is not put before
+  the first block of a page: Logseq would read it as the page's properties, and
+  `title::` renames the page. It is appended as it would be without the setting.
+- `--dry-run` names the block the write would go before (`would go before the
+  empty block ...`; `would_go_before_empty_block` in JSON). After a write that
+  did, the JSON has `before_empty_block`.
+
+**Without it:** writes append as they always did. This is the default, because an
+empty last block can be deliberate, as a spacer or a template's placeholder.
+
+The environment variable `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST` overrides the file in
+both directions (`1`, `true`, `yes`, `on` or `0`, `false`, `no`, `off`); an empty
+one is not set, and any other value counts as off, with a warning. A value in the
+file that is not `true` or `false` is a config error.
 
 ### `[analysis]`
 

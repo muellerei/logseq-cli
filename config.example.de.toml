@@ -51,6 +51,22 @@ projects_namespace = "vorhaben/"
 person_property = "type"
 person_value = "Kontakt"
 
+# Ob ein Write am Ende einer Sektion vor die leeren Blöcke geht, die sie
+# abschließen, sodass diese zuletzt bleiben. Wer dort einen leeren Block als
+# Klickfläche stehen lässt, bekommt sonst vor jedem Eintrag der CLI eine
+# Leerzeile.
+#
+# Eingeschaltet geht ein Write direkt vor die leeren Blöcke am Ende, die Blöcke
+# desselben Befehls folgen in Reihenfolge, die leeren Blöcke bleiben zuletzt.
+# Es wird nichts gelöscht und nichts überschrieben, ein Block, in dem du gerade
+# tippst, bleibt also unberührt. Ein leerer Block hat keinen Text, keine
+# Eigenschaften und keine Kinder; einer mit einem leeren Block darunter ist
+# nicht leer.
+#
+# Ohne die Einstellung hängen Writes wie bisher an.
+# LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST überschreibt den Wert in beide Richtungen.
+keep_empty_blocks_last = false
+
 
 [analysis]
 
