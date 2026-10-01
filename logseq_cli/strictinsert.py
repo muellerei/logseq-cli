@@ -14,12 +14,13 @@ import re
 
 import click
 
-from logseq_cli.blocktext import id_lines, unwrap_block_id
+from logseq_cli.blocktext import PROPERTY_LINE_RE, id_lines, unwrap_block_id
 from logseq_cli.ids import collect_block_ids
 from logseq_cli.outlinetext import (
     collect_child_uuids,
     count_blocks,
     page_blocks_by_uuid,
+    trailing_empty_run,
 )
 from logseq_cli.pagenames import PageToWrite
 from logseq_cli.writerefused import WriteNotVerified, WriteRefused, partial_state
@@ -135,6 +136,123 @@ def insert_block_tree_with_uuids(api, tree: list, parent_uuid: str, *, batch: bo
         if children:
             uuids.extend(insert_block_tree_with_uuids(api, children, new_uuid, batch=batch))
     return uuids
+
+
+# What a command says after a write that went before the empty blocks at the
+# end of its section (#110).
+BEFORE_EMPTY_SUFFIX = " (before the empty block at the end)"
+
+
+def _only_property_lines(content: str) -> bool:
+    """Whether ``content`` is nothing but ``key:: value`` lines."""
+    lines = [line for line in (content or "").split("\n") if line.strip()]
+    return bool(lines) and all(PROPERTY_LINE_RE.match(line) for line in lines)
+
+
+def _children_of(api, parent_uuid, page_name):
+    """The direct children of a block, or the blocks of a page, read fresh, or
+    ``None`` when they cannot be read.
+
+    ``None`` for a read that failed, an answer that is no list (a page Logseq
+    has not loaded) and a block it does not have: callers go on without them.
+    RuntimeError is the API's BadResponseError, OSError the HTTP client's errors;
+    neither is imported, to keep the HTTP client out of this module (see the note
+    above the writerefused import in api.py).
+    """
+    try:
+        if parent_uuid:
+            parent = api.get_block(parent_uuid, include_children=True, cached=False)
+            children = parent.get("children") if isinstance(parent, dict) else None
+        else:
+            children = api.get_page_blocks_tree(page_name, cached=False)
+    except (RuntimeError, OSError):
+        return None
+    return children if isinstance(children, list) else None
+
+
+def first_empty_at_end(api, tree: list, *, parent_uuid: str = None, page_name: str = None):
+    """The first of the empty blocks that end a section, or ``None``.
+
+    ``[graph] keep_empty_blocks_last`` (#110): a write at the end of a section,
+    as the last child of ``parent_uuid`` or at the end of ``page_name``, goes
+    directly before that block, so the empty blocks stay last, as a place to
+    click, and no empty line is left between the entries. Only reads, so a
+    preview can ask it too. The children are read fresh, not from the cache.
+    ``None`` when the end of the section has no empty block, when Logseq
+    answers nothing for it (a page it has not loaded) and when the read fails:
+    the write then appends as it always did, and says why if that fails.
+    ``None`` too for a first block that is nothing but ``key::`` lines going
+    before the first block of a page: Logseq would read it as the page's
+    properties, ``title::`` and ``alias::`` included.
+    """
+    children = _children_of(api, parent_uuid, page_name)
+    if children is None:
+        return None
+    run = trailing_empty_run(children)
+    if not run:
+        return None
+    first_on_page = bool(page_name) and not parent_uuid and run[0] == children[0].get("uuid")
+    if first_on_page and _only_property_lines(tree[0].get("content", "")):
+        return None
+    return run[0]
+
+
+def _directly_before(children: list, written: list, anchor: str) -> bool:
+    """Whether the roots of ``written`` stand in ``children`` in the order they
+    were written, one after the other, directly before ``anchor``. Their own
+    children are not in this list."""
+    ids = [c.get("uuid") for c in children if isinstance(c, dict)]
+    roots = [u for u in written if u in ids]
+    if not roots or anchor not in ids:
+        return False
+    first, last = ids.index(roots[0]), ids.index(anchor)
+    return first < last and ids[first:last] == roots
+
+
+def before_first_empty(api, tree: list, *, parent_uuid: str = None, page_name: str = None,
+                       keep_ids: bool = False):
+    """Write ``tree`` directly before the first empty block that ends the section.
+
+    Returns ``(uuids, anchor)``: the uuids written in DFS pre-order and the
+    empty block they went before, or ``(None, None)`` when there is none and the
+    caller appends as it always did. The first root goes before the anchor, each
+    further root directly after the one written ahead of it and the children
+    under their root, so the order of the content holds
+    (:func:`insert_block_tree_as_siblings`). Not for a recursion: the caller asks
+    once, for the whole write.
+    """
+    anchor = first_empty_at_end(api, tree, parent_uuid=parent_uuid, page_name=page_name)
+    if anchor is None:
+        return None, None
+    written = insert_block_tree_as_siblings(api, tree, anchor, before=True,
+                                            keep_ids=keep_ids)
+    # The anchor was read a moment ago; the user, or another writer, may have
+    # moved, indented or filled it since, and an insert before a block lands
+    # wherever that block is now. The write is proven where it landed: directly
+    # before the anchor, in the section it was meant for.
+    children = _children_of(api, parent_uuid, page_name)
+    if children is not None and not _directly_before(children, written, anchor):
+        raise WriteNotVerified(
+            f"{len(written)} block(s) were written, but not directly before the empty "
+            f"block {anchor[:8]}... of the section any more: it changed while the write "
+            "was on its way. Check the section; move-block puts them in place.",
+            method="insertBlock", target=anchor, expected=f"before {anchor[:8]}...",
+            got="elsewhere")
+    return written, anchor
+
+
+def before_empty_or_append(api, tree: list, legacy, *, keep_last: bool, parent_uuid: str = None,
+                           page_name: str = None, keep_ids: bool = False):
+    """Write ``tree`` at the end of a section: before the empty blocks that end
+    it when ``keep_last`` is on and there are some, otherwise by ``legacy()``,
+    the write as it always was. Returns ``(uuids, anchor)`` where ``anchor`` is
+    the empty block the write went before, or ``None``."""
+    if keep_last:
+        uuids, anchor = before_first_empty(api, tree, parent_uuid=parent_uuid,
+                                           page_name=page_name, keep_ids=keep_ids)
+        if uuids is not None:
+            return uuids, anchor
+    return legacy(), None
 
 
 def insert_block_tree_batched(api, tree: list, parent_uuid: str) -> list:

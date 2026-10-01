@@ -242,7 +242,10 @@ non-zero rather than returning an empty result. See
 without it, and how to read the right values out of your own graph.
 
 The same file can switch writes off for an agent (`[safety] read_only`, see
-[Limiting what an agent can do](#limiting-what-an-agent-can-do)).
+[Limiting what an agent can do](#limiting-what-an-agent-can-do)), and keep the
+empty blocks you leave at the end of a section last, so entries land before them
+and no empty line is left (`[graph] keep_empty_blocks_last`, off by default, see
+[docs/configuration.md](docs/configuration.md#graph-keep_empty_blocks_last)).
 
 ## Commands
 

@@ -31,7 +31,7 @@ logseq-cli/
 │   ├── datalog.py      # EDN/datalog query building (value quoting, keywords)
 │   ├── dates.py        # Date keywords, journal days, repeaters, journal title formats
 │   ├── group.py        # The click group: global options, API client
-│   ├── headings.py     # Compare, find and add a heading on a page
+│   ├── headings.py     # Compare, find and add a heading on a page; which empty block a heading goes before
 │   ├── ids.py          # id:: lines in written text: dropped with a note, or kept by --keep-ids
 │   ├── lookup.py       # Blocks by content, backlinks, incoming block refs, page text
 │   ├── notes.py        # Notes on stderr, held under --json until the command ends
@@ -40,7 +40,7 @@ logseq-cli/
 │   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under
 │   ├── render.py       # Blocks to text; finding and resolving references
 │   ├── safety.py       # What keeps a command from writing: [safety] read_only, the gate every writing command carries
-│   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible
+│   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible; which empty block a write at the end goes before
 │   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
 │   ├── commands/       # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page

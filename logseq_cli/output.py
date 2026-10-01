@@ -295,6 +295,19 @@ def fail(message: str, as_json: bool = False, exit_code: int = 1, **fields):
     sys.exit(exit_code)
 
 
+def before_empty_fields(anchor) -> dict:
+    """``before_empty_block`` for the JSON of a write that went before the empty
+    blocks at the end of its section (#110), nothing for one that did not;
+    ``anchor`` is the first of them."""
+    return {"before_empty_block": anchor} if anchor else {}
+
+
+def would_go_before_fields(anchor) -> dict:
+    """``would_go_before_empty_block`` for a preview, the way
+    :func:`before_empty_fields` is for the run."""
+    return {"would_go_before_empty_block": anchor} if anchor else {}
+
+
 def uuid_fields(uuids: list) -> dict:
     """Standard {uuid, uuids} pair for command JSON output.
 

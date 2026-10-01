@@ -19,10 +19,10 @@ from logseq_cli.cliinput import (
     read_content_file,
     require_content,
 )
-from logseq_cli.config import load_config, resolve_heading
+from logseq_cli.config import keep_empty_blocks_last, load_config, resolve_heading
 from logseq_cli.dates import parse_date_keyword
 from logseq_cli.group import cli
-from logseq_cli.headings import find_heading, find_or_create_heading
+from logseq_cli.headings import first_empty_under, find_heading, find_or_create_heading
 from logseq_cli.ids import (
     BlockIdError,
     check_block_ids,
@@ -42,18 +42,24 @@ from logseq_cli.outlinetext import (
 )
 from logseq_cli.output import (
     fail,
+    before_empty_fields,
     follow_page,
     follow_page_to_write,
     handle_connection_error,
     output,
     uuid_fields,
+    would_go_before_fields,
 )
 from logseq_cli.safety import WriteCommand
 from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
+    BEFORE_EMPTY_SUFFIX,
     append_in_page,
     check_move,
     create_missing_page,
+    before_first_empty,
+    before_empty_or_append,
+    first_empty_at_end,
     insert_block_at,
     insert_block_tree_as_first_children,
     insert_block_tree_as_siblings,
@@ -408,6 +414,9 @@ Notes:
   A quote ends at a blank line, and the paragraph after it shows as plain
   text: written anyway, with a Note on stderr. Start the blank line with ">"
   to keep the paragraph in the quote.
+  [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
+  a section goes before the empty blocks that end it, so they stay last, and
+  nothing is overwritten.
 """)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
@@ -478,6 +487,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             print_note(note)
             tree = tree_without_block_ids(tree)
 
+        # What [graph] keep_empty_blocks_last acts on: the writes that end a section.
+        keep_on = keep_empty_blocks_last(load_config())
+        # The empty block a write went before, for what the command reports.
+        ahead_of = {}
+        end_target = {}
+
         # Resolve target + position first (no writes), so --dry-run can report
         # the plan and bail before touching the graph.
         if child_of:
@@ -487,8 +502,14 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 def do_insert():
                     return insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
             else:
+                end_target = {"parent_uuid": clean_id}
+
                 def do_insert():
-                    return insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
+                    uuids, ahead_of["uuid"] = before_empty_or_append(
+                        api, tree, lambda: insert_block_tree_with_uuids(
+                            api, tree, clean_id, keep_ids=keep_ids),
+                        keep_last=keep_on, keep_ids=keep_ids, **end_target)
+                    return uuids
         elif after:
             clean_id = unwrap_block_id(after)
             position = f"after {clean_id[:8]}..."
@@ -501,8 +522,14 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
         elif page and top_level:
             position = f"top-level of '{page}'"
+            end_target = {"page_name": page}
+
             def do_insert():
-                return insert_block_tree_at_page_top(api, tree, page, keep_ids=keep_ids)
+                uuids, ahead_of["uuid"] = before_empty_or_append(
+                    api, tree, lambda: insert_block_tree_at_page_top(
+                        api, tree, page, keep_ids=keep_ids),
+                    keep_last=keep_on, keep_ids=keep_ids, **end_target)
+                return uuids
         else:
             click.echo(
                 "Tree insert requires --child-of, --after, --before, or --page NAME --top-level",
@@ -515,10 +542,16 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             if child_of or after or before:
                 refuse_missing_anchor(api, clean_id, as_json)
             planned = count_blocks(tree)
+            would_anchor = (first_empty_at_end(api, tree, **end_target)
+                          if keep_on and end_target else None)
             if as_json:
-                output({"position": position, "blocks": planned, "dry_run": True, **alias}, True)
+                output({"position": position, "blocks": planned, "dry_run": True,
+                        **would_go_before_fields(would_anchor),
+                        **alias}, True)
             else:
                 click.echo(f"[DRY RUN] Would insert {planned} block(s) {position}")
+                if would_anchor:
+                    click.echo(f"  would go before the empty block {would_anchor[:8]}...")
             return
 
         if page and top_level:
@@ -534,10 +567,12 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                 **uuid_fields(uuids),
                 "blocks_added": len(uuids),
                 "properties": applied,
+                **before_empty_fields(ahead_of.get("uuid")),
                 **alias,
             }, True)
         else:
-            click.echo(f"Inserted {len(uuids)} block(s) {position}")
+            click.echo(f"Inserted {len(uuids)} block(s) {position}"
+                       f"{BEFORE_EMPTY_SUFFIX if ahead_of.get('uuid') else ''}")
             if not quiet:
                 # One line per block: useful when a UUID is needed downstream,
                 # noise when only the confirmation matters, which is why this is
@@ -584,6 +619,13 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         content = outline_text(tree) if hierarchical else tree[0]["content"]
 
     note_quote_breaks(tree)
+    # [graph] keep_empty_blocks_last acts on the writes that end a section: the end
+    # of a page and a last child.
+    keep_on = keep_empty_blocks_last(load_config())
+    end_target = ({"page_name": page} if page else
+                  {"parent_uuid": unwrap_block_id(child_of)} if child_of and not as_first
+                  else {})
+    ahead_of = {}
     if dry_run:
         if not page:
             refuse_missing_anchor(api, after or before or child_of, as_json)
@@ -592,21 +634,35 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                        f"after {after[:8]}..." if after else
                        f"before {before[:8]}..." if before else
                        f"{'first child' if as_first else 'child'} of {child_of[:8]}...")
+        would_anchor = (first_empty_at_end(api, tree, **end_target)
+                      if keep_on and end_target else None)
         if as_json:
-            output({"position": target_desc, "blocks": planned, "dry_run": True, **alias}, True)
+            output({"position": target_desc, "blocks": planned, "dry_run": True,
+                    **would_go_before_fields(would_anchor),
+                    **alias}, True)
         else:
             click.echo(f"[DRY RUN] Would insert {planned} block(s) {target_desc}")
+            if would_anchor:
+                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
         return
 
+    written = None
     if page:
         create_missing_page(api, target)
+    if keep_on and end_target:
+        written, ahead_of["uuid"] = before_first_empty(api, tree, keep_ids=keep_ids, **end_target)
+
+    if page:
         if hierarchical:
-            uuids = insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids)
+            uuids = written if written is not None else insert_tree_at_page_end(
+                api, page, tree, keep_ids=keep_ids)
             new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"end of '{page}' ({len(uuids)} block(s))"
         else:
-            result = append_in_page(api, page, content, keep_ids)
+            result = (api.get_block(written[0], include_children=False) or {"uuid": written[0]}
+                      if written is not None
+                      else append_in_page(api, page, content, keep_ids))
             new_uuid = result["uuid"]
             position = f"end of '{page}'"
     elif after:
@@ -637,14 +693,18 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         if hierarchical:
             if as_first:
                 uuids = insert_block_tree_as_first_children(api, tree, clean_id, keep_ids=keep_ids)
+            elif written is not None:
+                uuids = written
             else:
                 uuids = insert_block_tree_with_uuids(api, tree, clean_id, keep_ids=keep_ids)
             new_uuid = uuids[0]
             result = {"blocks_added": len(uuids), "uuids": uuids}
             position = f"{where} of {clean_id[:8]}... ({len(uuids)} block(s))"
         else:
-            result = insert_block_at(api, clean_id, content, sibling=False, before=as_first,
-                                     keep_ids=keep_ids)
+            result = (api.get_block(written[0], include_children=False) or {"uuid": written[0]}
+                      if written is not None
+                      else insert_block_at(api, clean_id, content, sibling=False,
+                                           before=as_first, keep_ids=keep_ids))
             new_uuid = result["uuid"]
             position = f"{where} of {clean_id[:8]}..."
 
@@ -652,9 +712,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     applied = apply_block_properties(api, new_uuid, properties) if properties else {}
 
     if as_json:
-        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([new_uuid]), **alias}, True)
+        output({"position": position, "content": content, "result": result, "properties": applied, **uuid_fields([new_uuid]),
+                **before_empty_fields(ahead_of.get("uuid")), **alias}, True)
     else:
-        click.echo(f"Inserted block {position}")
+        click.echo(f"Inserted block {position}{BEFORE_EMPTY_SUFFIX if ahead_of.get('uuid') else ''}")
         # Before the preview: the content may itself contain "uuid: ...".
         click.echo(f"  uuid: {new_uuid}")
         preview = content[:80] + ("..." if len(content) > 80 else "")
@@ -687,6 +748,9 @@ Examples:
                                           --under-heading "## Open TODOs"
 Note:
   Default target: today's journal. Auto-creates the journal page if missing.
+  [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
+  a section goes before the empty blocks that end it, so they stay last, and
+  nothing is overwritten.
 """)
 @click.option("--source-id", required=True, help="UUID of the block to reference")
 @click.option("--journal-date", default=None, help="Target journal date (YYYY-MM-DD), defaults to today")
@@ -706,7 +770,9 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
       logseq-cli add-block-ref --source-id UUID --journal-date 2026-04-23 --under-heading "## Tasks"
     """
     api = ctx.obj["api"]
-    under_heading = resolve_heading(load_config(), under_heading)
+    config = load_config()
+    under_heading = resolve_heading(config, under_heading)
+    keep_on = keep_empty_blocks_last(config)
     refuse_split_heading(under_heading, command="add-block-ref")
     source_id = source_id.strip().strip("()").strip()
     # A ref to no block renders as nothing, and the TODO it carries over looks
@@ -760,6 +826,11 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         # append it to the page and make the preview a write.
         heading_exists = (find_heading(api, page, under_heading) is not None
                           if under_heading and not would_create_page else False)
+        # The empty block [graph] keep_empty_blocks_last would put the ref before;
+        # none when the heading is missing, which would go there itself.
+        would_anchor = (first_empty_under(api, [{"content": ref_content, "children": []}],
+                                      page, under_heading)
+                      if keep_on and not would_create_page else None)
         if under_heading:
             position = f"under '{under_heading}' on '{page}'"
         else:
@@ -773,6 +844,7 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
                     "source_content": source_content,
                     "would_create_page": would_create_page,
                     "would_create_heading": bool(under_heading) and not heading_exists,
+                    **would_go_before_fields(would_anchor),
                     "dry_run": True}, True)
         else:
             click.echo(f"[DRY RUN] Would add block-ref {position}")
@@ -784,24 +856,33 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
             if under_heading:
                 click.echo(f"  heading: {under_heading}"
                            f"{'' if heading_exists else ' (would be created)'}")
+            if would_anchor:
+                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
         return
 
     # A ref that was never written is worse than a visible error: the TODO looks
     # linked on the project page and silently is not, which is exactly what
     # block-refs are relied on for. The API proves each insert and raises.
+    ref_node = [{"content": ref_content, "children": []}]
     if under_heading:
-        heading_uuid = find_or_create_heading(api, page, under_heading)
-        result = api.insert_block(heading_uuid, ref_content, {"sibling": False})
+        heading_uuid = find_or_create_heading(api, page, under_heading, keep_last=keep_on)
+        uuids, ahead_of = before_empty_or_append(
+            api, ref_node, lambda: [api.insert_block(heading_uuid, ref_content,
+                                                     {"sibling": False})["uuid"]],
+            keep_last=keep_on, parent_uuid=heading_uuid)
         position = f"under '{under_heading}' on '{page}'"
     else:
-        result = api.append_block_in_page(page, ref_content)
+        uuids, ahead_of = before_empty_or_append(
+            api, ref_node, lambda: [api.append_block_in_page(page, ref_content)["uuid"]],
+            keep_last=keep_on, page_name=page)
         position = f"top-level on '{page}'"
-    new_uuid = result["uuid"]
+    new_uuid = uuids[0]
 
     if as_json:
-        output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}), "position": position, "uuid": new_uuid}, True)
+        output({"source_id": source_id, "ref": ref_content, **(names or {"page": page}), "position": position, "uuid": new_uuid,
+                **before_empty_fields(ahead_of)}, True)
     else:
-        click.echo(f"Added block-ref {position}")
+        click.echo(f"Added block-ref {position}{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
         click.echo(f"  {ref_content}")
         click.echo(f"  uuid: {new_uuid}")
 
@@ -817,6 +898,9 @@ Note:
   A source block Logseq would not read back as one block (a "- " or "# " line
   after the first, a code fence nothing closes) is refused before anything is
   copied; move-block moves it as it is.
+  [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
+  a section goes before the empty blocks that end it, so they stay last, and
+  nothing is overwritten.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
@@ -829,6 +913,7 @@ Note:
 def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
+    keep_on = keep_empty_blocks_last(load_config())
     # A missing page under the name Logseq creates it with, as for
     # insert-block --page.
     ref, target = follow_page_to_write(api, to_page, as_json)
@@ -857,10 +942,13 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         planned = count_blocks([source])
         action = "move" if remove else "copy"
         content = without_block_ids(source.get("content", "")) if isinstance(source, dict) else ""
+        would_anchor = (first_empty_at_end(api, [{"content": content, "children": []}], page_name=to_page)
+                      if keep_on else None)
         if as_json:
             output({"action": action, "blocks": planned, **names,
                     "source_id": block_id, "removes_source": bool(remove),
-                    "refs_broken": len(refs), "dry_run": True}, True)
+                    "refs_broken": len(refs), "dry_run": True,
+                    **would_go_before_fields(would_anchor)}, True)
         else:
             click.echo(f"[DRY RUN] Would {action} {planned} block(s) to '{to_page}'")
             preview = content[:80] + ("..." if len(content) > 80 else "")
@@ -870,6 +958,8 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
                 click.echo(f"  source block {block_id} WOULD BE REMOVED after copying")
             if refs:
                 click.echo(f"  block refs into the source that would dangle: {len(refs)}")
+            if would_anchor:
+                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
         return
 
     # Every insert is proven by the API: Logseq answers a failed write with
@@ -882,15 +972,21 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         # name one uuid for two blocks until Logseq reads it again (#56).
         content = without_block_ids(block.get("content", ""))
         if parent_uuid:
-            result = api.insert_block(parent_uuid, content, {"sibling": False})
+            new_uuid = api.insert_block(parent_uuid, content, {"sibling": False})["uuid"]
         else:
-            result = api.append_block_in_page(to_page, content)
-        new_uuid = result["uuid"]
+            # The root is the one write at the end of the page: before the empty
+            # blocks that end it, with [graph] keep_empty_blocks_last on.
+            root, ahead_of["uuid"] = before_empty_or_append(
+                api, [{"content": content, "children": []}],
+                lambda: [api.append_block_in_page(to_page, content)["uuid"]],
+                keep_last=keep_on, page_name=to_page)
+            new_uuid = root[0]
         copied = 1
         for child in block.get("children", []):
             copied += _copy_tree(child, new_uuid)
         return copied
 
+    ahead_of = {}
     create_missing_page(api, target)
     count = _copy_tree(source)
 
@@ -901,13 +997,15 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
 
     action = "Moved" if remove else "Copied"
     result_data = {"action": action.lower(), "blocks": count, **names, "source_id": block_id}
+    result_data.update(before_empty_fields(ahead_of.get("uuid")))
     if remove:
         result_data["refs_broken"] = len(refs)
 
     if as_json:
         output(result_data, True)
     else:
-        click.echo(f"{action} {count} block(s) to '{to_page}'.")
+        click.echo(f"{action} {count} block(s) to '{to_page}'"
+                   f"{BEFORE_EMPTY_SUFFIX if ahead_of.get('uuid') else ''}.")
         if refs:
             click.echo(f"  {len(refs)} block ref(s) into the source now point at nothing")
 

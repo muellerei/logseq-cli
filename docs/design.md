@@ -54,7 +54,14 @@ page, whose link Logseq rewrites. An insert is not refused: Logseq saves the ope
 it inserts (measured), and the CLI inserts with `focus: false`, so the cursor
 stays where it was. The one insert refused is a text with a ref to the open
 block while that block has no `id::` yet, since storing the id writes into
-it. A write of several blocks goes block by block while a block is open,
+it. With `[graph] keep_empty_blocks_last` a write at the end of a section goes
+before the empty blocks that end it, by `insertBlock` with `before`, and so
+touches none of them: the cursor can sit in the empty block the user clicked and
+stays there. A first version wrote into the empty block with `updateBlock`, which
+the editor gate refuses for an open block (measured, 0.10.15) and which
+overwrites whatever another writer, or the user, put there between the CLI's
+read and its write; an adversarial pass showed it, and an insert cannot lose
+that text. A write of several blocks goes block by block while a block is open,
 since Logseq's batch insert opens its last block in the editor once the page
 is on screen. What the word does not cover is a block entered in the
 milliseconds between the CLI's question and its write.

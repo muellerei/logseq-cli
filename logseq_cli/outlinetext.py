@@ -62,6 +62,36 @@ def page_blocks_by_uuid(tree: list) -> dict:
     return found
 
 
+def _is_empty_block(block) -> bool:
+    """A block with no text, no properties and no children.
+
+    A child handed back as a bare uuid (``["uuid", "..."]``) is not a dict and
+    says nothing about itself, so it is not taken for free space. A block that
+    only has an empty child is not empty either: the child was put there on
+    purpose (Tab makes it, two Enter do not).
+    """
+    return (isinstance(block, dict)
+            and not (block.get("content") or "").strip()
+            and not block.get("children")
+            and not block.get("properties"))
+
+
+def trailing_empty_run(children) -> list:
+    """The uuids of the empty blocks that end ``children``, in order.
+
+    ``children`` are the children of a block, or the blocks of a page, as
+    getBlock or getPageBlocksTree hands them back. Empty blocks before a block
+    with text are not part of the run: only the free space at the end counts
+    (#110).
+    """
+    run = []
+    for block in reversed(children or []):
+        if not _is_empty_block(block):
+            break
+        run.append(block["uuid"])
+    return run[::-1]
+
+
 def bullet_lines(content: str, prefix: str) -> list:
     """One block's text as lines of an outline, its bullet after ``prefix``.
 

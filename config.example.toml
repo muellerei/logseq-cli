@@ -65,6 +65,21 @@ projects_namespace = "projects/"
 person_property = "type"
 person_value = "Person"
 
+# Whether a write at the end of a section goes before the empty blocks that end
+# it, so they stay last. Many Logseq users keep an empty block at the end of a
+# section as a place to click and type; without this, every entry the CLI
+# writes lands behind it and an empty line stays in front of each one.
+#
+# With it on, a write goes directly before the empty blocks at the end, the
+# blocks of the same command follow in order, and the empty blocks stay last.
+# Nothing is deleted and no block is written over, so a block you are typing in
+# is never touched. An empty block has no text, no properties and no children;
+# one with an empty block under it is not empty.
+#
+# Without it: writes append as they always did. The environment variable
+# LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST overrides this value in both directions.
+keep_empty_blocks_last = false
+
 
 [analysis]
 
