@@ -82,7 +82,7 @@ class TestDeadRefsAreReported:
             {"uuid": "b1", "content": f"see (({LIVE}))", "children": []}]
         result = split_runner().invoke(
             cli, ["get-page", "--page", "Page", "--resolve-refs", "--json"])
-        assert "dead" not in result.stderr.lower(), result.stderr
+        assert result.stderr == ""
         assert "dead_refs" not in json.loads(result.stdout)
 
     def test_without_resolve_refs_nothing_is_claimed(self, api):
