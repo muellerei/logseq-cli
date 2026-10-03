@@ -141,7 +141,7 @@ class TestEveryWriter:
         assert _ids_asked_for(api) == [ID]
         page, _, _, parent = api.graph.locate(ID)
         assert parent is None
-        assert "cannot preserve" not in r.stderr
+        assert "id:: propert" not in r.stderr
 
     def test_an_id_that_already_exists_is_refused_before_any_write(self, name):
         api = _api(existing_ids=[ID])

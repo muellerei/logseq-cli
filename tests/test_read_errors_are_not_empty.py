@@ -70,6 +70,19 @@ def test_get_page_stats_does_not_report_zero_inbound_links_after_an_error():
     assert json.loads(result.stderr)["backlinks_unread"] == ["Alpha"]
 
 
+def test_get_page_stats_reports_the_inbound_count_when_the_scan_can_read_every_page():
+    """The twin of the test above, and what keeps its ``"inbound_count" not in``
+    from going blind: were the field renamed, only a test that expects it
+    present would notice."""
+    api = _api("nobody")  # no page fails to read
+    api.get_page_linked_references.side_effect = RuntimeError("HTTP 500")  # falls back to the scan
+    result = _run(api, "get-page-stats", "--page", "Alpha")
+    assert result.exit_code == 0, result.stderr
+    stats = json.loads(result.stdout)
+    assert stats["inbound_links"] == sorted([JOURNAL, "Beta"])
+    assert stats["inbound_count"] == 2
+
+
 @pytest.mark.parametrize("command", [
     ["analyze-graph"],
     ["find-knowledge-gaps"],
