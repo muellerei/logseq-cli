@@ -274,6 +274,7 @@ class TestAMissingNamedFile:
         monkeypatch.setenv("LOGSEQ_CLI_CONFIG", str(tmp_path / "gone.toml"))
         result = invoke("get-page", "--page", "Probe Page")
         assert result.exit_code == 0
+        assert "alpha block" in result.stdout
 
     def test_no_variable_and_no_file_is_a_normal_run(self, sent):
         result = invoke("add-journal-block", "--content", "x")
@@ -330,6 +331,7 @@ class TestSafetyIsCheckedStrictly:
         config("[safety]\nreadonly = true\n")
         result = invoke("get-page", "--page", "Probe Page")
         assert result.exit_code == 0
+        assert "alpha block" in result.stdout
 
     def test_a_reader_that_loads_the_config_warns_and_goes_on(self, config, capsys):
         config("[safety]\nreadonly = true\n")
@@ -552,6 +554,7 @@ class TestInitForceKeepsSafety:
         path = config('[journal]\ndefault_heading = "## Old"\n')
         result = invoke("init", "--force")
         assert result.exit_code == 0
+        assert "## Old" not in path.read_text(encoding="utf-8")
         assert "[safety]" not in path.read_text(encoding="utf-8")
         assert "Kept" not in result.stderr
 

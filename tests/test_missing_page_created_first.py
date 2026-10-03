@@ -102,6 +102,7 @@ def test_preview_creates_nothing(monkeypatch, args):
     _source(api)
     result = _run(*args, "--dry-run")
     assert result.exit_code == 0, result.stderr
+    assert "DRY RUN" in result.stdout, result.stdout
     api.create_page.assert_not_called()
     api.append_block_in_page.assert_not_called()
 

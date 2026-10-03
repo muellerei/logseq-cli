@@ -201,6 +201,7 @@ def test_accepted(args):
     api = _graph()
     r = _run(args, api)
     assert r.exit_code == 0, r.stderr
+    assert _writes(api) >= 1
 
 
 # --- writes of text that already exists ---------------------------------------
@@ -245,6 +246,7 @@ def test_replace_text_and_set_todo_status_leave_an_existing_line_alone():
     assert r.exit_code == 0, r.stderr
     r = _run(["set-todo-status", "--id", ANCHOR, "--status", "DONE"], api)
     assert r.exit_code == 0, r.stderr
+    assert api.update_block.call_args.args[1] == "DONE a term\n- b"
 
 
 # --- the heading written first, and the words of each refusal -----------------
@@ -315,3 +317,4 @@ def test_replace_text_may_change_the_text_of_a_line_the_block_had():
         api.graph.locate(u)[1][api.graph.locate(u)[2]].update(content=c)
     r = _run(["replace-text", "--page", "Page A", "--find", "old", "--replace", "new"], api)
     assert r.exit_code == 0, r.stderr
+    assert api.update_block.call_args.args[1] == "TODO a\n- new"

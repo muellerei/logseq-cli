@@ -1,4 +1,5 @@
 """Shared test helpers."""
+import datetime
 import re
 
 import pytest
@@ -118,6 +119,17 @@ def mock_api(**overrides):
     for name, value in overrides.items():
         setattr(api, name, value)
     return api
+
+
+def journal_day(days_ago=1):
+    """Logseq's ``journalDay`` integer for a day relative to today.
+
+    A fixed date works until it leaves a relative window such as
+    ``--timeframe "last 30 days"``; then every test built on it silently
+    sees an empty journal. Derive the day from the clock instead.
+    """
+    day = datetime.date.today() - datetime.timedelta(days=days_ago)
+    return int(day.strftime("%Y%m%d"))
 
 
 def split_runner():

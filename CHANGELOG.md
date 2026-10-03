@@ -210,6 +210,31 @@ file carries most of the reasoning behind the tool.
   holding it from its file. Logseq then keeps a placeholder `id:: <uuid>`
   without a page (#70), which was inlined as the ref's text.
 
+- The suite would have gone red with no change to the code: ten tests failed
+  from 2026-10-11 and one more from 2027-01-01. Their fixtures held a fixed
+  journal day (2026-09-10, August 2026) while the commands under test filter
+  against "last 30 days" or "this year", so once the day left the window the
+  command saw an empty journal and the assertions failed. `journal_day()` in
+  `tests/conftest.py` now derives the day from the clock. Reproduced with a
+  faked clock on 15 dates through 2028 (month ends, year change, leap day) at
+  00:00 and 23:59; all 3265 tests pass on each. No command changed.
+  - Two tests looped over the entries of a result and would pass over an empty
+    one: `get-journal-summary --no-content`, silently from 2027, and
+    `get-journal-range --heading`, on an empty journal at any date. Both now
+    assert the list is not empty.
+- Sixteen tests passed whether or not the command did anything. They asserted
+  exit code 0 and, at most, that something was not written; one searched
+  stderr for "dead" where the message reads "no longer exists", so it could
+  not fail. Found by making `CliRunner.invoke` a no-op (exit 0, no output):
+  135 tests still passed, and for 16 of them no twin test proved that the
+  command acted. Each now asserts what exists only if it did: the written
+  block, the rendered page, the dry-run notice, the query sent, the JSON
+  payload. With the no-op, fourteen of them fail; the other two were mutated
+  on their own (forcing `--resolve-refs` on makes the new dead-ref assertion
+  fail where the old one passed; `get-todos --from 2099`, which drops every
+  task, fails the new one). The empty-graph smoke test now requires exit 0 and
+  JSON where it allowed `SystemExit`. No command changed.
+
 ## [0.16.0] - 2026-09-26
 
 Every write is now proven, and none overwrites a block you are editing.

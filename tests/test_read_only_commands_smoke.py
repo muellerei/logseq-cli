@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import journal_day, split_runner
 
 COMMANDS = [
     ("analyze-graph", []),
@@ -72,8 +72,8 @@ def test_survives_an_empty_graph(command, args, tmp_path):
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
          patch("logseq_cli.group.LogseqAPI", return_value=empty_api()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
-    assert result.exception is None or isinstance(result.exception, SystemExit), \
-        f"{command} raised {result.exception!r}"
+    assert result.exit_code == 0, f"{command}: {result.exception!r} {result.stderr}"
+    json.loads(result.stdout)
 
 
 def graph_with(pages_topics):
@@ -289,7 +289,7 @@ class TestMoodCountsStatementsNotWords:
         cfg.write_text(self.CONFIG, encoding="utf-8")
         api = MagicMock()
         api.get_all_pages.return_value = [
-            {"originalName": "J", "journalDay": 20260910, "journal?": True}]
+            {"originalName": "J", "journalDay": journal_day(), "journal?": True}]
         with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
              patch("logseq_cli.group.LogseqAPI", return_value=api), \
              patch("logseq_cli.commands.analysis.get_page_content", return_value=text):

@@ -117,6 +117,7 @@ def test_a_change_of_case_is_allowed(double, extra):
     assert r.exit_code == 0, r.stderr
     if extra:
         assert double.sent("renamePage") == []
+        assert json.loads(r.stdout)["new_name"] == "OLD page"
         return
     assert double.sent("renamePage") == [["Old Page", "OLD page"]]
     page = LogseqAPI(token="t").get_page("old page")

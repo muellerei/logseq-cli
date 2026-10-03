@@ -58,6 +58,7 @@ class TestPropertyLookupSpellings:
     def test_uppercase_typed_single_word_still_matches(self):
         r = _invoke(_api_with_page({"type": "Person"}), "Type")
         assert r.exit_code == 0, r.output
+        assert json.loads(r.stdout)["value"] == "Person"
 
     def test_missing_key_still_fails(self):
         r = _invoke(_api_with_page({"type": "Person"}), "team")

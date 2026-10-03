@@ -164,6 +164,7 @@ class TestGetTodosDateRange:
             result = runner.invoke(cli, ["get-todos", "--from", "2026-05-01", "--json"])
         assert result.exit_code == 0, result.output
         contents = [t["content"] for t in _json.loads(result.output)["todos"]]
+        assert any("in range" in c for c in contents), contents
         assert not any("plain page" in c for c in contents), (
             f"task without a journal date passed a one-sided range: {contents!r}"
         )
