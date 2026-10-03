@@ -167,6 +167,8 @@ def test_create_page_proof_survives_unicode_normalisation(monkeypatch):
     assert name != unicodedata.normalize("NFC", name)
     r = _invoke(double, ["create-page", "--page", name])
     assert r.exit_code == 0, r.stderr
+    assert [a[0] for a in double.sent("createPage")] == [name]
+    assert json.loads(r.stdout)["created"] == name
 
 
 @pytest.mark.parametrize("name,day", [

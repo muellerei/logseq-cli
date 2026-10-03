@@ -222,6 +222,19 @@ file carries most of the reasoning behind the tool.
     one: `get-journal-summary --no-content`, silently from 2027, and
     `get-journal-range --heading`, on an empty journal at any date. Both now
     assert the list is not empty.
+- Sixteen tests passed whether or not the command did anything. They asserted
+  exit code 0 and, at most, that something was not written; one searched
+  stderr for "dead" where the message reads "no longer exists", so it could
+  not fail. Found by making `CliRunner.invoke` a no-op (exit 0, no output):
+  135 tests still passed, and for 16 of them no twin test proved that the
+  command acted. Each now asserts what exists only if it did: the written
+  block, the rendered page, the dry-run notice, the query sent, the JSON
+  payload. With the no-op, fourteen of them fail; the other two were mutated
+  on their own (forcing `--resolve-refs` on makes the new dead-ref assertion
+  fail where the old one passed; `get-todos --from 2099`, which drops every
+  task, fails the new one). The empty-graph smoke test now requires exit 0 and
+  JSON where it allowed `SystemExit`. No command changed.
+
 ## [0.16.0] - 2026-09-26
 
 Every write is now proven, and none overwrites a block you are editing.

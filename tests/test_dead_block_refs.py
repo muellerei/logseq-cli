@@ -88,4 +88,5 @@ class TestDeadRefsAreReported:
     def test_without_resolve_refs_nothing_is_claimed(self, api):
         """No lookups happen, so no claim about liveness can be made."""
         result = split_runner().invoke(cli, ["get-page", "--page", "Page"])
-        assert "dead" not in result.stderr.lower(), result.stderr
+        assert "no longer exists" not in result.stderr, result.stderr
+        api.get_block.assert_not_called()

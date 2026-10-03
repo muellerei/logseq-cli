@@ -72,8 +72,8 @@ def test_survives_an_empty_graph(command, args, tmp_path):
     with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
          patch("logseq_cli.group.LogseqAPI", return_value=empty_api()):
         result = split_runner().invoke(cli, ["--token", "X", command, *args, "--json"])
-    assert result.exception is None or isinstance(result.exception, SystemExit), \
-        f"{command} raised {result.exception!r}"
+    assert result.exit_code == 0, f"{command}: {result.exception!r} {result.stderr}"
+    json.loads(result.stdout)
 
 
 def graph_with(pages_topics):

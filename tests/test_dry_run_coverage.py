@@ -761,5 +761,6 @@ class TestEveryWriteHasADryRun:
             result = CliRunner().invoke(
                 cli, ["add-journal-entry", "--content", "Entry", "--dry-run"])
         assert result.exit_code == 0, result.output
+        assert "Would add 1 block" in result.output, result.output
         api.create_page.assert_not_called()
         api.append_block_in_page.assert_not_called()

@@ -67,6 +67,7 @@ class TestNameAlias:
                 "find-block", "--content", "x", "--name", "SomePage", "--json",
             ])
         assert r.exit_code == 0, r.output  # would be 2 if --name were unknown
+        assert '[?p :block/name "somepage"]' in api.datascript_query.call_args[0][0]
 
     def test_insert_block_accepts_name(self):
         api = MagicMock()

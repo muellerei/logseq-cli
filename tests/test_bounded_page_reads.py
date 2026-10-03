@@ -551,11 +551,13 @@ class TestFromBlock:
         result, _ = _run(["get-page", "--name", "ﬁnal", "--name", "final",
                           "--max-chars", "100000", "--no-backlinks"], _big_tree())
         assert result.exit_code == 0, result.output
+        assert "=== ﬁnal ===" in result.stdout and "=== final ===" in result.stdout
 
     def test_a_page_named_twice_still_reads_without_a_cap(self):
         result, _ = _run(["get-page", "--name", "A", "--name", "A",
                           "--no-backlinks"], _big_tree())
         assert result.exit_code == 0
+        assert result.stdout.count("=== A ===") == 2, result.stdout
 
     def test_markdown_continuation_keeps_the_bullet_of_a_properties_block(self):
         """Only the page's own first block is written without a bullet; a
