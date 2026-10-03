@@ -235,6 +235,23 @@ file carries most of the reasoning behind the tool.
   task, fails the new one). The empty-graph smoke test now requires exit 0 and
   JSON where it allowed `SystemExit`. No command changed.
 
+- The suite would not have noticed `get-page-stats` losing its `inbound_count`
+  field. Its only test looked for the field's absence after a failed read
+  (`"inbound_count"` not in stdout), and no test expected it present: renaming
+  it left all 3265 tests green. A test now reads the stats when the scan can
+  read every page and expects the field and its value.
+  - Three more checks asserted that a message is absent after the message had
+    gone, so they could not fail: "Could not find or create" (removed with the
+    top-level fallback) and "cannot preserve" (removed when top-level blocks
+    began to keep their ids), the latter in two tests. The first was redundant
+    next to the JSON parse of stderr and is removed; the others now look for
+    the dropped-`id::` note, whose wording their sibling tests pin.
+  - Found by listing the 154 checks of the form `"text" not in …` and
+    asking, for each, whether the code still emits the text and whether any
+    test expects it. Checked by mutation: printing the dropped-id note despite
+    `--keep-ids` passes the old assertions and fails the new ones in all eight
+    cases. No command changed.
+
 ## [0.16.0] - 2026-09-26
 
 Every write is now proven, and none overwrites a block you are editing.
