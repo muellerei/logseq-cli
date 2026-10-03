@@ -183,7 +183,7 @@ class TestCommand:
         assert result.exit_code == 0, result.output
         _, siblings, i, parent = api.graph.locate(VALID)
         assert parent is None and i == len(siblings) - 1
-        assert "cannot preserve" not in result.output
+        assert "id:: propert" not in result.output
 
 
 class TestIdLinesAsLogseqReadsThem:

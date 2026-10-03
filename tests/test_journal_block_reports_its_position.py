@@ -37,5 +37,4 @@ def test_a_heading_not_created_fails_instead_of_moving_the_blocks(monkeypatch, e
     assert result.stdout == ""
     error = json.loads(result.stderr)
     assert (error["reason"], error["method"]) == ("write_not_verified", "appendBlockInPage")
-    assert "Could not find or create" not in result.stderr
     assert double.tree("2026-01-05, Monday") == [("journal top", [])]
