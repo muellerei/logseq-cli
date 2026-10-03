@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import journal_day, split_runner
 
 COMMANDS = [
     ("analyze-graph", []),
@@ -289,7 +289,7 @@ class TestMoodCountsStatementsNotWords:
         cfg.write_text(self.CONFIG, encoding="utf-8")
         api = MagicMock()
         api.get_all_pages.return_value = [
-            {"originalName": "J", "journalDay": 20260910, "journal?": True}]
+            {"originalName": "J", "journalDay": journal_day(), "journal?": True}]
         with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
              patch("logseq_cli.group.LogseqAPI", return_value=api), \
              patch("logseq_cli.commands.analysis.get_page_content", return_value=text):

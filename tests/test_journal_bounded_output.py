@@ -15,7 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import journal_day, split_runner
 
 
 def _journal_pages(days):
@@ -105,6 +105,7 @@ class TestJournalRangeHeading:
             "get-journal-range", "--from", "2026-08-01", "--to", "2026-08-02",
             "--heading", "## Log", "--json"])
         entries = json.loads(result.stdout)
+        assert entries, "the loop below would pass over nothing"
         for entry in entries:
             contents = [b["content"] for b in entry["blocks"]]
             assert contents == ["## Log"]
@@ -118,6 +119,17 @@ class TestJournalRangeHeading:
 
 
 class TestJournalSummaryNoContent:
+    @pytest.fixture(autouse=True)
+    def pages_in_this_year(self, api):
+        """``--range "this year"`` needs pages inside the current year.
+
+        The module fixture's August 2026 pages fall out of it from 1 Jan 2027; the
+        no-content test then loops over zero entries and passes for nothing.
+        """
+        day = journal_day(0)
+        api.get_all_pages.return_value = [
+            {"originalName": "J", "name": "j", "journalDay": day}]
+
     def test_no_content_drops_bodies_but_keeps_length(self, api, monkeypatch):
         monkeypatch.setattr("logseq_cli.commands.journal.get_page_content",
                             lambda api_, name: "x" * 500 + " [[Alice]]")
@@ -125,6 +137,7 @@ class TestJournalSummaryNoContent:
             "get-journal-summary", "--range", "this year", "--no-content", "--json"])
         payload = json.loads(result.stdout)
         assert payload["content_omitted"] is True
+        assert payload["entries"], "the loop below would pass over nothing"
         for entry in payload["entries"]:
             assert "content" not in entry
             assert entry["content_length"] == 510

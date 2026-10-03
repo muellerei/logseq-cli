@@ -12,9 +12,9 @@ from unittest.mock import MagicMock, patch
 
 
 from logseq_cli.cli import cli
-from tests.conftest import split_runner
+from tests.conftest import journal_day, split_runner
 
-JOURNAL = {"originalName": "2026-09-10", "journalDay": 20260910, "journal?": True}
+JOURNAL = {"originalName": "J", "journalDay": journal_day(), "journal?": True}
 
 
 def run(text, *args, config=None, tmp_path=None):
