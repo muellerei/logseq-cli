@@ -212,15 +212,14 @@ def _is_incidental_page(name: str) -> bool:
     stripped = name.strip()
     if len(stripped) < 3:
         return True
+    # Also a date in file-name form (2025_10_10, 2025-10-10, 2025/10/10): digits
+    # and separators only, a journal under another spelling, not a gap.
     if not any(c.isalpha() for c in stripped):
         return True
     if re.fullmatch(r"[\W_]+", stripped):
         return True
     # A name opening with punctuation is a tag that swallowed one: "#-AI"
     if not (stripped[0].isalnum() or stripped[0] in "_@"):
-        return True
-    # 2025_10_10, 2025-10-10, 2025/10/10 — a journal, not a gap
-    if re.fullmatch(r"\d{4}[-_/]\d{1,2}[-_/]\d{1,2}", stripped):
         return True
     # An unclosed bracket dragged in from prose: "#Active)", "3b82f6)".
     if stripped.endswith(")") and "(" not in stripped:

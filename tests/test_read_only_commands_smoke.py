@@ -212,7 +212,8 @@ class TestFindKnowledgeGapsIgnoresArtefacts:
     them, while "596 orphaned pages" reads as a call to action.
     """
 
-    ARTEFACTS = [")", "-", "1", "272", "-AI", "2025_10_10", "..."]
+    ARTEFACTS = [")", "-", "1", "272", "-AI", "2025_10_10", "2025-10-10",
+                 "2025/10/10", "..."]
 
     def _graph(self, extra=(), trees=None):
         names = [*self.ARTEFACTS, "Real Knowledge Page", *extra]
