@@ -539,7 +539,7 @@ Every command with all its options: [docs/commands.md](docs/commands.md).
 | `insert-block` | Insert at specific position (after/before/child-of, `--first` for first child); `--keep-ids` preserves `id::` values in `--tree` or `--content` (also on `add-note-content`, `add-journal-block`, `add-journal-content`) |
 | `find-block` | Find blocks by content; `--limit N` caps the output (what is withheld goes to stderr); `--with-children` prints the subtree; `--uuid-only` prints bare uuids and fails on no match; `--exactly-one` fails unless exactly one block matches |
 | `update-block` | Change one block's content (by `--id` or `--where-content`); its properties are kept, a key `--content` sets takes the new value |
-| `set-todo-status` | Change a TODO/DOING/DONE marker (never `replace-text`) |
+| `set-todo-status` | Change a task's marker (never `replace-text`) |
 | `move-block` | Relocate a block, keeping its UUID and refs |
 | `copy-block` | Copy a block to another page (new UUID) |
 | `remove-block` | Delete a block by UUID |

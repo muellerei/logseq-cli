@@ -15,8 +15,8 @@ from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.safety import WriteCommand
-from logseq_cli.tasks import (ORDER, STATES, marker_before_newline, marker_of, markers_in,
-                              marker_clause,
+from logseq_cli.tasks import (FRONTEND_MARKERS, ORDER, STATES, marker_before_newline, marker_of,
+                              markers_in, marker_clause,
                               task_text, with_marker)
 
 
@@ -473,8 +473,8 @@ Examples:
                                             --page "Project Alpha" --status DONE
   logseq-cli --token TOKEN set-todo-status --id JOURNAL-UUID --status DONE --follow-refs
 Notes:
-  Status values: TODO, DOING, DONE, LATER, NOW, CANCELED.
-  --follow-refs: when the block holds only a ((uuid)) ref or {{embed ((uuid))}},
+""" f"""  Status values: {', '.join(FRONTEND_MARKERS)}.
+""" """  --follow-refs: when the block holds only a ((uuid)) ref or {{embed ((uuid))}},
   follows it, and on through every such block, and updates the one at the end.
   A chain that loops or reaches a missing block is refused, nothing written.
   Prefer this over replace-text for marker changes — 1 call, deterministic.
@@ -488,8 +488,9 @@ Notes:
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
 @click.option("--page", "--name", default=None, help="Page to search in (used with --content)")
 @click.option("--status", required=True,
-              type=click.Choice(["TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED"]),
-              help="New task status")
+              type=click.Choice(FRONTEND_MARKERS, case_sensitive=False),
+              help=f"Marker to set: {', '.join(FRONTEND_MARKERS)} (case does not matter). It takes "
+                   "a marker, not a state, because only the marker DOING separates it from TODO.")
 @click.option("--follow-refs", is_flag=True,
               help="If the block holds only a ((uuid)) ref or an embed of one, follow it, "
                    "through every such block, and update the block at the end instead.")

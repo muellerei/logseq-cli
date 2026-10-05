@@ -96,6 +96,13 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `set-todo-status --status` no longer tells upper case from lower case
+  (`--status done` is taken, as `--status todo` always was for `get-todos`),
+  and sets every marker Logseq's frontend knows: WAIT, WAITING, IN-PROGRESS and
+  CANCELLED are new. STARTED stays out: Logseq's parser reads it, but the
+  frontend does not offer it, so the CLI does not write a marker Logseq never
+  writes (#92).
+
 - `get-todos` without `--status` now lists every open task, not only TODO,
   DOING, NOW and LATER: tasks marked WAIT, WAITING, IN-PROGRESS or STARTED come
   with it. Logseq draws the first three as open tasks, and its parser reads
