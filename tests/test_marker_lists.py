@@ -4,9 +4,7 @@ Before them the code kept six lists of its own, and none was complete. This
 reads the source of every module but tasks.py and finds each place where two
 or more different marker words stand as whole words in one string literal or
 one collection (a set, list, tuple, the keys of a dict): Datalog strings and
-regexes included. EXCEPTIONS names the places that are still to be replaced;
-the test wants the counts equal, so a new list in a module with an old
-exception does not pass as "one of the old ones".
+regexes included. There is no list of exceptions: the answer is none.
 
 Prose is not a list. Docstrings and the first argument of ``fail`` are left
 out; in ``help=`` and ``epilog=`` only an enumeration counts (two markers in a
@@ -33,12 +31,6 @@ _ALT = "|".join(MARKERS)
 WORD = re.compile(rf"(?<![A-Za-z0-9_])({_ALT})(?![A-Za-z0-9_])")
 ENUMERATION = re.compile(
     rf"(?<![A-Za-z0-9_])(?:{_ALT})(?![A-Za-z0-9_])[\s,/]+(?:{_ALT})(?![A-Za-z0-9_])")
-
-# (file, symbol) -> places still holding a marker list of their own.
-EXCEPTIONS = {
-    ("commands/analysis.py", "analyze_journal_patterns"): 2,
-}
-
 
 def _words(text):
     return {m.group(1) for m in WORD.finditer(text)}
@@ -129,11 +121,8 @@ def found_in_package():
 
 
 def test_no_module_but_tasks_keeps_a_marker_list():
-    found = collections.Counter(found_in_package())
-    more = {k: n - EXCEPTIONS.get(k, 0) for k, n in found.items() if n > EXCEPTIONS.get(k, 0)}
-    fewer = {k: n - found.get(k, 0) for k, n in EXCEPTIONS.items() if n > found.get(k, 0)}
-    assert not more, f"more found than allowed, a new marker list; use tasks.ORDER/STATE: {more}"
-    assert not fewer, f"fewer found than allowed, an outdated entry; lower the count or drop it: {fewer}"
+    found = dict(found_in_package())
+    assert not found, f"a marker list outside tasks.py; use tasks.ORDER/STATE: {found}"
 
 
 def _count(source):

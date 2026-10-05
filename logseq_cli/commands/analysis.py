@@ -370,7 +370,18 @@ def find_knowledge_gaps(ctx, min_refs, include_orphans, as_json):
             for o in result["orphaned_pages"]:
                 click.echo(f"  {o}")
 
-@cli.command("analyze-journal-patterns", epilog="""\b
+# Said in the help and in the text output, from one place; the JSON carries no
+# field for either (habit tracking goes away with its text pattern).
+TASK_DATING_NOTE = ("Tasks are dated by the page their block is on. "
+                    "get-todos --from/--to also counts the days a block ref carried a task to.")
+HABIT_COUNT_NOTE = ('Habits are counted from the text pattern "- [ ]" / "- [x]", '
+                    "not from Logseq's checkboxes.")
+
+
+@cli.command("analyze-journal-patterns",
+             help="Analyze patterns in journal entries.\n\n"
+                  + TASK_DATING_NOTE + "\n\n" + HABIT_COUNT_NOTE,
+             epilog="""\b
 Example:
   logseq-cli --token TOKEN analyze-journal-patterns --timeframe "last 30 days" --mood --topics
 """)
@@ -381,7 +392,6 @@ Example:
 @click.pass_context
 @handle_connection_error
 def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
-    """Analyze patterns in journal entries."""
     api = ctx.obj["api"]
     start, end = parse_date_range(timeframe)
     pages = api.get_all_pages()
@@ -409,23 +419,6 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     mood_indicator_patterns = [f"{label}:" for label in mood_labels] + [
         "\U0001f60a", "\U0001f614", "\U0001f620", "\U0001f60c",
     ]
-    # Two ways of writing a task. Logseq's own are the markers (TODO, DOING,
-    # DONE...); the markdown checkbox is what people paste in from elsewhere.
-    # Counting only the checkbox reported "0 complete, 0 incomplete" for a
-    # graph with over a thousand tasks — a number that reads like a
-    # measurement rather than a pattern that cannot match.
-    # The markers are upper-case in Logseq and only there, so they are matched
-    # case-sensitively: "Now that we finished" and "Later kam der Regen"
-    # open a sentence, not a task. The checkbox alternative keeps (?i), where
-    # "[X]" and "[x]" are both in the wild.
-    # The bullet may repeat: get_page_content prefixes each block with "- ",
-    # so a block already starting with one arrives as "- - TODO ...".
-    incomplete_task = re.compile(
-        r"(?i:- \[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
-        re.MULTILINE)
-    complete_task = re.compile(
-        r"(?i:- \[x\])|^(?:\s*-\s*)*(?:DONE|CANCELED|CANCELLED)\b",
-        re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
     # Projects get named in more than one way. A namespace prefix covers both
     # the tag (#projects/alpha) and the link ([[projects/alpha]]), because a
@@ -438,11 +431,28 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     # list, and treating every TODO as a habit would drown the real ones.
     habit_checkbox = re.compile(r"- \[[ x]\]", re.IGNORECASE)
 
+    # A task is a block Logseq gave a marker: one query for all of them, over the
+    # same days the pages are filtered by, and the page text takes no part. A
+    # day holds a set of blocks, so a block answered twice counts once.
+    rows = api.datascript_query(
+        "[:find ?b ?m ?d :where [?b :block/marker ?m] "
+        + tasks.marker_clause("?m", tasks.ORDER)
+        + " [?b :block/page ?p] [?p :block/journal-day ?d]"
+        + f" [(>= ?d {int(start.strftime('%Y%m%d'))})]"
+        + f" [(<= ?d {int(end.strftime('%Y%m%d'))})]]") or []
+    per_day = {}
+    overall = {state: set() for state in tasks.STATES}
+    for row in rows:
+        if not (isinstance(row, (list, tuple)) and len(row) >= 3) or row[1] not in tasks.STATE:
+            continue
+        block, marker, day = row[:3]
+        state = tasks.STATE[marker]
+        per_day.setdefault(day, {}).setdefault(state, set()).add(block)
+        overall[state].add(block)
+
     entries = []
     topic_by_date = {}
     mood_entries = []
-    total_incomplete = 0
-    total_complete = 0
 
     # Extended analysis collectors
     mood_patterns = []  # {date, mood, context}
@@ -520,13 +530,9 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
                         })
                         break
 
-        # Habits / tasks
-        inc = len(incomplete_task.findall(content))
-        comp = len(complete_task.findall(content))
-        total_incomplete += inc
-        total_complete += comp
-        entry["tasks_incomplete"] = inc
-        entry["tasks_complete"] = comp
+        # Tasks of the day: the blocks the query answered for it.
+        day = per_day.get(int(jd), {})
+        entry["tasks"] = {state: len(day.get(state, ())) for state in tasks.STATES}
 
         # Habit tracking - extract individual checkbox items
         for line in content.split("\n"):
@@ -587,11 +593,11 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
         "timeframe": timeframe,
         "entries_analyzed": len(entries),
         "tasks": {
-            "total_complete": total_complete,
-            "total_incomplete": total_incomplete,
-            "completion_rate": (
-                round(total_complete / (total_complete + total_incomplete) * 100, 1)
-                if (total_complete + total_incomplete) > 0
+            **{state: len(overall[state]) for state in tasks.STATES},
+            # Cancelled tasks are neither done nor open.
+            "done_rate": (
+                round(len(overall["done"]) / (len(overall["open"]) + len(overall["done"])) * 100, 1)
+                if (len(overall["open"]) + len(overall["done"])) > 0
                 else 0
             ),
         },
@@ -620,8 +626,9 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
     else:
         click.echo(f"=== Journal Patterns ({timeframe}) ===\n")
         click.echo(f"Entries analyzed: {len(entries)}")
-        click.echo(f"\nTasks: {total_complete} complete, {total_incomplete} incomplete "
-                    f"({result['tasks']['completion_rate']}% rate)")
+        click.echo(f"\nTasks: {len(overall['open'])} open, {len(overall['done'])} done, "
+                   f"{len(overall['cancelled'])} cancelled ({result['tasks']['done_rate']}% done)")
+        click.echo(TASK_DATING_NOTE)
         if topics and result.get("top_topics"):
             click.echo("\nTop Topics:")
             for t in result["top_topics"][:10]:
@@ -646,6 +653,7 @@ def analyze_journal_patterns(ctx, timeframe, mood, topics, as_json):
         # Extended: Habit Tracking
         if habit_stats:
             click.echo("\nHabit Tracking:")
+            click.echo(f"  {HABIT_COUNT_NOTE}")
             for habit_name, stats in sorted(habit_stats.items(), key=lambda x: x[1]["total"], reverse=True)[:10]:
                 click.echo(f"  {habit_name}:")
                 click.echo(f"    Completion: {stats['completion_rate']}% ({stats['done']}/{stats['total']})")
