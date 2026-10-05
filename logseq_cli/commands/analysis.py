@@ -178,7 +178,7 @@ def analyze_graph(ctx, days, as_json):
         "tasks": {**per_state, "open_by_marker": open_by_marker},
         "top_referenced": [{"page": p, "refs": c} for p, c in top_referenced],
         "clusters": len(clusters),
-        "largest_cluster": len(clusters[0]) if clusters else 0,
+        "largest_cluster": max((len(c) for c in clusters), default=0),
     }
     if days is not None:
         result["recently_updated"] = [{"page": r["page"], "updated": r["updated"]} for r in recently_updated[:30]]
