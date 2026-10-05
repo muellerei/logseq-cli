@@ -265,9 +265,15 @@ logseq-cli add-journal-content \
   --content "- ## Section\n\t- Child item\n\t\t- Grandchild"
 ```
 
-Each line is a block, with two exceptions that stay with the block they belong
+Each line is a block, with four exceptions that stay with the block they belong
 to, as in Logseq's own files. A `key:: value` line without a bullet goes on the
-block above. So does a code block: from a line starting with ```` ``` ```` or
+block above. So does a `SCHEDULED: <…>` or `DEADLINE: <…>` line, indented or
+not: `TODO x` with `SCHEDULED: <2026-09-25 Fri>` under it is one block, a task
+with a date. So does a `:LOGBOOK:` drawer, every line from `:LOGBOOK:` to
+`:END:`. A `:LOGBOOK:` that no `:END:` closes before the next bullet line is no
+drawer but text, as a code fence nothing closes is, and the lines after it are
+read as usual. So does a
+code block: from a line starting with ```` ``` ```` or
 `~~~` to the next such line without a bullet, every line is code, `- ` lines
 included, and keeps its indentation. Put the fence on a bullet line to make the
 code block a block of its own:
@@ -276,6 +282,12 @@ code block a block of its own:
 logseq-cli add-note-content --page "Notes" \
   --content $'- Example\n  ```js\n  run()\n  ```\n- ```sh\n  make\n  ```'
 # -> "Example" with the code on it, then a block holding only the sh code
+```
+
+```bash
+logseq-cli add-note-content --page "Notes" \
+  --content $'TODO Send the report\nSCHEDULED: <2026-09-25 Fri>'
+# -> one task block with its date, not a task and a block that says SCHEDULED
 ```
 
 Text the CLI writes as ONE block must come back from the page file as that

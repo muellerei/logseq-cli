@@ -13,7 +13,7 @@ is tested without a mock; the layering tests keep it that way (ADR 0003).
 
 import re
 
-from logseq_cli.blocktext import PROPERTY_LINE_RE, code_block_lines, is_fence
+from logseq_cli.blocktext import PROPERTY_LINE_RE, attached_line_mask, code_block_lines, is_fence
 from logseq_cli.notes import print_note
 
 
@@ -178,11 +178,45 @@ def _dedent_code(raw_lines: list, opener: int, close: int, bulleted: bool) -> st
     return "".join("\n" + text for text in out)
 
 
+def _attached_lines(lines: list, raw_lines: list) -> list:
+    """The shared mask of lines that belong to the block above, over the lines
+    the loop reads as text: the lines of a code block, started on a bullet line
+    or not, are the loop's own (it skips them), and code_block_lines does not
+    know a fence on a bullet line, so a drawer must not pair across one, and a
+    "- ```" line inside a code block is no opener. A bullet line also ends
+    the reach of a drawer opener."""
+    skipped, index = set(), 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        bare = stripped[2:] if stripped.startswith("- ") else stripped
+        if is_fence(bare):
+            close = _outline_fence_close(raw_lines, index)
+            if close is not None:
+                skipped.update(range(index, close + 1))
+                index = close + 1
+                continue
+        index += 1
+    # A bullet line ends the reach of a drawer opener: the mask is made per
+    # stretch that starts at a bullet line, so an opener whose closer comes
+    # only behind the next bullet is text, as one that nothing closes is.
+    mask = [False] * len(lines)
+    stretch = []
+    for i in [i for i in range(len(lines)) if i not in skipped] + [None]:
+        if stretch and (i is None or lines[i].strip().startswith("- ")):
+            for j, value in zip(stretch, attached_line_mask([lines[j] for j in stretch])):
+                mask[j] = value
+            stretch = []
+        if i is not None:
+            stretch.append(i)
+    return mask
+
+
 def parse_hierarchical_content(content: str) -> list:
     """Parse indented content into a block tree.
 
-    Each line becomes a block, except a property line or a code block, which
-    go on the block they belong to (see below). Indentation (tab or 2 spaces)
+    Each line becomes a block, except a property line, a SCHEDULED/DEADLINE
+    line, a LOGBOOK drawer or a code block, which go on the block they belong
+    to (see below). Indentation (tab or 2 spaces)
     creates children. Leading '- ' is stripped from each line. Mixed tab/space indentation is
     normalized to tab-only first, so a node's leading whitespace can never
     carry the ``\\t  \\t`` form that would break Logseq's outline.
@@ -194,6 +228,7 @@ def parse_hierarchical_content(content: str) -> list:
     last_node = None
     last_indent = -1
     skip_to = -1
+    attached = _attached_lines(lines, raw_lines)
 
     for index, line in enumerate(lines):
         if index <= skip_to:
@@ -242,6 +277,13 @@ def parse_hierarchical_content(content: str) -> list:
                 last_node["content"] += "\n" + stripped + code
                 continue
             stripped += code
+
+        # A SCHEDULED/DEADLINE line and a closed LOGBOOK drawer belong to the
+        # block above, indented or not: Logseq writes them under the bullet.
+        # The one rule is blocktext's; an opener nothing closes is text.
+        if attached[index] and last_node is not None:
+            last_node["content"] += "\n" + stripped
+            continue
 
         # A property line without a bullet continues the block above it, as in
         # Logseq's files, so pasted outlines carrying collapsed:: true / id::
