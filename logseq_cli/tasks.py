@@ -11,7 +11,7 @@ layering tests keep it that way (ADR 0003).
 """
 import re
 
-from logseq_cli.blocktext import PLANNING_LINE_RE, property_line_mask
+from logseq_cli.blocktext import attached_line_mask, property_line_mask
 from logseq_cli.datalog import edn_string
 
 # The words mldoc reads as :block/marker, in the order a list of tasks is
@@ -128,29 +128,16 @@ def task_text(content: str, marker) -> str:
 
     Those lines are metadata of the task, not the task: left in, a repeating
     task reported on stderr printed its own timestamp line and a ``:LOGBOOK:``
-    fragment instead of what it says. Which word the marker is comes from the
-    DB marker (``marker``), not from a list kept here: the list had drifted
-    and missed CANCELED and WAIT. Without a marker nothing is removed.
+    fragment instead of what it says. Which lines they are is blocktext's rule
+    (attached_line_mask, property_line_mask): an unclosed drawer opener is
+    text, and nothing inside a code block counts. Which word the marker is
+    comes from the DB marker (``marker``), not from a list kept here: the list
+    had drifted and missed CANCELED and WAIT. Without a marker nothing is
+    removed.
     """
-    content_lines = []
-    in_logbook = False
-    raw_lines = content.split("\n")
-    for line, is_property in zip(raw_lines, property_line_mask(raw_lines)):
-        stripped = line.strip()
-        if stripped == ":LOGBOOK:":
-            in_logbook = True
-            continue
-        if stripped == ":END:":
-            in_logbook = False
-            continue
-        if in_logbook:
-            continue
-        if is_property:
-            continue
-        if PLANNING_LINE_RE.match(line):
-            continue
-        content_lines.append(line)
-    clean = "\n".join(content_lines).strip()
+    raw = content.split("\n")
+    drop = [a or p for a, p in zip(attached_line_mask(raw), property_line_mask(raw))]
+    clean = "\n".join(line for line, d in zip(raw, drop) if not d).strip()
     if marker:
         clean = re.sub(rf"^{re.escape(marker)}(?:\s+|$)", "", clean)
     return clean

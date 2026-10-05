@@ -92,6 +92,12 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `get-todos` (`content`, `--match`, `--tag`) now reads an unclosed
+  `:LOGBOOK:` as text and a `:LOGBOOK:` inside a code fence as code, the way
+  mldoc reads them (measured with mldoc 1.5.7); before, everything after such
+  a line was dropped from the task text. A `SCHEDULED:` or `DEADLINE:` line inside a code
+  fence and a stray `:END:` now stay too (#92).
+
 - `doctor` no longer advises removing a config file that does not parse:
   "Fix the config file." Once the file carries a limit, removing it lifts the
   limit.
