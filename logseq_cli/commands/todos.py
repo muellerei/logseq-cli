@@ -4,7 +4,6 @@ import re
 import click
 
 from logseq_cli.blocktext import pointer_target
-from logseq_cli.datalog import edn_string
 from logseq_cli.dates import (
     journal_day_to_date,
     next_occurrence,
@@ -16,7 +15,9 @@ from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.safety import WriteCommand
-from logseq_cli.tasks import marker_before_newline, marker_of, task_text, with_marker
+from logseq_cli.tasks import (ORDER, STATES, marker_before_newline, marker_of, markers_in,
+                              marker_clause,
+                              task_text, with_marker)
 
 
 def follow_ref_chain(api, block: dict, as_json: bool):
@@ -51,7 +52,7 @@ def follow_ref_chain(api, block: dict, as_json: bool):
     return target, followed
 
 
-def _fetch_todo_references(api, markers_str: str) -> dict:
+def _fetch_todo_references(api, markers) -> dict:
     """Map each referenced todo's uuid to the pages its references sit on.
 
     In Logseq a block reference is not a copy, it is the same block appearing in
@@ -69,7 +70,7 @@ def _fetch_todo_references(api, markers_str: str) -> dict:
         '[:find (pull ?src [:block/uuid]) '
         '(pull ?refp [:block/original-name :block/name :block/journal-day]) '
         ':where [?src :block/marker ?m] '
-        f'[(contains? #{{{markers_str}}} ?m)] '
+        + marker_clause("?m", sorted(markers)) + ' '
         '[?ref :block/refs ?src] '
         '[?ref :block/page ?refp]]'
     )
@@ -142,13 +143,22 @@ def _place_references(occurrences, date_start, date_end, limit: int):
         deduped = deduped[:limit]
     return deduped, withheld
 
+def _given(ctx, name):
+    """Whether the option was typed on the command line: its source, not its
+    value, since --state open equals the default and is still given."""
+    return ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+
+
 @cli.command("get-todos", epilog="""\b
 Examples:
   logseq-cli --token TOKEN get-todos --status TODO --status DOING
   logseq-cli --token TOKEN get-todos --page "Projects" --tag urgent
-  logseq-cli --token TOKEN get-todos --from 2026-05-01 --to 2026-05-31 --include-done
+  logseq-cli --token TOKEN get-todos --from 2026-05-01 --to 2026-05-31 --state open --state done
+  logseq-cli --token TOKEN get-todos --due-from today --due-to 2026-05-08
 Notes:
-  --status repeatable. Default: TODO, DOING, NOW, LATER (no DONE).
+""" f"""  --state {'|'.join(STATES)} (repeatable, default open: {', '.join(markers_in(['open']))}) selects by state;
+  --status picks single markers and overrides --state.
+""" """  --due-from today --due-to <today plus 7 days> lists what is due in the next seven days.
   A task carried forward by a block-ref ((uuid)) is found on the day it stands,
   and reported once: "page" and "uuid" stay the original block, "references"
   names the other pages it appears on. Following refs costs one extra query for
@@ -164,8 +174,12 @@ Notes:
   --match is a Python regex over that content as stored: ((refs)) are not
   resolved, and ^/$ anchor the whole text unless the pattern starts with (?m).
 """)
-@click.option("--status", multiple=True, default=("TODO", "DOING", "NOW", "LATER"),
-              help="Task status to include (repeatable, default: TODO DOING NOW LATER)")
+@click.option("--state", multiple=True, default=("open",),
+              type=click.Choice(STATES, case_sensitive=False),
+              help=f"Select by state (repeatable): {', '.join(STATES)}. Default: open.")
+@click.option("--status", multiple=True, type=click.Choice(ORDER, case_sensitive=False),
+              help=f"Select single markers instead of states (repeatable, case does not matter): "
+                   f"{', '.join(ORDER)}. Given together with --state, --status applies.")
 @click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
 @click.option("--match", "match", default=None, help="Filter by what the task says: a regular expression, case-insensitive, searched in the task text (not its properties)")
@@ -173,7 +187,7 @@ Notes:
 @click.option("--to", "to_date", default=None, help="Only TODOs on or before this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Same page rule as --from.")
 @click.option("--due-from", "due_from", default=None, help="Only tasks due on or after this date, by SCHEDULED/DEADLINE rather than by the journal page they sit on. A repeating task is placed by its next occurrence, derived from the date in its text; one whose interval cannot be read is left out and named on stderr")
 @click.option("--due-to", "due_to", default=None, help="Only tasks due on or before this date. Same rule as --due-from")
-@click.option("--include-done", is_flag=True, help="Also include DONE tasks")
+@click.option("--include-done", is_flag=True, hidden=True, help="Also include DONE tasks")
 @click.option("--refs-limit", "refs_limit", type=int, default=10, show_default=True,
               help="Occurrences kept per task in 'references'; 0 lifts the cap. references_withheld counts everything left out, which with --from/--to also includes occurrences outside the range and on pages with no journal-day — so 0 does not make it zero")
 @click.option("--no-follow-refs", "no_follow_refs", is_flag=True,
@@ -181,12 +195,17 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_to, include_done,
-              refs_limit, no_follow_refs, as_json):
+def get_todos(ctx, state, status, page, tag, match, from_date, to_date, due_from, due_to,
+              include_done, refs_limit, no_follow_refs, as_json):
     """List all TODOs/tasks in the graph."""
     api = ctx.obj["api"]
 
-    markers = set(s.upper() for s in status)
+    if _given(ctx, "status"):
+        markers = set(status)
+        if _given(ctx, "state"):
+            print_note("Note: --state was not applied, because --status is given.")
+    else:
+        markers = set(markers_in(state))
     if include_done:
         markers.add("DONE")
 
@@ -197,12 +216,11 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
     except re.error as e:
         fail(f"--match is not a valid regular expression: {e}.", as_json)
 
-    markers_str = " ".join(edn_string(m) for m in sorted(markers))
     query = (
         '[:find (pull ?b [:block/content :block/marker :block/uuid '':block/scheduled :block/deadline :block/repeated?]) '
         '(pull ?p [:block/original-name :block/name :block/journal-day]) '
         ':where [?b :block/marker ?m] '
-        f'[(contains? #{{{markers_str}}} ?m)] '
+        + marker_clause("?m", sorted(markers)) + ' '
         '[?b :block/page ?p]]'
     )
     results = api.datascript_query(query)
@@ -210,7 +228,7 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
     # One extra read for the whole command, not one per task: the relation is
     # queried in bulk and joined below. --no-follow-refs skips it entirely
     # rather than fetching what it will not use.
-    occurrences = {} if no_follow_refs else _fetch_todo_references(api, markers_str)
+    occurrences = {} if no_follow_refs else _fetch_todo_references(api, markers)
 
     todos = []
     for block_data, page_data in results:
@@ -382,8 +400,8 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
         t.pop("_journal_day", None)
 
     # Sort: DOING/NOW first, then by page
-    marker_order = {"DOING": 0, "NOW": 1, "TODO": 2, "LATER": 3, "DONE": 4}
-    todos.sort(key=lambda t: (marker_order.get(t["marker"], 9), t["page"].lower()))
+    rank = {m: i for i, m in enumerate(ORDER)}
+    todos.sort(key=lambda t: (rank.get(t["marker"], len(ORDER)), t["page"].lower()))
 
     if repeating_excluded:
         # Named, not just counted: a bare number would leave the caller unable

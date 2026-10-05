@@ -1,11 +1,14 @@
 """Tests for get-todos: page-name inline per TODO."""
 
 import json as _json
+import re
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from logseq_cli.cli import cli
+from tests.conftest import split_runner
 
 
 def _mock_api_for_todos(todo_rows, ref_rows=None):
@@ -578,3 +581,139 @@ class TestGetTodosReferenceEdges:
         todos = _json.loads(result.output)["todos"]
         assert len(todos) == 1, todos
         assert todos[0]["references"] == ["Mar 19"], todos[0]
+
+
+OPEN = {"NOW", "LATER", "TODO", "DOING", "IN-PROGRESS", "WAIT", "WAITING", "STARTED"}
+ELEVEN = ["DOING", "NOW", "IN-PROGRESS", "STARTED", "TODO", "LATER", "WAIT", "WAITING",
+          "DONE", "CANCELED", "CANCELLED"]
+
+
+def _marker_set(query):
+    """The markers the first set of a query asks for."""
+    return set(re.findall(r'"([A-Z-]+)"', re.search(r"#\{([^}]*)\}", query).group(1)))
+
+
+def _row(marker, page="Page A", uuid=None):
+    return ({"content": f"{marker} task", "marker": marker, "uuid": uuid or f"u-{marker}"},
+            {"original-name": page, "name": page.lower()})
+
+
+def _get(*args, rows=(), runner=None):
+    api = _mock_api_for_todos(list(rows))
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
+        result = (runner or CliRunner()).invoke(cli, ["get-todos", *args])
+    return result, api
+
+
+def _asked(api):
+    queries = [c.args[0] for c in api.datascript_query.call_args_list]
+    return [_marker_set(q) for q in queries]
+
+
+class TestSelectByState:
+    """A task is selected by where it stands (open, done, cancelled), or by
+    single markers; the markers are the ones Logseq's parser reads, and the
+    mock here applies no marker rule of its own: what is asked for is read
+    from the query sent."""
+
+    def test_without_a_filter_every_open_marker_is_asked_for(self):
+        rows = [_row(m) for m in ("WAIT", "WAITING", "IN-PROGRESS", "STARTED")]
+        result, api = _get("--json", rows=rows)
+        assert result.exit_code == 0, result.output
+        assert _asked(api) == [OPEN, OPEN]
+        assert len(_json.loads(result.output)["todos"]) == 4
+
+    def test_state_done_alone_asks_for_done_and_says_nothing(self):
+        result, api = _get("--state", "done", runner=split_runner())
+        assert _asked(api)[0] == {"DONE"}
+        assert "--state" not in result.stderr
+
+    def test_state_cancelled_asks_for_both_spellings(self):
+        _, api = _get("--state", "cancelled")
+        assert _asked(api)[0] == {"CANCELED", "CANCELLED"}
+
+    def test_state_is_repeatable(self):
+        _, api = _get("--state", "open", "--state", "done")
+        assert _asked(api)[0] == OPEN | {"DONE"}
+
+    def test_include_done_adds_done_to_a_state(self):
+        assert _asked(_get("--include-done")[1])[0] == OPEN | {"DONE"}
+        assert _asked(_get("--state", "cancelled", "--include-done")[1])[0] == \
+            {"CANCELED", "CANCELLED", "DONE"}
+
+    def test_include_done_adds_done_to_a_status(self):
+        _, api = _get("--status", "TODO", "--include-done")
+        assert _asked(api)[0] == {"TODO", "DONE"}
+
+    def test_status_wins_over_state_and_a_note_says_so(self):
+        result, api = _get("--status", "DOING", "--state", "done", runner=split_runner())
+        assert _asked(api)[0] == {"DOING"}
+        assert "--state" in result.stderr and "--status" in result.stderr
+
+    def test_an_explicit_state_equal_to_the_default_still_triggers_the_note(self):
+        result, api = _get("--state", "open", "--status", "DOING", runner=split_runner())
+        assert _asked(api)[0] == {"DOING"}
+        assert "--state" in result.stderr and "--status" in result.stderr
+
+    def test_status_alone_needs_no_note(self):
+        result, api = _get("--status", "DOING", runner=split_runner())
+        assert _asked(api)[0] == {"DOING"}
+        assert "--state" not in result.stderr
+
+    def test_status_is_case_insensitive_and_arrives_upper_case(self):
+        _, api = _get("--status", "todo")
+        query = api.datascript_query.call_args_list[0].args[0]
+        assert _marker_set(query) == {"TODO"} and '"todo"' not in query
+        _, api = _get("--status", "todo", "--status", "TODO")
+        assert api.datascript_query.call_args_list[0].args[0].count('"TODO"') == 1
+
+    def test_state_is_case_insensitive(self):
+        assert _asked(_get("--state", "OPEN")[1])[0] == OPEN
+        assert _asked(_get("--state", "Done")[1])[0] == {"DONE"}
+
+    def test_an_unknown_state_is_a_usage_error(self):
+        result, api = _get("--state", "foo")
+        assert result.exit_code != 0
+        assert "--state" in result.output
+        assert api.datascript_query.call_count == 0
+
+    def test_status_state_and_include_done_together(self):
+        result, api = _get("--status", "DOING", "--state", "done", "--include-done",
+                           runner=split_runner())
+        assert _asked(api)[0] == {"DOING", "DONE"}
+        assert "--state" in result.stderr and "--status" in result.stderr
+
+    def test_the_note_under_json_follows_the_result(self):
+        result, _ = _get("--status", "DOING", "--state", "done", "--json", runner=split_runner())
+        assert _json.loads(result.stdout)["count"] == 0
+        assert "--state" in result.stderr
+
+    @pytest.mark.parametrize("marker", ELEVEN)
+    @pytest.mark.parametrize("case", [str.upper, str.lower], ids=["upper", "lower"])
+    def test_every_marker_is_accepted_by_status(self, marker, case):
+        result, api = _get("--status", case(marker))
+        assert result.exit_code == 0, result.output
+        assert _asked(api)[0] == {marker}
+
+    def test_an_unknown_status_is_a_usage_error(self):
+        result, _ = _get("--status", "foo")
+        assert result.exit_code != 0
+        assert "--status" in result.output
+
+    def test_include_done_is_not_in_the_help(self):
+        result, _ = _get("--help")
+        assert "--include-done" not in result.output
+        assert "--state open --state done" in result.output
+
+    def test_sorted_by_marker_order_then_page(self):
+        # Each marker on a page named backwards, so that sorting by page alone fails.
+        pages = [f"Page {chr(ord('Z') - i)}" for i in range(len(ELEVEN))]
+        rows = [_row(m, page) for m, page in zip(ELEVEN, pages)]
+        rows += [_row("TODO", "b", "u-b"), _row("TODO", "A", "u-A")]
+        result, _ = _get("--include-done", "--no-follow-refs", "--json", rows=reversed(rows))
+        todos = _json.loads(result.output)["todos"]
+        assert [t["marker"] for t in todos] == [
+            "DOING", "NOW", "IN-PROGRESS", "STARTED", "TODO", "TODO", "TODO", "LATER",
+            "WAIT", "WAITING", "DONE", "CANCELED", "CANCELLED"]
+        todo_pages = [t["page"] for t in todos if t["marker"] == "TODO"]
+        assert todo_pages == ["A", "b", pages[4]]

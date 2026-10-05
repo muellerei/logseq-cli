@@ -12,6 +12,10 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `get-todos --state open|done|cancelled` (repeatable, default `open`) selects
+  tasks by state, so `--state done` lists the finished ones and `--state
+  cancelled` both spellings of the cancelled marker (#92).
+
 - `[graph] keep_empty_blocks_last = true` (or `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST`)
   makes a write that ends a section go before the empty blocks that end it, so
   they stay last and no empty line is left in front of the entry (#110). Found by
@@ -91,6 +95,22 @@ file carries most of the reasoning behind the tool.
   gets a short section with the recipe.
 
 ### Changed
+
+- `get-todos` without `--status` now lists every open task, not only TODO,
+  DOING, NOW and LATER: tasks marked WAIT, WAITING, IN-PROGRESS or STARTED come
+  with it. Logseq draws the first three as open tasks, and its parser reads
+  STARTED as a marker too, although its own interface does not offer it (#92).
+  The result is the same shape and every task carries its `marker`; only more
+  tasks appear. To keep the old selection, pass `--status TODO --status DOING
+  --status NOW --status LATER`. `--status` takes only the eleven markers Logseq
+  reads and does not mind the case (`--status todo` still works);
+  `get-todos --status foo` used to run and find nothing without a word, and is
+  now a usage error with a non-zero exit. `--status` has no default any more,
+  so `--state` decides unless `--status` is given, and a note says so when both
+  are. `--include-done` still works, adds DONE to either, and is left out of
+  `--help`. Tasks are ordered by marker, with IN-PROGRESS and STARTED among the
+  work in hand and WAIT and WAITING after LATER; they used to sort after DONE,
+  by page.
 
 - `set-todo-status` refuses a block that is no task instead of making it one:
   `no marker` became `DONE no marker`, `todo x` became `DONE x`. Logseq reads
