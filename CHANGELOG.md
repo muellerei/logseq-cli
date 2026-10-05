@@ -206,6 +206,12 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `analyze-graph` reported the size of the first cluster it found as
+  `largest_cluster`, not the size of the largest one. The order of the clusters
+  follows the order of the pages, so a graph whose first linked group was small
+  under-reported it (found while reading the code next to the report;
+  reproduced with two groups of 2 and 3 pages) (#92).
+
 - `get-todos` worked out `next_due` of a repeating task from the first repeater
   in its text, not from the timestamp whose date it reports. A task with
   `SCHEDULED: <… .+1d>` and `DEADLINE: <… +1w>` reports the deadline, but

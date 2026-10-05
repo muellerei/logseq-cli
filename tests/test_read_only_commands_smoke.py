@@ -328,6 +328,31 @@ class TestSmartQueryTaskPatterns:
         assert _markers_in(_sent_query(tmp_path, "done")) == {"DONE"}
 
 
+class TestAnalyzeGraphReportsTheLargestCluster:
+    """largest_cluster was the size of the first cluster found, and the order of
+    the clusters follows the order of the pages."""
+
+    TWO_GROUPS = {"A": ["B"], "C": ["D", "E"]}   # A, the small group, comes first
+
+    def test_the_largest_cluster_is_reported_not_the_first(self, tmp_path):
+        d = run_json(graph_with(self.TWO_GROUPS), tmp_path, "analyze-graph")
+        assert d["clusters"] == 2 and d["largest_cluster"] == 3
+
+    def test_text_line_names_the_largest_cluster(self, tmp_path):
+        out = run_result(graph_with(self.TWO_GROUPS), tmp_path, "analyze-graph").stdout
+        assert "Largest cluster: 3 pages" in out
+
+    def test_no_cluster_reports_zero(self, tmp_path):
+        api = graph_with({"A": [], "B": []})
+        d = run_json(api, tmp_path, "analyze-graph")
+        assert d["clusters"] == 0 and d["largest_cluster"] == 0
+        assert "Largest cluster" not in run_result(api, tmp_path, "analyze-graph").stdout
+
+    def test_equal_sized_clusters_report_that_size(self, tmp_path):
+        d = run_json(graph_with({"A": ["B"], "C": ["D"]}), tmp_path, "analyze-graph")
+        assert d["clusters"] == 2 and d["largest_cluster"] == 2
+
+
 class TestFindKnowledgeGapsIgnoresArtefacts:
     """596 "orphans" in a real graph were almost all side effects.
 
