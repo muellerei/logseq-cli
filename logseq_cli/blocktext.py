@@ -62,6 +62,10 @@ PROPERTY_KEY_STOP = r':,;\\\[\](){}|^"@~`'
 _INDENT = r'[ \t\f\r]*'
 PROPERTY_LINE_RE = re.compile(rf'^{_INDENT}(?!#)([^\s{PROPERTY_KEY_STOP}]+)::(?: |$)')  # group 1: the key
 
+# A SCHEDULED or DEADLINE line of a block: get-todos leaves it out of a task's
+# text, and a resolved Block Ref shows its date with the title.
+PLANNING_LINE_RE = re.compile(r"^\s*(SCHEDULED|DEADLINE):\s*<")
+
 
 def property_line_mask(lines: list) -> list:
     """For each line of a block's content, whether Logseq reads it as a property.
@@ -164,7 +168,7 @@ def without_block_ids(content: str) -> str:
     return "\n".join(line for line, value in id_lines(content) if not value)
 
 
-def _drawer_lines(lines: list) -> set:
+def drawer_lines(lines: list) -> set:
     """Indexes of the lines of every closed ``:LOGBOOK:`` drawer outside code.
 
     An opener that no ``:END:`` closes is text, as for a fence: taking it for
@@ -181,6 +185,22 @@ def _drawer_lines(lines: list) -> set:
             drawer.update(range(start, i + 1))
             start = None
     return drawer
+
+
+def attached_line_mask(lines: list) -> list:
+    """For each line of a block's content, whether it belongs to the block
+    above it rather than to its text: a SCHEDULED/DEADLINE line, or a line of
+    a closed ``:LOGBOOK:`` drawer (opener and ``:END:`` included), in either
+    case outside a code block (code_block_lines).
+
+    An opener that no ``:END:`` closes is text, not a drawer (mldoc 1.5.7
+    reads it as a paragraph). Property lines are not in this mask; they have
+    property_line_mask, and a reader that needs both combines the two.
+    """
+    inside, _ = code_block_lines(lines)
+    drawer = drawer_lines(lines)
+    return [i in drawer or (not inside[i] and bool(PLANNING_LINE_RE.match(line)))
+            for i, line in enumerate(lines)]
 
 
 def normalize_block_text(text: str) -> str:
@@ -209,7 +229,7 @@ def normalize_block_text(text: str) -> str:
     write through that did not land.
     """
     lines = without_block_ids(text).split("\n")
-    drawer = _drawer_lines(lines)
+    drawer = drawer_lines(lines)
     kept = [line.rstrip() for i, line in enumerate(lines) if i not in drawer]
     return "\n".join(kept).strip()
 
@@ -223,8 +243,8 @@ def block_text_matches(sent: str, read: str) -> bool:
     """
     if normalize_block_text(sent) != normalize_block_text(read):
         return False
-    had_drawer = bool(_drawer_lines(sent.split("\n")))
-    return not had_drawer or bool(_drawer_lines(read.split("\n")))
+    had_drawer = bool(drawer_lines(sent.split("\n")))
+    return not had_drawer or bool(drawer_lines(read.split("\n")))
 
 
 # A Block Ref is what Logseq gives the target an Id Line for (#95), measured

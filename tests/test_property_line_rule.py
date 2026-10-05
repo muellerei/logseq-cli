@@ -226,6 +226,48 @@ class TestTheCodeBlockRule:
             "A call doc\n```\nkind:: meeting"
 
 
+SCHED = "SCHEDULED: <2026-09-25 Fri>"
+CLOCK = "CLOCK: [2026-09-29 Tue 10:00:00]--[2026-09-29 Tue 10:05:00] =>  00:05:00"
+ATTACHED = [
+    ("scheduled", ["TODO x", SCHED], [False, True]),
+    ("deadline", ["TODO x", "DEADLINE: <2026-09-25 Fri>"], [False, True]),
+    ("indented", ["TODO x", "  DEADLINE: <2026-09-25 Fri>"], [False, True]),
+    ("no angle bracket", ["TODO x", "SCHEDULED: soon"], [False, False]),
+    ("closed drawer", ["TODO x", ":LOGBOOK:", CLOCK, ":END:", "after"],
+     [False, True, True, True, False]),
+    ("indented drawer", ["TODO x", "  :LOGBOOK:",
+                         '  * State "DONE" from "TODO" [2026-09-29 Tue 10:00]', "  :END:"],
+     [False, True, True, True]),
+    ("opener without closer is text", ["TODO x", ":LOGBOOK:", "no end"], [False, False, False]),
+    ("closer without opener is text", ["TODO x", ":END:", "y"], [False, False, False]),
+    ("drawer in a code block", ["TODO x", "```", ":LOGBOOK:", CLOCK, ":END:", "```"],
+     [False] * 6),
+    ("planning line in a code block", ["TODO x", "```", SCHED, "```"], [False] * 4),
+    ("property line is not attached", ["TODO x", "prio:: high", SCHED], [False, False, True]),
+    ("no lines", [], []),
+]
+
+
+class TestAttachedLineMask:
+    """The one rule for which lines belong to the block above them."""
+
+    @pytest.mark.parametrize("name,lines,expected", ATTACHED, ids=[n for n, _, _ in ATTACHED])
+    def test_mask(self, name, lines, expected):
+        from logseq_cli.blocktext import attached_line_mask
+        assert attached_line_mask(lines) == expected
+
+    def test_it_is_disjoint_from_the_property_mask(self):
+        from logseq_cli.blocktext import attached_line_mask, property_line_mask
+        lines = ["TODO x", "prio:: high", SCHED]
+        assert property_line_mask(lines) == [False, True, False]
+        assert attached_line_mask(lines) == [False, False, True]
+
+    def test_drawer_lines_is_public(self):
+        from logseq_cli.blocktext import drawer_lines
+        assert drawer_lines(["a", ":LOGBOOK:", "b", ":END:"]) == {1, 2, 3}
+        assert drawer_lines([":LOGBOOK:", "x"]) == set()
+
+
 class TestOnlyThePageOwnPropertiesLoseTheirBullet:
     """Logseq writes the page's properties, its first block, without a bullet;
     every other block keeps one, properties-only or not (an empty

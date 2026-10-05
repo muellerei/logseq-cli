@@ -159,7 +159,7 @@ def test_the_package_import_graph_has_no_cycle():
 
 # Written out, not derived: the list is a decision, and adding or removing a
 # module here should be a visible change.
-PURE = ("dates", "outlinetext", "cliinput")
+PURE = ("dates", "outlinetext", "cliinput", "tasks")
 
 
 def _takes_api(path):
@@ -181,8 +181,8 @@ def _takes_api(path):
 
 
 def test_the_pure_modules_need_no_logseq_api():
-    """These three need no LogseqAPI, and their docstrings and ADR 0003 say
-    so. That was not why they were cut out, but it keeps them testable without
+    """The modules in PURE need no LogseqAPI, and their docstrings and ADR 0003
+    say so. That was not why they were cut out, but it keeps them testable without
     a mock. Code that needs the API belongs elsewhere."""
     api_side = {_module_name(p) for p in PACKAGE.glob("*.py") if _takes_api(p)}
     offenders = {}

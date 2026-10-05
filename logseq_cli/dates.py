@@ -88,11 +88,6 @@ def journal_day_to_date(jd: int) -> datetime.date:
     return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
 
 
-# A SCHEDULED or DEADLINE line of a block: get-todos leaves it out of a task's
-# text, and a resolved Block Ref shows its date with the title.
-PLANNING_LINE_RE = re.compile(r"^\s*(SCHEDULED|DEADLINE):\s*<")
-
-
 # Repeating tasks
 # ---------------
 # Logseq stores a repeater's date as written in the text, and :block/scheduled

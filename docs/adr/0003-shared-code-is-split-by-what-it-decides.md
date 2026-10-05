@@ -6,7 +6,8 @@ each one answers: `dates`, `headings`, `outlinetext`, `ids`, `cliinput`,
 `datalog` and `render`. They replaced `helpers.py`, 2165 lines that held date
 parsing, the outline parser, the `id::` contract, Strict Insert, property rules
 and graph lookups side by side. The modules sit flat in `logseq_cli/`, and a
-caller imports a name from the module that defines it.
+caller imports a name from the module that defines it. `tasks` came later, for
+the question what a task is, and is split by the same rule.
 
 ## Considered Options
 
@@ -45,8 +46,9 @@ tests anyway. A trial run with the re-export in place still failed two tests
 module whose question it answers. If none fits, it gets a new module named for
 its own question, not another collection.
 
-The split was not made by test level, but three of the modules turned out to
-need no API: `dates`, `outlinetext` and `cliinput`. Their docstrings say so.
+The split was not made by test level, but four of the modules need no
+API: `dates`, `outlinetext`, `cliinput` and, added later, `tasks`. Their
+docstrings say so.
 `tests/test_package_layering.py` keeps it true: none of them may take `api` or
 import a module that does. The same file also checks that the import graph of the
 package has no cycle, counting imports inside functions. Python accepts some
