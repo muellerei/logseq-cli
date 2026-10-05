@@ -96,6 +96,21 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `analyze-journal-patterns` counts tasks from the database, one count per
+  journal day. `tasks` holds `open`, `done`, `cancelled` and `done_rate`, and
+  the `tasks` of each entry holds `open`, `done` and `cancelled`. A task is a
+  block that carries a marker Logseq reads, so `TODO:`, a lowercase `todo`,
+  `TODO` followed by a line break and Markdown checkboxes (`- [ ]`) are no
+  longer counted as tasks, and CANCELED and CANCELLED no longer count as done.
+  The rate is named `done_rate`, not `completion_rate`, on purpose: its value
+  changes (cancelled tasks do not count, checkbox lines drop out), and a key
+  must not keep its name while it returns a different number, so a reader of the
+  old key now fails loudly instead of reading a wrong figure. `done_rate` is
+  `done / (open + done)` in percent with one decimal. Tasks are dated by the
+  page their block is on. `get-todos --from/--to` also counts the days a block
+  ref carried a task to. Habit tracking still counts the text pattern `- [ ]` /
+  `- [x]` and now says so in `--help` and in the text output (#92).
+
 - `analyze-graph` counts tasks from the database, like `get-todos`:
   `total_todos` is replaced by `tasks` (`open`, `done`, `cancelled`,
   `open_by_marker`) and the text line reads `Tasks: N open (…), M done, K
@@ -203,6 +218,10 @@ file carries most of the reasoning behind the tool.
 - `analyze-graph` no longer reports `total_todos`; `tasks` replaces it (#92).
   A key that changes its value never keeps its old name, so a reader of the
   old key fails loudly.
+
+- `analyze-journal-patterns` no longer reports `tasks.total_complete`,
+  `tasks.total_incomplete` and `tasks.completion_rate`, and no longer reports
+  `tasks_complete` and `tasks_incomplete` per entry (#92).
 
 ### Fixed
 

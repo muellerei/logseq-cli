@@ -1098,3 +1098,9 @@ class TestFormerAnalysisCases:
         # A page text put a block's further lines at column 0, where a pattern took
         # one for a block start; Logseq reads a marker only where the block starts.
         assert tasks.marker_of("a note\nTODO is only a word here") is None
+
+
+    @pytest.mark.parametrize("text", ["Now that we finished it", "Waiting for the call",
+                                      "Later we will see"])
+    def test_a_capitalised_word_opening_a_sentence_is_no_marker(self, text):
+        assert tasks.marker_of(text) is None
