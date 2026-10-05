@@ -80,7 +80,7 @@ Note:
   Existing block properties survive the update: they are read first and written
   back, so changing the text no longer drops them. A property line in
   --content is the new value of its key.
-  Use set-todo-status to change TODO/DOING/DONE markers.
+  Use set-todo-status to change a task's marker.
   --content is ONE block, so a line Logseq would read as a block of its own is
   refused: a "- " or "# " line after the first (indented too), or a code fence
   nothing closes. In a closed code block such lines are fine. Children go in

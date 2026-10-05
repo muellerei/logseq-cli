@@ -132,3 +132,48 @@ def test_a_task_property_block_at_the_end_of_a_chain_is_refused():
     r, _ = _set_status(_block("", None, host), "--follow-refs", "--json", api=api)
     assert json.loads(r.stderr)["reason"] == "not_a_task"
     api.update_block.assert_not_called()
+
+
+FRONTEND = ["TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "CANCELLED", "WAIT", "WAITING",
+            "IN-PROGRESS"]
+
+
+def test_started_is_not_a_choice():
+    r, api = _set_status(_block("TODO x", "TODO"), status="STARTED")
+    assert r.exit_code != 0
+    assert "Invalid value" in r.stderr and "--status" in r.stderr
+    api.update_block.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["WAITING", "waiting"])
+def test_waiting_is_a_choice(value):
+    r, api = _set_status(_block("TODO x", "TODO"), status=value)
+    assert r.exit_code == 0, r.stderr
+    assert api.update_block.call_args.args[1] == "WAITING x"
+
+
+@pytest.mark.parametrize("marker", FRONTEND)
+@pytest.mark.parametrize("case", [str.upper, str.lower], ids=["upper", "lower"])
+def test_every_frontend_marker_is_accepted(marker, case):
+    r, _ = _set_status(_block("TODO x", "TODO"), status=case(marker))
+    assert r.exit_code == 0, r.stderr
+
+
+def _help(*args):
+    r = split_runner().invoke(cli, [*args, "--help"])
+    return " ".join(r.output.split())
+
+
+def test_status_help_says_it_takes_a_marker():
+    text = _help("set-todo-status")
+    assert "takes a marker" in text and "DOING" in text
+    assert "WAITING" in text
+    assert "Status values: DOING, NOW, IN-PROGRESS, TODO, LATER, WAIT, WAITING, DONE, " \
+        "CANCELED, CANCELLED." in text
+    assert "STARTED" not in text
+
+
+def test_update_block_help_names_no_marker_list():
+    text = _help("update-block")
+    assert "to change a task's marker" in text
+    assert "TODO/DOING/DONE" not in text
