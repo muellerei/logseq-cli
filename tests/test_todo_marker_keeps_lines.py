@@ -17,16 +17,19 @@ from tests.conftest import PageGraph, page_graph_api, split_runner
 UUID = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
 
 
-@pytest.mark.parametrize("old,new", [
-    ("TODO\nnotes", "DONE\nnotes"),
-    ("TODO\n```js\nx()\n```", "DONE\n```js\nx()\n```"),
-    ("TODO write it\nnotes:: more", "DONE write it\nnotes:: more"),
-    ("TODO  spaced", "DONE spaced"),
-    ("no marker\nsecond", "DONE no marker\nsecond"),
+# The marker is what Logseq stored for the block, the third value: a bare
+# marker before a line break is no task to Logseq, so it has none.
+@pytest.mark.parametrize("old,new,marker", [
+    ("TODO\nnotes", "DONE\nnotes", None),
+    ("TODO\n```js\nx()\n```", "DONE\n```js\nx()\n```", None),
+    ("TODO write it\nnotes:: more", "DONE write it\nnotes:: more", "TODO"),
+    ("TODO  spaced", "DONE spaced", "TODO"),
+    ("no marker\nsecond", "DONE no marker\nsecond", None),
 ], ids=["bare marker", "code under a bare marker", "property line", "extra space",
         "no marker"])
-def test_only_the_marker_changes(old, new):
-    api = page_graph_api(PageGraph({"Page A": [{"uuid": UUID, "content": old}]}))
+def test_only_the_marker_changes(old, new, marker):
+    block = {"uuid": UUID, "content": old, **({"marker": marker} if marker else {})}
+    api = page_graph_api(PageGraph({"Page A": [block]}))
     api.update_block.side_effect = lambda u, c, properties=None, replacing=None: \
         api.graph.locate(u)[1][api.graph.locate(u)[2]].update(content=c)
     with patch("logseq_cli.group.LogseqAPI", return_value=api):

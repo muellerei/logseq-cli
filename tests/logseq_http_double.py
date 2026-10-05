@@ -41,6 +41,7 @@ import unicodedata
 import requests
 
 import logseq_cli.api
+from logseq_cli import tasks
 from tests.conftest import _logseq_block_id
 
 # The write methods, as LogseqAPI calls them; set_mode takes these names.
@@ -61,7 +62,6 @@ _PROPERTY_LINE = re.compile(r"[ \t]*([^\s:]+):: ?(.*)")
 _PAGE_LINK = re.compile(r"\[\[([^\[\]]+)\]\]")
 _TAG = re.compile(r"(?:^|(?<=\s))#([^\s#\[\],]+)")
 _BLOCK_REF = re.compile(r"\(\(([0-9a-fA-F-]{36})\)\)")
-_MARKERS = ("TODO", "DOING", "DONE", "LATER", "NOW", "WAITING", "CANCELED", "CANCELLED")
 
 # The date format of the measured graph.
 DATE_FORMAT = "yyyy-MM-dd, EEEE"
@@ -206,11 +206,6 @@ def _only_properties(content: str):
     if not all(_PROPERTY_LINE.fullmatch(line) for line in content.split("\n")):
         return None
     return _property_texts(content)
-
-
-def _marker(content: str):
-    first = content.split(" ", 1)[0].split("\n", 1)[0]
-    return first if first in _MARKERS else None
 
 
 def _page_names(content: str, texts: dict) -> list:
@@ -408,7 +403,9 @@ class LogseqHttpDouble:
     def add_page(self, name, blocks=()):
         """A page as a file read in makes it: a first block holding only
         property lines is its property block. ``blocks`` are texts or
-        ``{"content", "children", "uuid"}``. Returns the page."""
+        ``{"content", "children", "uuid", "marker"}``; ``marker`` is what
+        Logseq stored as the block's marker, and a block without the key has
+        none, whatever its text says. Returns the page."""
         page = self._new_page(name, [self._build(b) for b in blocks])
         self._settle(page)
         for node in self._walk(page["blocks"]):
@@ -432,10 +429,25 @@ class LogseqHttpDouble:
         if strip_ids:
             content = "\n".join(ln for ln in content.split("\n")
                                 if not re.match(r"(?i)[\s﻿]*id:: ", ln))
-        return {"id": self._fresh_id(), "uuid": uuid, "content": prefix + content,
+        node = {"id": self._fresh_id(), "uuid": uuid, "content": prefix + content,
                 "pre": False, "typed": {},
                 "children": [self._build(c, keep=keep, strip_ids=strip_ids, prefix=prefix)
                              for c in spec.get("children") or []]}
+        if spec.get("marker"):
+            # What Logseq stored as :block/marker; never guessed from the text.
+            node["marker"] = spec["marker"]
+        return node
+
+    def _reparse_task_fields(self, node):
+        """Logseq reads a block's text again after a write and sets
+        :block/marker from it. This is the one place the double does that,
+        and it uses the rule the production code uses, which a test checks
+        on its own against mldoc."""
+        marker = tasks.marker_of(node["content"])
+        if marker:
+            node["marker"] = marker
+        else:
+            node.pop("marker", None)
 
     def _new_page(self, name, blocks):
         day = _parse_date(name, self.date_format)
@@ -551,9 +563,8 @@ class LogseqHttpDouble:
                "propertiesTextValues": {_camel(k): v for k, v in texts.items()},
                "preBlock?": bool(node["pre"]),
                "refs": self._refs(node)}
-        marker = _marker(node["content"])
-        if marker:
-            out["marker"] = marker
+        if node.get("marker"):
+            out["marker"] = node["marker"]
         out["children"] = ([self._block_out(page, c, node, True) for c in node["children"]]
                            if children else [["uuid", c["uuid"]] for c in node["children"]])
         return out
@@ -786,8 +797,12 @@ class LogseqHttpDouble:
         for page in (p for p in pages if p):
             for node in self._walk(page["blocks"]):
                 if needle is None or needle in node["content"]:
-                    rows.append([{"content": node["content"], "uuid": node["uuid"],
-                                  "page": self._page_pull(page)}])
+                    row = {"content": node["content"], "uuid": node["uuid"],
+                           "page": self._page_pull(page)}
+                    # A pull gives back what it names.
+                    if node.get("marker") and ":block/marker" in query.split(":where")[0]:
+                        row["marker"] = node["marker"]
+                    rows.append([row])
         return rows
 
     # --- writes --------------------------------------------------------------
@@ -922,6 +937,7 @@ class LogseqHttpDouble:
         if page is None:
             return None
         node = self._build({"content": content, "uuid": wanted})
+        self._reparse_task_fields(node)
         page["blocks"].append(node)
         self._index(node)
         self._opened(page, node, options)
@@ -941,6 +957,7 @@ class LogseqHttpDouble:
             return None
         page, siblings, i, parent = found
         node = self._build({"content": content, "uuid": wanted})
+        self._reparse_task_fields(node)
         if not options.get("sibling"):
             kids = siblings[i]["children"]
             kids.insert(0, node) if options.get("before") else kids.append(node)
@@ -986,6 +1003,7 @@ class LogseqHttpDouble:
         target[at:at] = nodes
         made = list(self._walk(nodes))
         for node in made:
+            self._reparse_task_fields(node)
             self._index(node)
         if made and page["id"] in self._visible:
             if self.batch_opens_after_checks:
@@ -994,22 +1012,25 @@ class LogseqHttpDouble:
                 self.editing = made[-1]["uuid"]
         return None
 
-    def _track_time(self, old, new):
-        """With time tracking on, a marker change to DOING/NOW clocks in, one
-        to DONE/LATER/TODO closes the open CLOCK line (upstream
-        util/clock.cljs ``clock-in`` and ``clock-out``, 0.10.15; format
-        assumed: time tracking was off in the measured graph)."""
-        before, after = _marker(old), _marker(new)
-        if not self.time_tracking or before == after:
-            return new
-        lines = new.split("\n")
-        if after in ("DOING", "NOW"):
+    def _track_time(self, old_marker, new_marker, text):
+        """With time tracking on, the pair (old marker, new marker) decides:
+        tasks.CLOCK_IN_STEPS start a clock, tasks.CLOCK_OUT_STEPS close the
+        open CLOCK line, any other pair leaves the text alone (upstream
+        util/clock.cljs, 0.10.15; format assumed: time tracking was off in the
+        measured graph). Two pairs start only without a logbook yet."""
+        if not self.time_tracking:
+            return text
+        pair = (old_marker, new_marker)
+        lines = text.split("\n")
+        if pair in tasks.CLOCK_IN_STEPS:
+            if pair in (("NOW", "NOW"), ("DOING", "DOING")) and ":LOGBOOK:" in lines:
+                return text
             if ":LOGBOOK:" in lines and ":END:" in lines[lines.index(":LOGBOOK:"):]:
                 end = lines.index(":END:", lines.index(":LOGBOOK:"))
                 lines.insert(end, CLOCK_IN)
                 return "\n".join(lines)
             return "\n".join([*lines, ":LOGBOOK:", CLOCK_IN, ":END:"])
-        if after in ("DONE", "LATER", "TODO"):
+        if pair in tasks.CLOCK_OUT_STEPS:
             open_clocks = [i for i, ln in enumerate(lines)
                            if ln.startswith("CLOCK: [") and "--" not in ln]
             if open_clocks:
@@ -1047,7 +1068,10 @@ class LogseqHttpDouble:
         new = "\n".join(lines)
         if new == node["content"]:
             return None
-        node["content"] = self._track_time(node["content"], new)
+        before = node.get("marker")
+        node["content"] = new
+        self._reparse_task_fields(node)
+        node["content"] = self._track_time(before, node.get("marker"), new)
         wanted = _logseq_block_id(node["content"])
         if wanted:
             node["uuid"] = wanted.lower()

@@ -93,7 +93,7 @@ def test_replace_text_appended_logbook_is_success(monkeypatch):
     # drawer: the write landed, and replace-text must not report it failed.
     double = LogseqHttpDouble().install(monkeypatch)
     double.time_tracking = True
-    double.add_page("Probe Page", ["TODO task one", "other"])
+    double.add_page("Probe Page", [{"content": "TODO task one", "marker": "TODO"}, "other"])
     r = split_runner().invoke(cli, ["--token", "t", "replace-text", "--page", "Probe Page",
                                     "--find", "TODO", "--replace", "DOING", "--json"])
     assert double.tree("Probe Page")[0] == ("DOING task one", [])

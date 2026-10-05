@@ -5,6 +5,7 @@ import pathlib
 import pytest
 
 from logseq_cli import tasks
+from tests.test_marker_lists import WORD, sites
 
 # Generated with mldoc 1.5.7, the parser Logseq ships; not edited by hand.
 # (prefix, word, separator, text, marker): marker is what mldoc reads in the
@@ -930,3 +931,122 @@ class TestOneRuleForAttachedLines:
         shared = tmp_path / "shared.py"
         shared.write_text("def f(x):\n    return attached_line_mask(x)\n")
         assert _source_uses_the_shared_rule(shared, "f")
+
+
+# --- the test helpers keep no marker rule of their own ------------------------
+
+TESTS = pathlib.Path(__file__).parent
+DOUBLE = "logseq_http_double.py"
+ALLOWED_CALLER = ("LogseqHttpDouble", "_reparse_task_fields")
+_RE_CALLS = {"compile", "match", "search", "sub", "findall", "fullmatch"}
+
+
+def helper_files():
+    """The helpers of the tests: every file in tests/ that is not a test."""
+    return sorted(p for p in TESTS.glob("*.py")
+                  if not p.name.startswith("test_") and p.name != "__init__.py")
+
+
+def marker_lists(tree):
+    return sites(tree)
+
+
+def marker_regexes(tree):
+    """Calls of re.compile/match/... with a string holding a marker word."""
+    found = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _RE_CALLS and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "re"):
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
+                        and WORD.search(arg.value):
+                    found.append(node.lineno)
+    return found
+
+
+def old_names(tree):
+    """The module name _MARKERS and a function _marker."""
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_marker":
+            found.append(node.lineno)
+        if isinstance(node, ast.Name) and node.id == "_MARKERS":
+            found.append(node.lineno)
+    return found
+
+
+def marker_of_callers(tree):
+    """(class, function) around each call of marker_of, by name or attribute."""
+    found = []
+
+    def visit(node, cls, func):
+        if isinstance(node, ast.ClassDef):
+            cls = node.name
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            func = node.name
+        if isinstance(node, ast.Call):
+            f = node.func
+            if (isinstance(f, ast.Name) and f.id == "marker_of") or \
+                    (isinstance(f, ast.Attribute) and f.attr == "marker_of"):
+                found.append((cls, func))
+        for child in ast.iter_child_nodes(node):
+            visit(child, cls, func)
+
+    visit(tree, None, None)
+    return found
+
+
+def _parse(path):
+    return ast.parse(path.read_text(encoding="utf-8"))
+
+
+class TestTestHelpersKeepNoMarkerRule:
+    """The tests decide what a task is the way Logseq does: a double that
+    derived the marker from the text with a rule of its own would confirm the
+    code under test with the very rule it is to check. The helpers carry no
+    marker list, no marker regex and the old names; only one method of the
+    double reads the text for a marker, as Logseq does after a write."""
+
+    def test_the_helpers_are_found(self):
+        names = {p.name for p in helper_files()}
+        assert {"conftest.py", DOUBLE} <= names
+
+    @pytest.mark.parametrize("path", helper_files(), ids=lambda p: p.name)
+    def test_no_marker_list(self, path):
+        assert not marker_lists(_parse(path)), \
+            f"{path.name} lists marker words; use tasks.ORDER or a fixture's own marker"
+
+    @pytest.mark.parametrize("path", helper_files(), ids=lambda p: p.name)
+    def test_no_marker_regex(self, path):
+        assert not marker_regexes(_parse(path)), f"{path.name} matches a marker with a regex"
+
+    @pytest.mark.parametrize("path", helper_files(), ids=lambda p: p.name)
+    def test_no_old_names(self, path):
+        assert not old_names(_parse(path)), f"{path.name} keeps _MARKERS or _marker"
+
+    def test_marker_of_is_called_in_one_place(self):
+        calls = []
+        for path in helper_files():
+            calls += [(path.name, *c) for c in marker_of_callers(_parse(path))]
+        assert calls == [(DOUBLE, *ALLOWED_CALLER)]
+
+    def test_the_guard_sees_a_list(self):
+        assert marker_lists(ast.parse('X = ("TODO", "DONE")'))
+        assert not marker_lists(ast.parse("from logseq_cli import tasks\nX = tasks.CLOCK_IN_STEPS\n"
+                                          "Y = tasks.CLOCK_OUT_STEPS"))
+
+    def test_the_guard_sees_a_regex(self):
+        assert marker_regexes(ast.parse('import re\nre.compile(r"^(TODO|DONE) ")'))
+        assert not marker_regexes(ast.parse('import re\nre.compile(r"^x")'))
+
+    def test_the_guard_sees_the_old_names(self):
+        assert old_names(ast.parse("def _marker(c):\n    pass"))
+        assert old_names(ast.parse("_MARKERS = 1"))
+
+    def test_the_guard_places_a_marker_of_call(self):
+        elsewhere = ast.parse("class A:\n    def f(self):\n        return tasks.marker_of(x)")
+        assert marker_of_callers(elsewhere) == [("A", "f")]
+        here = ast.parse("class LogseqHttpDouble:\n    def _reparse_task_fields(self):\n"
+                         "        return tasks.marker_of(x)")
+        assert marker_of_callers(here) == [ALLOWED_CALLER]

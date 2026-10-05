@@ -52,7 +52,7 @@ def _json_payload(result):
 # set-todo-status
 # ---------------------------------------------------------------------------
 # As Logseq answers getBlock without children: the page as its id.
-TASK_BLOCK = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report",
+TASK_BLOCK = {"uuid": "00000000-0000-4000-8000-0000000000a1", "content": "TODO Write the report", "marker": "TODO",
               "page": {"id": 1}}
 
 
@@ -98,8 +98,8 @@ class TestSetTodoStatusDryRun:
     def test_ambiguous_content_still_aborts_under_dry_run(self, api):
         # Two TODO blocks match: the command refuses to guess, preview or not.
         api.datascript_query.return_value = [
-            [{"uuid": "a", "content": "TODO Ship the release"}],
-            [{"uuid": "b", "content": "TODO Ship the docs"}],
+            [{"uuid": "a", "content": "TODO Ship the release", "marker": "TODO"}],
+            [{"uuid": "b", "content": "TODO Ship the docs", "marker": "TODO"}],
         ]
         result = split_runner().invoke(cli, ["set-todo-status", "--content", "Ship",
                                              "--page", "Project Alpha",

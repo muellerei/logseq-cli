@@ -120,8 +120,8 @@ class TestSetTodoStatusAmbiguity:
     """Regression: it used to take candidates[0] and rewrite it silently."""
 
     def test_two_matching_todos_abort(self):
-        api = _api([{"uuid": "u-A", "content": "TODO Report (A)"},
-                    {"uuid": "u-B", "content": "TODO Report (B)"}])
+        api = _api([{"uuid": "u-A", "content": "TODO Report (A)", "marker": "TODO"},
+                    {"uuid": "u-B", "content": "TODO Report (B)", "marker": "TODO"}])
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
                 "set-todo-status", "--content", "Report", "--page", "X",
@@ -132,7 +132,7 @@ class TestSetTodoStatusAmbiguity:
 
     def test_todo_marker_still_disambiguates_prose(self):
         """A TODO plus a prose mention is not ambiguous: the marker decides."""
-        api = _api([{"uuid": "u-A", "content": "TODO Write report"},
+        api = _api([{"uuid": "u-A", "content": "TODO Write report", "marker": "TODO"},
                     {"uuid": "u-B", "content": "see Write report above"}])
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = CliRunner().invoke(cli, [
