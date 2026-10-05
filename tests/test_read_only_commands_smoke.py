@@ -9,6 +9,8 @@ analysis concludes.
 
 import json
 import os
+import re
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -146,61 +148,184 @@ class TestSuggestConnectionsRanksEvidenceNotCoincidence:
         assert len(d["suggestions"][0]["shared_topics"]) == 6
 
 
-class TestAnalyzeGraphCountsOpenTasks:
-    """total_todos matched "todo" anywhere, case-insensitively.
+def run_result(api, tmp_path, *args):
+    cfg = tmp_path / "c.toml"
+    cfg.write_text("", encoding="utf-8")
+    with patch.dict(os.environ, {"LOGSEQ_CLI_CONFIG": str(cfg)}, clear=False), \
+         patch("logseq_cli.group.LogseqAPI", return_value=api):
+        return split_runner().invoke(cli, ["--token", "X", *args])
 
-    That counted "Todo-Zettel" in prose and the TODO inside a DONE block's
-    logbook line, so the number was neither the open tasks nor all of them.
+
+ELEVEN = {"NOW", "LATER", "TODO", "DOING", "IN-PROGRESS", "WAIT", "WAITING", "STARTED",
+          "DONE", "CANCELED", "CANCELLED"}
+TREE = [
+    "TODO a", "WAITING b", "STARTED c", "DONE d", "DONE e", "CANCELED f",
+    "note\n* [ ] a", "[ ] b", "TODO: c", "TODO\nnotes", "note\n[ ] c", "* [ ] d", "## [ ] e",
+]
+SIX_ROWS = [["TODO", 1], ["WAITING", 1], ["STARTED", 1], ["DONE", 2], ["CANCELED", 1]]
+
+
+class TestAnalyzeGraphCountsOpenTasks:
+    """Tasks are the blocks Logseq gives a marker, counted by one query.
+
+    The count used to be a pattern over the page text, and it counted what only
+    looked like a task. The mock here answers two things apart: the page tree,
+    with the text of every block, and the answer of the task query, with the
+    blocks that carry a marker. It applies no marker rule of its own, so a
+    number that comes out right can only come from the answer of the query.
     """
 
-    def _api(self, text):
+    def _api(self, trees=None, rows=SIX_ROWS):
+        trees = trees if trees is not None else {"P": TREE}
         api = MagicMock()
-        api.get_all_pages.return_value = [{"originalName": "P"}]
-        api.get_page_blocks_tree.return_value = [
-            {"uuid": "1", "content": text, "children": []}]
+        api.get_all_pages.return_value = [{"originalName": n} for n in trees]
+        api.get_page_blocks_tree.side_effect = lambda n: (
+            None if trees[n] is None else
+            [{"uuid": str(i), "content": c, "children": []} for i, c in enumerate(trees[n])])
         api.get_page.return_value = {"name": "P"}
+        api.datascript_query.return_value = rows
         return api
 
-    def test_markers_count(self, tmp_path):
-        d = run_json(self._api("- TODO one\n- LATER two\n- [ ] three"),
-                     tmp_path, "analyze-graph")
-        assert d["total_todos"] == 3
+    def test_counts_come_from_the_query_answer_not_from_text(self, tmp_path):
+        d = run_json(self._api(), tmp_path, "analyze-graph")
+        assert d["tasks"] == {"open": 3, "done": 2, "cancelled": 1,
+                              "open_by_marker": {"STARTED": 1, "TODO": 1, "WAITING": 1}}
+        assert list(d["tasks"]["open_by_marker"]) == ["STARTED", "TODO", "WAITING"]
+        assert "total_todos" not in d and "checkboxes" not in d
 
-    def test_prose_does_not_count(self, tmp_path):
-        d = run_json(self._api("- the Todo-Zettel is long\n- => todo later maybe"),
-                     tmp_path, "analyze-graph")
-        assert d["total_todos"] == 0
+    def test_the_query_names_exactly_the_eleven_markers(self, tmp_path):
+        api = self._api({"P": TREE, "Q": ["plain"]})
+        run_json(api, tmp_path, "analyze-graph")
+        assert len(api.datascript_query.call_args_list) == 1
+        query = api.datascript_query.call_args_list[0].args[0]
+        assert ":block/marker" in query and "(count ?b)" in query
+        asked = set(re.findall(r'"([A-Z-]+)"', re.search(r"#\{([^}]*)\}", query).group(1)))
+        assert asked == ELEVEN
 
-    def test_a_logbook_line_does_not_count(self, tmp_path):
-        """`State "DONE" from "TODO"` is history, not an open task."""
-        d = run_json(self._api('- DONE shipped\n  :LOGBOOK:\n  * State "DONE" from "TODO"\n  :END:'),
-                     tmp_path, "analyze-graph")
-        assert d["total_todos"] == 0
+    def test_the_note_counts_blocks_that_start_with_a_box(self, tmp_path):
+        result = run_result(self._api(), tmp_path, "analyze-graph", "--json")
+        assert ('Note: 1 blocks start with "[ ]", which Logseq shows as text, '
+                'not as a task or checkbox.') in result.stderr
+        none = self._api({"P": ["TODO a", "plain\n[ ] b", "* [ ] c"]})
+        assert "Note:" not in run_result(none, tmp_path, "analyze-graph", "--json").stderr
+        many = self._api({"P": ["[x] a", "[X] b", "  [ ] c", "[ ]d"]})
+        assert 'Note: 4 blocks start with "[ ]"' in \
+            run_result(many, tmp_path, "analyze-graph", "--json").stderr
 
-    def test_an_empty_bracket_pair_in_prose_does_not_count(self, tmp_path):
-        """A checkbox is `- [ ]` at the start of a block, not `[ ]` anywhere.
+    def test_text_line_shows_the_open_markers_in_order(self, tmp_path):
+        out = run_result(self._api(), tmp_path, "analyze-graph").stdout
+        assert "Tasks: 3 open (1 STARTED, 1 TODO, 1 WAITING), 2 done, 1 cancelled" in out
+        assert "Open TODOs:" not in out
 
-        The marker half of this pattern was anchored to the line but the
-        checkbox half was not, so an empty pair inside running text counted:
-        a code snippet (`tags = [ ]`), an empty markdown link, a table cell.
-        A graph with no tasks at all reported three of them.
+    def test_no_open_tasks_drops_the_parenthesis(self, tmp_path):
+        api = self._api(rows=[["DONE", 2]])
+        d = run_json(api, tmp_path, "analyze-graph")
+        assert d["tasks"]["open_by_marker"] == {}
+        out = run_result(api, tmp_path, "analyze-graph").stdout
+        assert "Tasks: 0 open, 2 done, 0 cancelled" in out
 
-        analyze-journal-patterns requires the bullet and was already right;
-        the two counters measure the same thing and must agree.
-        """
-        text = ("- tags = [ ] means an empty list\n"
-                "- see [ ](https://example.com)\n"
-                "- a sentence about [ ] brackets")
-        d = run_json(self._api(text), tmp_path, "analyze-graph")
-        assert d["total_todos"] == 0
+    def test_a_block_without_marker_does_not_count_whatever_the_text_says(self, tmp_path):
+        d = run_json(self._api(rows=[]), tmp_path, "analyze-graph")
+        assert d["tasks"] == {"open": 0, "done": 0, "cancelled": 0, "open_by_marker": {}}
 
-    def test_a_marker_on_a_further_line_does_not_count(self, tmp_path):
-        """Logseq reads a marker only where a block starts. The page text
-        used to put a block's further lines at column 0, where the pattern
-        took one for a block start (#75)."""
-        d = run_json(self._api("a note\nTODO is only a word here"),
-                     tmp_path, "analyze-graph")
-        assert d["total_todos"] == 0
+    def test_open_tasks_equal_the_count_of_get_todos(self, tmp_path):
+        """Both commands make their number from the same three blocks. A mock
+        cannot show that the database answers both queries alike; the live runs
+        do."""
+        def answer(query):
+            if "(pull ?b" in query:
+                return [({"content": f"TODO {c}", "marker": "TODO", "uuid": f"u{c}"},
+                         {"original-name": "P", "name": "p"}) for c in "abc"]
+            return [["TODO", 3]]
+        api = self._api()
+        api.datascript_query.side_effect = answer
+        assert run_json(api, tmp_path, "analyze-graph")["tasks"]["open"] == 3
+        assert run_json(api, tmp_path, "get-todos", "--no-follow-refs")["count"] == 3
+
+    def test_days_help_says_what_it_limits(self):
+        out = split_runner().invoke(cli, ["analyze-graph", "--help"]).output
+        assert "Recently updated" in " ".join(out.split())
+
+    def test_open_markers_follow_tasks_order_not_the_alphabet(self, tmp_path):
+        api = self._api({"P": ["NOW a", "IN-PROGRESS b", "DOING c"]},
+                        rows=[["NOW", 1], ["IN-PROGRESS", 1], ["DOING", 1]])
+        d = run_json(api, tmp_path, "analyze-graph")
+        assert list(d["tasks"]["open_by_marker"]) == ["DOING", "NOW", "IN-PROGRESS"]
+        out = run_result(api, tmp_path, "analyze-graph").stdout
+        assert "Tasks: 3 open (1 DOING, 1 NOW, 1 IN-PROGRESS), 0 done, 0 cancelled" in out
+
+    def test_a_page_without_a_tree_is_skipped(self, tmp_path):
+        result = run_result(self._api({"P": None}, rows=[["TODO", 1]]), tmp_path,
+                            "analyze-graph", "--json")
+        assert result.exit_code == 0, result.stderr
+        assert json.loads(result.stdout)["tasks"] == {
+            "open": 1, "done": 0, "cancelled": 0, "open_by_marker": {"TODO": 1}}
+        assert "Note:" not in result.stderr
+
+    def test_a_box_block_under_a_parent_is_found(self, tmp_path):
+        api = self._api(rows=[])
+        api.get_page_blocks_tree.side_effect = lambda n: [
+            {"uuid": "1", "content": "parent", "children": [
+                {"uuid": "2", "content": "[ ] nested", "children": []}]}]
+        result = run_result(api, tmp_path, "analyze-graph", "--json")
+        assert 'Note: 1 blocks start with "[ ]"' in result.stderr
+
+    def test_days_limits_only_the_recently_updated_list(self, tmp_path):
+        now = int(time.time() * 1000)
+        api = self._api()
+        api.get_all_pages.return_value = [
+            {"originalName": "P", "updatedAt": now},
+            {"originalName": "Q", "updatedAt": now - 40 * 86400 * 1000}]
+        api.get_page_blocks_tree.side_effect = lambda n: []
+        d = run_json(api, tmp_path, "analyze-graph", "--days", "30")
+        assert [r["page"] for r in d["recently_updated"]] == ["P"]
+        assert d["total_pages"] == 2 and d["tasks"]["open"] == 3
+
+    def test_a_marker_outside_state_is_skipped(self, tmp_path):
+        d = run_json(self._api(rows=[["TODO", 1], ["FOO", 7]]), tmp_path, "analyze-graph")
+        assert d["tasks"]["open"] == 1 and d["tasks"]["open_by_marker"] == {"TODO": 1}
+        assert "FOO" not in json.dumps(d)
+
+    def test_a_query_answer_of_none_counts_zero(self, tmp_path):
+        api = self._api(rows=None)
+        assert run_json(api, tmp_path, "analyze-graph")["tasks"] == {
+            "open": 0, "done": 0, "cancelled": 0, "open_by_marker": {}}
+        assert "Tasks: 0 open, 0 done, 0 cancelled" in run_result(api, tmp_path,
+                                                                  "analyze-graph").stdout
+
+
+def _sent_query(tmp_path, request):
+    api = empty_api()
+    run_result(api, tmp_path, "smart-query", "--request", request, "--json")
+    return api.datascript_query.call_args.args[0]
+
+
+def _markers_in(query):
+    return set(re.findall(r'"([A-Z-]+)"', query))
+
+
+OPEN_MARKERS = {"NOW", "LATER", "TODO", "DOING", "IN-PROGRESS", "WAIT", "WAITING", "STARTED"}
+
+
+class TestSmartQueryTaskPatterns:
+    """The patterns for open and done tasks ask for what Logseq reads as such,
+    not for a list of their own."""
+
+    def test_tasks_pattern_asks_for_every_open_marker(self, tmp_path):
+        query = _sent_query(tmp_path, "tasks")
+        assert ":block/marker" in query
+        assert _markers_in(query) == OPEN_MARKERS and "WAITING" in query
+
+    # The keywords of the pattern are product data, German ones included: with
+    # an English stand-in the test would not show that every word of it works.
+    @pytest.mark.parametrize("word", ["todo", "task", "tasks", "incomplete", "pending",
+                                      "aufgaben", "offene", "offen"])
+    def test_every_keyword_of_the_pattern_reaches_it(self, tmp_path, word):
+        assert _sent_query(tmp_path, word) == _sent_query(tmp_path, "tasks")
+        assert _markers_in(_sent_query(tmp_path, word)) == OPEN_MARKERS
+
+    def test_done_pattern_asks_for_exactly_done(self, tmp_path):
+        assert _markers_in(_sent_query(tmp_path, "done")) == {"DONE"}
 
 
 class TestFindKnowledgeGapsIgnoresArtefacts:

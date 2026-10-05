@@ -36,8 +36,6 @@ ENUMERATION = re.compile(
 
 # (file, symbol) -> places still holding a marker list of their own.
 EXCEPTIONS = {
-    ("commands/query.py", "smart_query"): 1,
-    ("commands/analysis.py", "analyze_graph"): 1,
     ("commands/analysis.py", "analyze_journal_patterns"): 2,
 }
 

@@ -17,6 +17,7 @@ from logseq_cli.safety import (
 )
 from logseq_cli.group import cli, resolve_version
 from logseq_cli.headings import normalize_heading
+from logseq_cli.outlinetext import preorder_blocks
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, handle_connection_error, output
 
@@ -139,7 +140,7 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
         if not name:
             continue
         seen = set()
-        for block in _walk_blocks(api.get_page_blocks_tree(name) or []):
+        for block in preorder_blocks(api.get_page_blocks_tree(name) or []):
             text = (block.get("content") or "").strip()
             if text.startswith("#"):
                 seen.add(normalize_heading(text))
@@ -197,12 +198,6 @@ def init_config(ctx, out_path, days, force, dry_run, as_json):
     if not as_json:
         click.echo(f"Wrote {target}")
         click.echo("Review it: these are counts from your graph, not certainties.")
-
-def _walk_blocks(blocks):
-    """Yield every block in a tree, depth first."""
-    for block in blocks:
-        yield block
-        yield from _walk_blocks(block.get("children") or [])
 
 def _as_list(value):
     if value is None:

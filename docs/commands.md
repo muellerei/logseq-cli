@@ -94,12 +94,14 @@ graph.
 | `search-pages --query TEXT` | Case-insensitive name search |
 | `get-backlinks --page NAME [--with-context] [--limit N]` | Pages linking to NAME. `--with-context` also shows the blocks that do the linking — they arrive with the same API call, so it costs no extra read; `--limit` (default 3) caps the blocks per page and reports the remainder; `0` keeps all |
 | `get-journal-summary --range RANGE [--no-content]` | Journal summary (today, this week, last 30 days). `--no-content` drops the per-day bodies |
-| `analyze-graph [--days N]` | Graph structure analysis. `--days N` adds the pages modified in the last N days |
+| `analyze-graph [--days N]` | Graph structure analysis. `--days N` limits only the "Recently updated" list to the pages modified in the last N days; every other figure covers the whole graph. See "analyze-graph output" below the table |
 | `find-knowledge-gaps [--min-refs N] [--include-orphans/--no-include-orphans]` | Missing/underdeveloped/orphaned pages. `--min-refs` (default 2) is how many incoming references a short page needs before it counts as underdeveloped rather than unused |
 | `analyze-journal-patterns [--timeframe RANGE] [--mood/--no-mood] [--topics/--no-topics]` | Journal entry patterns over `--timeframe` (default "last 30 days"). `--no-mood` and `--no-topics` drop those sections |
 | `smart-query --request TEXT [--advanced] [--include-query]` | Datalog queries (natural language, or `--advanced` to pass raw Datalog through). `--include-query` prints the generated query alongside the result |
 | `suggest-connections [--min-confidence N] [--min-shared N] [--max-suggestions N] [--focus PAGE]` | Topic-based connection suggestions. `--min-shared` (default 3) is the real filter — it sets how many topics two pages must share before the pair counts at all; `--min-confidence` (default 0.3) then scores it. `--max-suggestions` (default 10) caps the list and the remainder is reported as withheld; `total_found` counts what the graph held, not what survived the cap. `--focus` restricts to one page |
 | `get-page-stats --page NAME` | Page statistics (blocks, words, in/outbound links) |
+
+**analyze-graph output.** `--json` carries `tasks`: `{"open": N, "done": N, "cancelled": N, "open_by_marker": {"<MARKER>": N, ...}}`. A task is a block with a marker Logseq reads; `TODO:`, a lower-case `todo`, `[ ]` at the start of a block and `TODO` followed directly by a line break are not. `open` is the same number as the `count` of `get-todos --no-follow-refs`. The text output has the line `Tasks: 12 open (2 DOING, 10 TODO), 40 done, 1 cancelled`, open markers in the order of the list, and a note on stderr when blocks start with `[ ]`: `Note: N blocks start with "[ ]", which Logseq shows as text, not as a task or checkbox.`
 
 ### Write (5)
 
@@ -324,6 +326,8 @@ logseq-cli smart-query --request "offene aufgaben"   # German → finds open tas
 logseq-cli smart-query --request "open tasks"         # English → same result
 ```
 
+The pattern for open tasks finds every open marker Logseq reads (the markers and their three states are in `CONTEXT.md`, under Task State); the pattern for done tasks finds `DONE` only.
+
 Date formatting is locale-independent — weekday and month names are always English (as Logseq expects), regardless of system locale.
 
 ## Scripting Examples
@@ -333,7 +337,7 @@ See `examples/` directory:
 - `backup-graph.sh` - Export all pages as a JSON backup
 - `carry-todos-to-today.sh` - Carry open tasks older than N days into today's journal as `((block-refs))`; dry run unless `--write` (suitable for a morning cronjob)
 - `carried-over-todos.sh` - Tasks standing in the last N days, longest-carried first (uses `references` to show how long each has been taken along)
-- `daily-todos.sh` - Daily TODO overview (suitable for cronjob)
+- `daily-todos.sh` - Daily open-task overview (suitable for cronjob)
 - `export-all-pages.sh` - Export all pages as individual JSON files
 - `export-page.sh` - Export a page as Logseq-compatible markdown
 - `morning-log.sh` - Add a timestamped log entry to today's journal

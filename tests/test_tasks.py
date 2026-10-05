@@ -1079,3 +1079,22 @@ class TestTaskTextKeepsTheHeadingPrefix:
     ])
     def test_task_text(self, content, marker, expected):
         assert tasks.task_text(content, marker) == expected
+
+
+class TestFormerAnalysisCases:
+    """What the page-text counter of analyze-graph once got wrong, as the rule
+    it broke."""
+
+    @pytest.mark.parametrize("text", ["the Todo-Zettel is long", "=> todo later maybe"])
+    def test_prose_is_no_marker(self, text):
+        # A lower-case word, a hyphenated one: Logseq reads no marker.
+        assert tasks.marker_of(text) is None
+
+    def test_a_logbook_history_line_does_not_count(self):
+        # The TODO in a logbook line of a DONE block is history, not an open task.
+        assert tasks.marker_of('DONE shipped\n:LOGBOOK:\n* State "DONE" from "TODO"\n:END:') == "DONE"
+
+    def test_a_marker_on_a_further_line_does_not_count(self):
+        # A page text put a block's further lines at column 0, where a pattern took
+        # one for a block start; Logseq reads a marker only where the block starts.
+        assert tasks.marker_of("a note\nTODO is only a word here") is None

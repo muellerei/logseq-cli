@@ -6,7 +6,9 @@ from logseq_cli.group import cli
 from collections import Counter, defaultdict
 from logseq_cli.config import get, load_config
 from logseq_cli.dates import format_journal_date, journal_day_to_date, parse_date_range
-from logseq_cli.lookup import get_page_content
+from logseq_cli import tasks
+from logseq_cli.lookup import get_page_content, page_text
+from logseq_cli.outlinetext import preorder_blocks
 from logseq_cli.notes import print_note
 from logseq_cli.render import extract_topics
 from logseq_cli.output import fail, handle_connection_error, output
@@ -69,7 +71,9 @@ Example:
 Note:
   Requires Logseq running — no filesystem fallback possible.
 """)
-@click.option("--days", default=None, type=int, help="Limit to pages modified in last N days (1 or greater)")
+@click.option("--days", default=None, type=int,
+              help="Limit the Recently updated list to pages modified in the last N days (1 or greater); "
+                   "every other figure covers the whole graph")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
@@ -86,18 +90,6 @@ def analyze_graph(ctx, days, as_json):
 
     pages = api.get_all_pages()
 
-    # Open tasks only, and only where Logseq puts a marker: at the start of a
-    # block. Matching "todo" anywhere, case-insensitively, counted "Todo-Zettel"
-    # in prose and the "TODO" inside a DONE block's logbook line, so the number
-    # was neither the open tasks nor all of them.
-    todo_pattern = re.compile(
-        # The bullet may repeat: get_page_content prefixes each block with
-        # "- ", so a block that already starts with one arrives as "- - TODO".
-        # The checkbox needs its bullet for the same reason the markers need
-        # the line anchor: a bare "[ ]" occurs in code snippets, empty
-        # markdown links and table cells, none of which are tasks.
-        r"(?i:- \[ \])|^(?:\s*-\s*)*(?:TODO|DOING|NOW|LATER|WAITING|IN-PROGRESS)\b",
-        re.MULTILINE)
     link_pattern = re.compile(r"\[\[(.*?)\]\]")
 
     # Days filter: cutoff timestamp in milliseconds
@@ -108,7 +100,7 @@ def analyze_graph(ctx, days, as_json):
 
     page_names = set()
     journal_count = 0
-    total_todos = 0
+    box_blocks = 0
     reference_count = Counter()
     adjacency = defaultdict(set)
     recently_updated = []
@@ -128,11 +120,12 @@ def analyze_graph(ctx, days, as_json):
             updated_str = datetime.datetime.fromtimestamp(updated_at / 1000).strftime('%Y-%m-%d %H:%M')
             recently_updated.append({"page": name, "updated": updated_str, "updated_at": updated_at})
 
-        content = get_page_content(api, name)
-
-        # count TODOs
-        todos = todo_pattern.findall(content)
-        total_todos += len(todos)
+        # One read of the tree: its text for the links, its blocks for the
+        # ones that start with a checkbox Logseq shows as text.
+        blocks = api.get_page_blocks_tree(name) or []
+        content = page_text(blocks)
+        box_blocks += sum(1 for b in preorder_blocks(blocks)
+                          if tasks.starts_with_box(b.get("content") or ""))
 
         # extract links
         links = link_pattern.findall(content)
@@ -167,11 +160,22 @@ def analyze_graph(ctx, days, as_json):
 
     top_referenced = reference_count.most_common(15)
 
+    # A task is a block Logseq gave a marker: one query for all of them, not
+    # one per page, and the page text takes no part in the count.
+    rows = api.datascript_query(
+        "[:find ?m (count ?b) :where [?b :block/marker ?m] "
+        + tasks.marker_clause("?m", tasks.ORDER) + "]") or []
+    by_marker = {m: n for m, n in rows if m in tasks.STATE}
+    per_state = {state: sum(n for m, n in by_marker.items() if tasks.STATE[m] == state)
+                 for state in tasks.STATES}
+    open_by_marker = {m: by_marker[m] for m in tasks.ORDER
+                      if tasks.STATE[m] == "open" and by_marker.get(m)}
+
     result = {
         "total_pages": len(pages),
         "journal_pages": journal_count,
         "non_journal_pages": len(pages) - journal_count,
-        "total_todos": total_todos,
+        "tasks": {**per_state, "open_by_marker": open_by_marker},
         "top_referenced": [{"page": p, "refs": c} for p, c in top_referenced],
         "clusters": len(clusters),
         "largest_cluster": len(clusters[0]) if clusters else 0,
@@ -186,7 +190,10 @@ def analyze_graph(ctx, days, as_json):
         click.echo(f"Total pages:     {result['total_pages']}")
         click.echo(f"Journal pages:   {result['journal_pages']}")
         click.echo(f"Content pages:   {result['non_journal_pages']}")
-        click.echo(f"Open TODOs:      {result['total_todos']}")
+        breakdown = ", ".join(f"{n} {m}" for m, n in open_by_marker.items())
+        click.echo(f"Tasks: {per_state['open']} open"
+                   + (f" ({breakdown})" if breakdown else "")
+                   + f", {per_state['done']} done, {per_state['cancelled']} cancelled")
         click.echo(f"Clusters:        {result['clusters']}")
         if clusters:
             click.echo(f"Largest cluster: {result['largest_cluster']} pages")
@@ -197,6 +204,9 @@ def analyze_graph(ctx, days, as_json):
         click.echo("\nTop Referenced Pages:")
         for item in result["top_referenced"]:
             click.echo(f"  {item['page']}: {item['refs']} refs")
+    if box_blocks:
+        print_note(f'Note: {box_blocks} blocks start with "[ ]", which Logseq shows as text, '
+                   'not as a task or checkbox.')
 
 def _is_incidental_page(name: str) -> bool:
     """True for pages that exist as a side effect, not as knowledge.
