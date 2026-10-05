@@ -185,6 +185,17 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-todos` worked out `next_due` of a repeating task from the first repeater
+  in its text, not from the timestamp whose date it reports. A task with
+  `SCHEDULED: <… .+1d>` and `DEADLINE: <… +1w>` reports the deadline, but
+  `next_due` followed the daily repeater, so `--due-from` and `--due-to` could
+  place it up to six days off. Found by working the date out by hand with
+  Logseq's formula. `next_due` now comes from the timestamp whose date is
+  reported, with that timestamp's own repeater; a timestamp without a repeater
+  does not move, so `next_due` is its date (#92). Timestamps are read only from
+  the SCHEDULED and DEADLINE lines of a block, as Logseq reads them; a
+  `SCHEDULED:` in running text or in a code fence is not one.
+
 - A task with a date can be written in one call. `add-note-content --content
   $'TODO x\nSCHEDULED: <2026-09-25 Fri>'` made two blocks: the `SCHEDULED:` line
   became a block of its own and had no effect, and the dry run said "2
