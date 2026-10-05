@@ -1050,3 +1050,30 @@ class TestTestHelpersKeepNoMarkerRule:
         here = ast.parse("class LogseqHttpDouble:\n    def _reparse_task_fields(self):\n"
                          "        return tasks.marker_of(x)")
         assert marker_of_callers(here) == [ALLOWED_CALLER]
+
+
+class TestTaskTextKeepsTheHeadingPrefix:
+    """The DB marker decides; mldoc 1.5.7 also reads the marker after a tab
+    behind the hashes, which marker_of refuses on purpose because it is used
+    for writing. A prefix is hashes and blanks (space or tab), nothing else."""
+
+    @pytest.mark.parametrize("content,marker,expected", [
+        ("## TODO x", "TODO", "## x"),
+        ("# TODO x", "TODO", "# x"),
+        ("TODO x", "TODO", "x"),
+        ("TODO", "TODO", ""),
+        ("## DONE x", "DONE", "## x"),
+        ("## IN-PROGRESS x", "IN-PROGRESS", "## x"),
+        ("## TODO", "TODO", "##"),
+        ("## TODO x\nkey:: v\nSCHEDULED: <2026-09-25 Fri>", "TODO", "## x"),
+        ("##\tTODO x", "TODO", "##\tx"),
+        ("# \tTODO x", "TODO", "# \tx"),
+        ("#\tTODO x", "TODO", "#\tx"),
+        # mldoc reads no marker in these, so a marker given with them
+        # contradicts the text; the prefix rule must not take them as blanks.
+        ("##TODO x", "TODO", "##TODO x"),
+        ("##\nTODO x", "TODO", "##\nTODO x"),
+        ("##\u00a0TODO x", "TODO", "##\u00a0TODO x"),
+    ])
+    def test_task_text(self, content, marker, expected):
+        assert tasks.task_text(content, marker) == expected

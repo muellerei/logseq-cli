@@ -36,7 +36,6 @@ ENUMERATION = re.compile(
 
 # (file, symbol) -> places still holding a marker list of their own.
 EXCEPTIONS = {
-    ("commands/todos.py", "_TODO_MARKERS"): 1,
     ("commands/todos.py", "get_todos"): 4,
     ("commands/todos.py", "set_todo_status"): 2,
     ("commands/edit.py", "update_block"): 1,

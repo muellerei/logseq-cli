@@ -92,6 +92,21 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `set-todo-status` refuses a block that is no task instead of making it one:
+  `no marker` became `DONE no marker`, `todo x` became `DONE x`. Logseq reads
+  no marker in such a block (`todo x`, `TODO:`, `TODO` followed directly by a
+  line break); the command now stops with `reason: "not_a_task"` and writes
+  nothing, also under `--dry-run`. A block that only points to another one is
+  refused too, naming `--follow-refs`. With `--content`, blocks that match but
+  none of which is a task are refused (`no_task_matches`) instead of one being
+  rewritten; with `--follow-refs` this holds for the block at the end of the
+  chain, and a match that only points to a task is followed as before. Under
+  `--json`, a block not found by `--content`, an ambiguous match and a missing
+  selector now answer with a JSON object with a `reason` (`block_not_found`,
+  `ambiguous`, `missing_selector`) instead of plain text. Without `--json`,
+  these three messages now start with `Error: `, like every other refusal; the
+  wording after it is unchanged (#92).
+
 - `get-todos` (`content`, `--match`, `--tag`) now reads an unclosed
   `:LOGBOOK:` as text and a `:LOGBOOK:` inside a code fence as code, the way
   mldoc reads them (measured with mldoc 1.5.7); before, everything after such
@@ -142,6 +157,15 @@ file carries most of the reasoning behind the tool.
   [#98](https://github.com/muellerei/logseq-cli/issues/98).
 
 ### Fixed
+
+- `set-todo-status` no longer breaks a heading task: `## TODO ship it` became
+  `DONE ## TODO ship it`, a block Logseq reads no task in, because the command
+  took the first word of the text for the marker. It now swaps the marker where
+  Logseq reads it, behind the heading prefix (`## DONE ship it`), and
+  `get-todos` reports `content` without the marker (`## ship it`). It also keeps
+  the space between the marker and a line break: `TODO \nnotes` became
+  `DONE\nnotes`, which Logseq no longer reads as a task (measured with Logseq's
+  parser, mldoc 1.5.7) (#92).
 
 - A uuid that Logseq holds only as the placeholder of a dead ref (content
   `id:: <uuid>`, no page, kept once Logseq reads the file with the ref

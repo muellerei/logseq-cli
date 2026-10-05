@@ -441,16 +441,11 @@ _WAYS = {
     "copy-block": ("  - relocating it?            -> move-block keeps the block as it is\n"
                    "  - copying it?               -> split the source block first"),
     "replace-text": "  - choose a --replace that starts no line with - or #",
-    "set-todo-status": ("  - the marker goes in front of the first line, and this block starts\n"
-                        "    with a code fence: give it a first line of text (update-block)"),
 }
 _CLOSE_FENCE = ("  - close it                  -> end the code with a line that starts "
                 "with ``` (or ~~~); in outline text a line without a bullet")
 _FENCE_WAYS = {
     "add-journal-entry": _CLOSE_FENCE + "\n  - keep the code in one block -> leave out --multi-block",
-    # The marker in front of an opening fence makes it text, and the closing
-    # fence is left open: nothing the caller wrote.
-    "set-todo-status": _WAYS["set-todo-status"],
 }
 
 

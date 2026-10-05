@@ -67,12 +67,16 @@ class TestWhatStays:
         assert result.exit_code == 0, result.stderr
         assert content(HOST) == "DONE ship it"
 
-    def test_a_labelled_ref_is_a_link_and_is_changed_itself(self):
-        result, content, _ = run([{"uuid": TASK, "content": "TODO ship it", "marker": "TODO"},
-                                 {"uuid": HOST, "content": f"[see]((({TASK})))"}],
-                                 "--id", HOST, "--follow-refs")
-        assert result.exit_code == 0, result.stderr
-        assert content(HOST) == f"DONE [see]((({TASK})))"
+    def test_a_labelled_ref_is_a_link_and_no_task(self):
+        # A labelled ref is a link with text of its own, no ref to follow, and
+        # Logseq reads no marker in it: the block is no task, nothing is written.
+        result, content, api = run([{"uuid": TASK, "content": "TODO ship it", "marker": "TODO"},
+                                    {"uuid": HOST, "content": f"[see]((({TASK})))"}],
+                                   "--id", HOST, "--follow-refs", "--json")
+        assert refusal(result)["reason"] == "not_a_task"
+        assert refusal(result)["id"] == HOST
+        api.update_block.assert_not_called()
+        assert content(HOST) == f"[see]((({TASK})))"
         assert content(TASK) == "TODO ship it"
 
     def test_an_unknown_block_is_not_found_in_the_same_words(self):
@@ -125,14 +129,17 @@ class TestChains:
         assert content(TASK) == f"DONE ship it\nid:: {TASK}"
 
     @pytest.mark.parametrize("text", ["{{ embed ((T))}}", "{{EMBED ((T))}}"])
-    def test_what_logseq_reads_as_no_embed_is_changed_itself(self, text):
+    def test_what_logseq_reads_as_no_embed_is_no_task(self, text):
         # Neither is an embed to Logseq, the second holds no ref at all
-        # (measured, 0.10.15); the block is what the caller named.
+        # (measured, 0.10.15): nothing to follow, and no marker either, so the
+        # block the caller named is refused and nothing is written.
         host = text.replace("T", TASK)
-        result, content, _ = run([task(), {"uuid": HOST, "content": host}],
-                                 "--id", HOST, "--follow-refs")
-        assert result.exit_code == 0, result.stderr
-        assert content(HOST) == f"DONE {host}"
+        result, content, api = run([task(), {"uuid": HOST, "content": host}],
+                                   "--id", HOST, "--follow-refs", "--json")
+        out = refusal(result)
+        assert (out["reason"], out["id"]) == ("not_a_task", HOST)
+        api.update_block.assert_not_called()
+        assert content(HOST) == host
         assert content(TASK) == f"TODO ship it\nid:: {TASK}"
 
     def test_a_block_found_by_content_is_followed(self):
