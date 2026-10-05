@@ -1,8 +1,8 @@
-"""Dates as the CLI reads and writes them: keywords, journal days, repeaters.
+"""Dates as the CLI reads and writes them: keywords, journal days, timestamps, repeaters.
 
 Parses what a caller types for a date (``today``, an ISO date, a range), turns
 a journal day into a date and a date into the title Logseq gives its Journal
-Page, and works out when a repeating task falls due. Nothing here talks to
+Page, reads the SCHEDULED/DEADLINE timestamps of a block, and works out when a repeating task falls due. Nothing here talks to
 Logseq, so all of it is tested without a mock; the layering tests keep it that
 way (ADR 0003).
 """
@@ -10,8 +10,11 @@ way (ADR 0003).
 import re
 import calendar
 import datetime
+from typing import NamedTuple, Optional
 
 import click
+
+from logseq_cli.blocktext import PLANNING_LINE_RE, code_block_lines
 
 
 # Locale-independent English day/month names (Logseq always uses English)
@@ -88,6 +91,70 @@ def journal_day_to_date(jd: int) -> datetime.date:
     return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
 
 
+class Timestamp(NamedTuple):
+    """One SCHEDULED or DEADLINE of a block. ``kind`` is that word as written
+    (None where only the text between the angle brackets was read); the
+    weekday is neither read nor kept, so a text that names the wrong one reads
+    the same. ``repeater`` is ``(kind, num, unit)``: ``kind`` is ``+``, ``++`` or ``.+`` as
+    Logseq spells it, ``unit`` one of h d w m y."""
+    kind: Optional[str]
+    date: datetime.date
+    time: Optional[datetime.time]
+    repeater: Optional[tuple]
+
+
+_TIMESTAMP_RE = re.compile(r"(SCHEDULED|DEADLINE):\s*<([^>]*)>")
+_TIMESTAMP_BODY_RE = re.compile(
+    r"^\s*(\d{4})-(\d{2})-(\d{2})(?:\s+[A-Za-z]+)?(?:\s+(\d{1,2}):(\d{2}))?(.*)$", re.S)
+# ++ and .+ before +: the bare + would take them all.
+_INTERVAL_RE = re.compile(r"(\+\+|\.\+|\+)(\d+)([hdwmy])")
+
+
+def parse_timestamp(text: str):
+    """The text between ``<`` and ``>`` of a timestamp, as a Timestamp without
+    ``kind``, or None. Forgiving on purpose: a wrong or missing weekday, and
+    what is not a repeater (a warning time such as ``-2d``), are let go; the
+    date is not (a day that does not exist is None)."""
+    match = _TIMESTAMP_BODY_RE.match(text or "")
+    if not match:
+        return None
+    year, month, day, hour, minute, rest = match.groups()
+    try:
+        date = datetime.date(int(year), int(month), int(day))
+        time = datetime.time(int(hour), int(minute)) if hour is not None else None
+    except ValueError:
+        return None
+    interval = _INTERVAL_RE.search(rest)
+    repeater = (interval.group(1), int(interval.group(2)), interval.group(3)) if interval else None
+    return Timestamp(None, date, time, repeater)
+
+
+def timestamps(content: str) -> list:
+    """Every SCHEDULED/DEADLINE of a block's text, in the order of the text,
+    each with the repeater of its own.
+
+    Only a line that starts with the word counts (blocktext.PLANNING_LINE_RE),
+    and not one inside a code block: Logseq's parser reads a date as a line of
+    the block, nothing else. A line may hold both. One that does not read as a
+    date is left out, never guessed. next_occurrence works in days, for "what
+    is due"; this tells what the text says, and the two answer different
+    questions.
+    """
+    found = []
+    if "SCHEDULED" not in (content or "") and "DEADLINE" not in (content or ""):
+        return found
+    lines = (content or "").split("\n")
+    inside, _ = code_block_lines(lines)
+    for line, in_code in zip(lines, inside):
+        if in_code or not PLANNING_LINE_RE.match(line):
+            continue
+        for match in _TIMESTAMP_RE.finditer(line):
+            stamp = parse_timestamp(match.group(2))
+            if stamp:
+                found.append(stamp._replace(kind=match.group(1)))
+    return found
+
+
 # Repeating tasks
 # ---------------
 # Logseq stores a repeater's date as written in the text, and :block/scheduled
@@ -103,24 +170,6 @@ def journal_day_to_date(jd: int) -> datetime.date:
 #        weekday (repeat-until-future-timestamp)
 #   ++   add delta once, but only if the written date is already past
 #   +    add delta once, unconditionally
-_REPEATER_RE = re.compile(
-    r"(?:SCHEDULED|DEADLINE):\s*<[^>]*?(\+\+|\.\+|\+)(\d+)([hdwmy])[^>]*>"
-)
-
-
-def parse_repeater(content: str):
-    """Extract ``(kind, num, unit)`` from a SCHEDULED/DEADLINE line, or None.
-
-    ``kind`` is ``"+"``, ``"++"`` or ``".+"`` exactly as Logseq spells it. The
-    order in the pattern matters: ``++`` and ``.+`` must be tried before the
-    bare ``+``, or every repeater would read as ``+``.
-    """
-    if not content:
-        return None
-    match = _REPEATER_RE.search(content)
-    if not match:
-        return None
-    return match.group(1), int(match.group(2)), match.group(3)
 
 
 def _add_interval(start: datetime.date, num: int, unit: str):
@@ -154,7 +203,7 @@ def _add_interval(start: datetime.date, num: int, unit: str):
 def next_occurrence(start: datetime.date, repeater, today: datetime.date = None):
     """Next due date of a repeating task, or None if it cannot be derived.
 
-    ``repeater`` is what :func:`parse_repeater` returns. ``today`` is injectable
+    ``repeater`` is the one of a :class:`Timestamp` from :func:`timestamps`. ``today`` is injectable
     so the rule can be tested against fixed dates instead of the clock.
     """
     if not repeater or start is None:

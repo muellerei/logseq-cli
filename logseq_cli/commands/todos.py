@@ -8,7 +8,7 @@ from logseq_cli.dates import (
     journal_day_to_date,
     next_occurrence,
     parse_date_keyword,
-    parse_repeater,
+    timestamps,
 )
 from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
@@ -270,16 +270,23 @@ def get_todos(ctx, state, status, page, tag, match, from_date, to_date, due_from
             # Logseq stores the date as written, which is the next occurrence
             # only if the task was ticked off by its checkbox, so the next one
             # is derived with the source's own formula (see next_occurrence). A repeater whose interval cannot be read is
-            # left without next_due and reported rather than guessed at.
-            repeater = parse_repeater(content)
+            # left without next_due and reported rather than guessed at. The
+            # repeater is the one of the timestamp whose date is reported.
+            reported = "DEADLINE" if record.get("deadline") else "SCHEDULED"
             stored = record.get("deadline") or record.get("scheduled")
-            if repeater and stored:
-                try:
-                    nxt = next_occurrence(datetime.date.fromisoformat(stored), repeater)
-                except (ValueError, TypeError):
-                    nxt = None
-                if nxt:
-                    record["next_due"] = str(nxt)
+            planned = next((ts for ts in timestamps(content) if ts.kind == reported), None)
+            if planned and stored:
+                if planned.repeater is None:
+                    # Logseq moves only a timestamp with a repeater.
+                    record["next_due"] = stored
+                else:
+                    try:
+                        nxt = next_occurrence(datetime.date.fromisoformat(stored),
+                                              planned.repeater)
+                    except (ValueError, TypeError):
+                        nxt = None
+                    if nxt:
+                        record["next_due"] = str(nxt)
         todos.append(record)
 
     # Filter by page if requested

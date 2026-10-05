@@ -24,32 +24,10 @@ Derived rather than stored: Logseq keeps no "next occurrence" anywhere, and
 """
 import datetime
 
+import pytest
 
-from logseq_cli.dates import next_occurrence, parse_repeater
 
-
-class TestParseRepeater:
-    def test_double_plus_week(self):
-        assert parse_repeater("SCHEDULED: <2020-01-06 Mon ++1w>") == ("++", 1, "w")
-
-    def test_dotted_day(self):
-        assert parse_repeater("SCHEDULED: <2024-03-01 Fri .+3d>") == (".+", 3, "d")
-
-    def test_plain_plus_month(self):
-        assert parse_repeater("DEADLINE: <2024-03-01 Fri +2m>") == ("+", 2, "m")
-
-    def test_with_a_time_before_the_repeater(self):
-        assert parse_repeater("SCHEDULED: <2022-12-01 Thu 18:00 ++1w>") == ("++", 1, "w")
-
-    def test_no_repeater_is_none(self):
-        assert parse_repeater("SCHEDULED: <2024-03-01 Fri>") is None
-
-    def test_no_timestamp_at_all_is_none(self):
-        assert parse_repeater("TODO just a task") is None
-
-    def test_deadline_line_among_others(self):
-        content = "TODO pay rent\nDEADLINE: <2024-03-01 Fri ++1m>\n:LOGBOOK:\n:END:"
-        assert parse_repeater(content) == ("++", 1, "m")
+from logseq_cli.dates import Timestamp, next_occurrence, parse_timestamp, timestamps
 
 
 class TestNextOccurrence:
@@ -122,3 +100,78 @@ class TestNextOccurrence:
     def test_unknown_unit_is_none(self):
         """Not guessed: an unparseable repeater is reported, not invented."""
         assert next_occurrence(datetime.date(2026, 5, 10), ("++", 1, "x"), self.TODAY) is None
+
+
+D = datetime.date
+T = datetime.time
+
+
+class TestTimestamps:
+    """Every SCHEDULED/DEADLINE of a block, each with the repeater of its own."""
+
+    @pytest.mark.parametrize("content,expected", [
+        ("SCHEDULED: <2020-01-06 Mon ++1w>",
+         [Timestamp("SCHEDULED", D(2020, 1, 6), None, ("++", 1, "w"))]),
+        ("SCHEDULED: <2024-03-01 Fri .+3d>",
+         [Timestamp("SCHEDULED", D(2024, 3, 1), None, (".+", 3, "d"))]),
+        ("DEADLINE: <2024-03-01 Fri +2m>",
+         [Timestamp("DEADLINE", D(2024, 3, 1), None, ("+", 2, "m"))]),
+        ("SCHEDULED: <2022-12-01 Thu 18:00 ++1w>",
+         [Timestamp("SCHEDULED", D(2022, 12, 1), T(18, 0), ("++", 1, "w"))]),
+        ("SCHEDULED: <2024-03-01 Fri>", [Timestamp("SCHEDULED", D(2024, 3, 1), None, None)]),
+        ("SCHEDULED: <2026-09-24 Thu 18:00>",
+         [Timestamp("SCHEDULED", D(2026, 9, 24), T(18, 0), None)]),
+        ("TODO just a task", []),
+        ("TODO pay rent\nDEADLINE: <2024-03-01 Fri ++1m>\n:LOGBOOK:\n:END:",
+         [Timestamp("DEADLINE", D(2024, 3, 1), None, ("++", 1, "m"))]),
+        ("SCHEDULED: <2026-09-24 Thu 10:00 .+2h>",
+         [Timestamp("SCHEDULED", D(2026, 9, 24), T(10, 0), (".+", 2, "h"))]),
+    ])
+    def test_timestamps(self, content, expected):
+        assert timestamps(content) == expected
+
+    def test_two_timestamps_on_two_lines_each_with_its_own_repeater(self):
+        got = timestamps("TODO x\nSCHEDULED: <2026-09-22 Tue .+1d>\nDEADLINE: <2026-09-23 Wed +1w>")
+        assert [(t.kind, t.repeater) for t in got] == [
+            ("SCHEDULED", (".+", 1, "d")), ("DEADLINE", ("+", 1, "w"))]
+
+    def test_the_order_of_the_text_is_kept(self):
+        got = timestamps("DEADLINE: <2026-09-23 Wed +1w>\nSCHEDULED: <2026-09-22 Tue .+1d>")
+        assert [t.kind for t in got] == ["DEADLINE", "SCHEDULED"]
+
+    def test_both_on_one_line(self):
+        got = timestamps("SCHEDULED: <2026-09-22 Tue +1d> DEADLINE: <2026-09-23 Wed ++1w>")
+        assert [(t.kind, t.repeater) for t in got] == [
+            ("SCHEDULED", ("+", 1, "d")), ("DEADLINE", ("++", 1, "w"))]
+
+    def test_an_indented_line_is_read(self):
+        assert len(timestamps("TODO x\n  SCHEDULED: <2026-09-22 Tue +1d>")) == 1
+
+    @pytest.mark.parametrize("content", [
+        "TODO see SCHEDULED: <2026-09-22 Tue +1d> later",
+        "```\nSCHEDULED: <2026-09-22 Tue +1d>\n```",
+        "SCHEDULED: <2026-02-30 Fri +1d>",
+        "", None,
+    ], ids=["mid text", "code fence", "no such date", "empty", "none"])
+    def test_no_timestamp(self, content):
+        assert timestamps(content) == []
+
+
+class TestParseTimestamp:
+    @pytest.mark.parametrize("text,expected", [
+        ("2026-09-24 Thu .+1d", Timestamp(None, D(2026, 9, 24), None, (".+", 1, "d"))),
+        ("2026-09-24 Thu 18:00 ++1w", Timestamp(None, D(2026, 9, 24), T(18, 0), ("++", 1, "w"))),
+        ("2026-09-24 Thu 18:00", Timestamp(None, D(2026, 9, 24), T(18, 0), None)),
+        ("2026-09-24 Thu 9:05", Timestamp(None, D(2026, 9, 24), T(9, 5), None)),
+        ("2026-09-24 Thu +2m", Timestamp(None, D(2026, 9, 24), None, ("+", 2, "m"))),
+        ("2026-09-24", Timestamp(None, D(2026, 9, 24), None, None)),
+        ("2026-09-24 Mon", Timestamp(None, D(2026, 9, 24), None, None)),
+        ("2026-09-24 thu", Timestamp(None, D(2026, 9, 24), None, None)),
+        ("2026-09-24 Thu -2d", Timestamp(None, D(2026, 9, 24), None, None)),
+    ])
+    def test_read(self, text, expected):
+        assert parse_timestamp(text) == expected
+
+    @pytest.mark.parametrize("text", ["2026-02-30 Fri", "tomorrow", "", "2026-09-24 Thu 25:00"])
+    def test_none(self, text):
+        assert parse_timestamp(text) is None

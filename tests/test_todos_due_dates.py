@@ -21,6 +21,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from logseq_cli.cli import cli
+from logseq_cli.dates import next_occurrence
 from tests.conftest import split_runner
 
 
@@ -192,3 +193,63 @@ class TestRepeatingTasks:
         result = _run(["get-todos", "--from", "2026-05-01", "--to", "2026-05-31", "--json"],
                       rows)
         assert len(json.loads(result.stdout)["todos"]) == 1
+
+
+def _todo(args, rows):
+    """The one task a run reports, the JSON, and the spy on next_occurrence."""
+    with patch("logseq_cli.commands.todos.next_occurrence", wraps=next_occurrence) as spy:
+        result = _run(["get-todos", "--no-follow-refs", "--json", *args], rows)
+    assert result.exit_code == 0, result.stderr
+    data = json.loads(result.stdout)
+    return (data["todos"][0] if data["todos"] else None), data, spy
+
+
+class TestNextDueUsesTheReportedTimestamp:
+    """A task with two timestamps reports one date; its next_due follows that
+    timestamp's own repeater, not the first repeater in the text."""
+
+    TWO = _rows((
+        "TODO pay\nSCHEDULED: <2020-01-06 Mon .+1d>\nDEADLINE: <2020-01-07 Tue +1w>",
+        "TODO", "Finance", None, 20200106, 20200107, True))
+
+    def test_next_due_comes_from_the_repeater_of_the_deadline(self):
+        todo, data, spy = _todo([], self.TWO)
+        assert spy.call_args.args[0] == datetime.date(2020, 1, 7)
+        assert spy.call_args.args[1] == ("+", 1, "w")
+        assert todo["deadline"] == "2020-01-07"
+        due = datetime.date.fromisoformat(todo["next_due"])
+        assert due > datetime.date.today() and due.weekday() == 1
+        for day, count in ((due, 1), (due + datetime.timedelta(days=1), 0)):
+            _, data, _ = _todo(["--due-from", str(day), "--due-to", str(day)], self.TWO)
+            assert data["count"] == count and "repeating_excluded" not in data
+
+    def test_a_deadline_without_a_repeater_does_not_move(self):
+        rows = _rows(("TODO pay\nSCHEDULED: <2020-01-06 Mon .+1d>\nDEADLINE: <2020-01-07 Tue>",
+                      "TODO", "Finance", None, 20200106, 20200107, True))
+        todo, _, spy = _todo([], rows)
+        assert todo["next_due"] == "2020-01-07" and todo["repeating"] is True
+        assert spy.call_count == 0
+        _, data, _ = _todo(["--due-from", "2020-01-01", "--due-to", "2020-01-31"], rows)
+        assert data["count"] == 1
+
+    def test_only_a_scheduled_repeater_reads_as_before(self):
+        rows = _rows(("TODO weekly\nSCHEDULED: <2020-01-06 Mon .+1d>",
+                      "TODO", "Finance", None, 20200106, None, True))
+        todo, _, spy = _todo([], rows)
+        assert spy.call_args.args[1] == (".+", 1, "d")
+        assert datetime.date.fromisoformat(todo["next_due"]) > datetime.date.today()
+
+    def test_a_repeater_of_the_other_timestamp_is_not_borrowed(self):
+        rows = _rows(("TODO pay\nSCHEDULED: <2020-01-06 Mon .+1d>",
+                      "TODO", "Finance", None, None, 20200107, True))
+        todo, data, spy = _todo([], rows)
+        assert "next_due" not in todo and spy.call_count == 0
+        _, data, _ = _todo(["--due-from", "2020-01-01", "--due-to", "2030-01-01"], rows)
+        assert data["repeating_excluded"] == 1 and data["count"] == 0
+
+    def test_the_reported_date_is_the_one_from_the_database(self):
+        rows = _rows(("TODO pay\nDEADLINE: <2020-01-14 Tue +1w>",
+                      "TODO", "Finance", None, None, 20200107, True))
+        todo, _, spy = _todo([], rows)
+        assert spy.call_args.args[0] == datetime.date(2020, 1, 7)
+        assert todo["deadline"] == "2020-01-07"

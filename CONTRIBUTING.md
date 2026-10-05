@@ -29,7 +29,7 @@ logseq-cli/
 │   ├── cliinput.py     # --content, --content-file and --tree, taken from the command line
 │   ├── config.py       # Config file discovery, loading and lookup
 │   ├── datalog.py      # EDN/datalog query building (value quoting, keywords)
-│   ├── dates.py        # Date keywords, journal days, repeaters, journal title formats
+│   ├── dates.py        # Date keywords, journal days, SCHEDULED/DEADLINE timestamps, repeaters, journal title formats
 │   ├── group.py        # The click group: global options, API client
 │   ├── headings.py     # Compare, find and add a heading on a page; which empty block a heading goes before
 │   ├── ids.py          # id:: lines in written text: dropped with a note, or kept by --keep-ids
