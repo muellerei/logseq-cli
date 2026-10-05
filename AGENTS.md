@@ -163,8 +163,11 @@ U=$(logseq-cli find-block --content "tag support" --page "Project Alpha" --exact
 # All open tasks
 logseq-cli get-todos
 
-# Filter by status
+# Filter by marker
 logseq-cli get-todos --status TODO --status DOING
+
+# Filter by state: open (the default), done or cancelled
+logseq-cli get-todos --state done
 
 # Filter by page (substring)
 logseq-cli get-todos --page "Project Alpha"

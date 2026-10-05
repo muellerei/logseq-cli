@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# List all open TODOs, grouped by page
+# List the open TODO and DOING tasks, grouped by page
 # Usage: ./weekly-todos.sh [--status DOING]
 # Requires: LOGSEQ_TOKEN or --token
 

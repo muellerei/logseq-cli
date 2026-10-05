@@ -32,7 +32,7 @@ def _parts():
 
 TEXT, FIELDS, BODY = _parts()
 # click keeps --help out of ``params``; it is an option all the same.
-OPTIONS = {name: {opt for param in command.params
+OPTIONS = {name: {opt for param in command.params if not getattr(param, "hidden", False)
                   for opt in [*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ())]
                   if opt.startswith("--")} | set(click.Context(command).help_option_names)
            for name, command in cli.commands.items()}

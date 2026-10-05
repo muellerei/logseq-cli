@@ -40,7 +40,11 @@ def _documented_forms(param):
     ``--no-create``), and the reference lists the one a caller actually passes —
     which for a default-on flag is the negative. Either spelling counts as
     documented; requiring a specific one would document a flag nobody uses.
+    A hidden option is left out of ``--help`` on purpose, so the reference may
+    leave it out too.
     """
+    if getattr(param, "hidden", False):
+        return []
     forms = list(getattr(param, "opts", ())) + list(getattr(param, "secondary_opts", ()))
     return [f for f in forms if f.startswith("--") and f not in UBIQUITOUS]
 

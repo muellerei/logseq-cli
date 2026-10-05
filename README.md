@@ -70,17 +70,17 @@ files would not.
   more, not the pages they sit on.
   `logseq-cli get-backlinks --page "Alex" --with-context`
 - **Keep track of who owes what.** *"What am I waiting for from Alex?"* The
-  tasks marked WAITING or TODO that mention Alex, filtered before the agent
+  open tasks that mention Alex, WAITING ones included, filtered before the agent
   sees them.
-  `logseq-cli get-todos --status WAITING --status TODO --match "Alex"`
+  `logseq-cli get-todos --match "Alex"`
 - **Find where you wrote about something.** *"Where did I note the
   migration plan?"* The matching blocks, ten at most, with a note when there
   are more, instead of the agent opening page after page.
   `logseq-cli find-block --content "migration plan" --limit 10`
 - **Run it on a schedule.** A morning cron job running
   `examples/carry-todos-to-today.sh 7 --write`
-  ([the script](examples/carry-todos-to-today.sh)) carries every TODO, DOING,
-  NOW or LATER journal task older than a week into today's journal as a ref, with no agent and no
+  ([the script](examples/carry-todos-to-today.sh)) carries every open
+  journal task older than a week into today's journal as a ref, with no agent and no
   tokens involved (without `--write` it only previews). A scheduled agent run
   can start from an overview of the last month without its full text, and
   write a briefing or a summary of your mood into today's journal.
