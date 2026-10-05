@@ -1,4 +1,7 @@
 """The task rules: markers, states, reading and swapping a marker."""
+import ast
+import pathlib
+
 import pytest
 
 from logseq_cli import tasks
@@ -840,16 +843,10 @@ class TestStartsWithBox:
 LOG = "CLOCK: [2026-09-29 Tue 10:00:00]--[2026-09-29 Tue 10:05:00] =>  00:05:00"
 
 
-class TestTaskTextKeepsTheOldBehaviour:
-    """Where task_text lived inside get-todos, case by case; moving it changed
-    nothing. The first four are what an unclosed drawer, a drawer in a code
-    fence, a planning line in a fence and a stray closer did there."""
+class TestTaskTextKeepsWhatItAlwaysDid:
+    """Cases that read the same under the old inline code and the shared rule."""
 
     @pytest.mark.parametrize("content,marker,expected", [
-        ("TODO x\n:LOGBOOK:\nno end", "TODO", "x"),
-        ("TODO x\n```\n:LOGBOOK:\n```\ny", "TODO", "x\n```"),
-        ("TODO x\n```\nSCHEDULED: <2026-09-25 Fri>\n```", "TODO", "x\n```\n```"),
-        ("TODO x\n:END:\ny", "TODO", "x\ny"),
         ("TODO", "TODO", ""),
         ("TODO x", "TODO", "x"),
         ("DONE x", "DONE", "x"),
@@ -869,3 +866,67 @@ class TestTaskTextKeepsTheOldBehaviour:
     ])
     def test_task_text(self, content, marker, expected):
         assert tasks.task_text(content, marker) == expected
+
+
+class TestTaskTextReadsTheSharedRule:
+    """The lines that belong to a block are the ones blocktext says: a closed
+    drawer, a planning line outside a code block. An opener nothing closes is
+    text (mldoc 1.5.7), a drawer or planning line in a code fence is code, and
+    a closer without an opener is text."""
+
+    @pytest.mark.parametrize("content,expected", [
+        ("TODO x\n:LOGBOOK:\nno end", "x\n:LOGBOOK:\nno end"),
+        ("TODO x\n```\n:LOGBOOK:\n```\ny", "x\n```\n:LOGBOOK:\n```\ny"),
+        ("TODO x\n```\nSCHEDULED: <2026-09-25 Fri>\n```",
+         "x\n```\nSCHEDULED: <2026-09-25 Fri>\n```"),
+        ("TODO x\n:END:\ny", "x\n:END:\ny"),
+    ])
+    def test_task_text(self, content, expected):
+        assert tasks.task_text(content, "TODO") == expected
+
+
+def _source_uses_the_shared_rule(path, function_name):
+    """Whether the source (one function of it, or the whole module when
+    function_name is None) calls attached_line_mask and keeps a rule of its
+    own for the lines of a block out: no PLANNING_LINE_RE, no string holding
+    the drawer opener. A docstring may name it."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    scope = tree
+    if function_name is not None:
+        scope = next(n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == function_name)
+    docstrings = set()
+    for node in ast.walk(scope):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    calls = own_pattern = False
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Name) and node.id == "attached_line_mask":
+            calls = True
+        if isinstance(node, ast.Name) and node.id == "PLANNING_LINE_RE":
+            own_pattern = True
+        if isinstance(node, ast.Attribute) and node.attr == "PLANNING_LINE_RE":
+            own_pattern = True
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docstrings and ":LOGBOOK:" in node.value):
+            own_pattern = True
+    return calls and not own_pattern
+
+
+PACKAGE = pathlib.Path(tasks.__file__).parent
+
+
+class TestOneRuleForAttachedLines:
+    @pytest.mark.parametrize("filename,function", [("tasks.py", "task_text")])
+    def test_the_source_reads_the_shared_rule(self, filename, function):
+        assert _source_uses_the_shared_rule(PACKAGE / filename, function)
+
+    def test_the_check_catches_a_rule_of_its_own(self, tmp_path):
+        own = tmp_path / "own.py"
+        own.write_text('import re\n\ndef f(x):\n    return re.match(r"\\s*:LOGBOOK:", x)\n')
+        assert not _source_uses_the_shared_rule(own, "f")
+        shared = tmp_path / "shared.py"
+        shared.write_text("def f(x):\n    return attached_line_mask(x)\n")
+        assert _source_uses_the_shared_rule(shared, "f")

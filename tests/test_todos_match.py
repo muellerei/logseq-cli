@@ -120,3 +120,33 @@ class TestMarkerIsStrippedForEveryMarker:
         with patch("logseq_cli.group.LogseqAPI", return_value=api):
             r = split_runner().invoke(cli, ["get-todos", "--no-follow-refs", "--json"])
         assert json.loads(r.stdout)["todos"][0]["content"] == ""
+
+
+class TestLogbookOpenerAndFenceAreText:
+    """An unclosed :LOGBOOK: is text and one inside a code fence is code
+    (mldoc 1.5.7): the task keeps them, and --match and --tag see them."""
+
+    def _run_block(self, content, *args):
+        api = MagicMock()
+        api.datascript_query.return_value = [
+            [{"content": content, "marker": "TODO", "uuid": "u1"},
+             {"original-name": "Page A", "name": "page a"}]]
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--no-follow-refs", "--json", *args])
+        return json.loads(r.stdout)
+
+    @pytest.mark.parametrize("content,match", [
+        ("TODO x\n:LOGBOOK:\nno end #urgent", "no end"),
+        ("TODO x\n```\n:LOGBOOK:\n```\ny #urgent", "y #urgent"),
+    ])
+    def test_the_text_stays_and_is_found(self, content, match):
+        out = self._run_block(content)
+        assert out["todos"][0]["content"] == content[len("TODO "):]
+        assert self._run_block(content, "--match", match)["count"] == 1
+        assert self._run_block(content, "--tag", "urgent")["count"] == 1
+
+    def test_a_closed_drawer_stays_out(self):
+        content = "TODO x\n:LOGBOOK:\nCLOCK: [2026-09-29 Tue 10:00:00]\n:END:\n#urgent"
+        out = self._run_block(content)
+        assert out["todos"][0]["content"] == "x\n#urgent"
+        assert self._run_block(content, "--match", "CLOCK")["count"] == 0
