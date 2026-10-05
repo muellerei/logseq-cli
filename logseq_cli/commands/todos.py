@@ -4,10 +4,9 @@ import sys
 
 import click
 
-from logseq_cli.blocktext import pointer_target, property_line_mask, refuse_split_block
+from logseq_cli.blocktext import pointer_target, refuse_split_block
 from logseq_cli.datalog import edn_string
 from logseq_cli.dates import (
-    PLANNING_LINE_RE,
     journal_day_to_date,
     next_occurrence,
     parse_date_keyword,
@@ -18,6 +17,7 @@ from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.safety import WriteCommand
+from logseq_cli.tasks import task_text
 
 
 _TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
@@ -239,34 +239,7 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
         page_name = page_data.get("original-name") or page_data.get("name", "")
         journal_day = page_data.get("journal-day") or page_data.get("journalDay")
 
-        # Strip properties (key:: value), the SCHEDULED/DEADLINE lines and the
-        # LOGBOOK drawer. Those are metadata of the task, not the task: left in,
-        # a repeating task reported on stderr printed its own timestamp line and
-        # a ":LOGBOOK:" fragment instead of what it says.
-        content_lines = []
-        in_logbook = False
-        raw_lines = content.split("\n")
-        for line, is_property in zip(raw_lines, property_line_mask(raw_lines)):
-            stripped = line.strip()
-            if stripped == ":LOGBOOK:":
-                in_logbook = True
-                continue
-            if stripped == ":END:":
-                in_logbook = False
-                continue
-            if in_logbook:
-                continue
-            if is_property:
-                continue
-            if PLANNING_LINE_RE.match(line):
-                continue
-            content_lines.append(line)
-        clean_content = "\n".join(content_lines).strip()
-        # Strip the leading marker ("TODO some task" -> "some task"). Which word
-        # that is comes from :block/marker, not from a list kept here: the list
-        # had drifted and missed CANCELED and WAIT.
-        if marker:
-            clean_content = re.sub(rf"^{re.escape(marker)}(?:\s+|$)", "", clean_content)
+        clean_content = task_text(content, marker)
 
         record = {
             "marker": marker,

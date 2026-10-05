@@ -25,7 +25,7 @@ logseq-cli/
 ├── logseq_cli/
 │   ├── api.py          # HTTP API client: the methods it may send, the editor gate, the proof of each write
 │   ├── blockprops.py   # Property keys and values: what Logseq reads back, what a write keeps
-│   ├── blocktext.py    # How Logseq reads a block's lines: code blocks, block boundaries, property and id:: lines
+│   ├── blocktext.py    # How Logseq reads a block's lines: code blocks, block boundaries, property, drawer, planning and id:: lines
 │   ├── cliinput.py     # --content, --content-file and --tree, taken from the command line
 │   ├── config.py       # Config file discovery, loading and lookup
 │   ├── datalog.py      # EDN/datalog query building (value quoting, keywords)
@@ -41,6 +41,7 @@ logseq-cli/
 │   ├── render.py       # Blocks to text; finding and resolving references
 │   ├── safety.py       # What keeps a command from writing: [safety] read_only, the gate every writing command carries
 │   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible; which empty block a write at the end goes before
+│   ├── tasks.py        # What a task is: the eleven markers, their states, reading and swapping a marker
 │   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
 │   ├── commands/       # One module per group of commands
 │   │   ├── pages.py        # create/get/search/rename/delete a page

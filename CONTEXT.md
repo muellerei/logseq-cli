@@ -66,6 +66,26 @@ _Avoid_: link (for the whole family)
 kind of Reference that points at a Block rather than a page.
 _Avoid_: block reference link, embed
 
+**Task**:
+A Block Logseq reads as a task: one with a Marker. Text that only looks like
+one — `TODO:`, a lower-case `todo`, `TODO` followed by a line break, a
+Markdown checkbox — is not a Task.
+_Avoid_: todo (for the Block), checkbox, to-do item
+
+**Marker**:
+The keyword at the start of a Task's text that states where it stands —
+`TODO`, `DOING`, `DONE` and others. Logseq's parser fixes which keywords are
+Markers; the graph's config only picks the ones new Tasks get.
+_Avoid_: status keyword, workflow keyword
+
+**Task State**:
+Where a Task stands, read from its Marker as Logseq draws it: open (an empty
+box for `NOW`, `LATER`, `TODO`, `DOING`, `IN-PROGRESS`, `WAIT` and `WAITING`;
+`STARTED`, which Logseq parses but draws no box for, counts as open too), done (a ticked box:
+`DONE`) or cancelled (no box, struck through: `CANCELED`, `CANCELLED`).
+Cancelled is not done.
+_Avoid_: status (unqualified), complete, closed
+
 ### Guarantees the tool makes
 
 **Refusal**:

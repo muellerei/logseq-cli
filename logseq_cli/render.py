@@ -14,9 +14,8 @@ them, and a helper three modules import is not private to any of them.
 """
 import re
 
-from logseq_cli.blocktext import (BLOCK_REF_RE, PROPERTY_LINE_RE, code_block_lines, is_fence,
-                                  property_line_mask)
-from logseq_cli.dates import PLANNING_LINE_RE
+from logseq_cli.blocktext import (BLOCK_REF_RE, PLANNING_LINE_RE, PROPERTY_LINE_RE,
+                                  code_block_lines, is_fence, property_line_mask)
 from logseq_cli.headings import normalize_heading
 from logseq_cli.outlinetext import bullet_lines
 
