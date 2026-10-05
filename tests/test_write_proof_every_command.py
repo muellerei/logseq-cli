@@ -200,7 +200,7 @@ def _graph():
     double.add_page("Probe Page", [
         {"content": "## Heading", "children": ["child one"]},
         "alpha block",
-        "TODO task one",
+        {"content": "TODO task one", "marker": "TODO"},
         "beta\nprio:: 1",
         {"content": "parent block", "children": ["kid block"]},
     ])
@@ -341,7 +341,8 @@ def test_update_block_with_properties_is_not_a_false_alarm(monkeypatch):
 def test_set_todo_status_with_logbook_is_not_a_false_alarm(monkeypatch):
     # With time tracking on, TODO -> DOING appends a drawer (read in the code,
     # not measured).
-    double = _one_page(monkeypatch, "TODO task one", time_tracking=True)
+    double = _one_page(monkeypatch, {"content": "TODO task one", "marker": "TODO"},
+                       time_tracking=True)
     r = _invoke(double, ["set-todo-status", "--id", "@TODO task one", "--status", "DOING"])
     assert r.exit_code == 0, r.stderr
     assert double.tree("Probe Page")[0][0] == "DOING task one"
@@ -352,7 +353,7 @@ def test_doing_to_done_with_existing_drawer_is_success(monkeypatch):
     # set-todo-status sends the old drawer back; Logseq closes its CLOCK line.
     from tests.logseq_http_double import CLOCK_IN, CLOCK_OUT
     text = f"DOING task one\n:LOGBOOK:\n{CLOCK_IN}\n:END:"
-    double = _one_page(monkeypatch, text, time_tracking=True)
+    double = _one_page(monkeypatch, {"content": text, "marker": "DOING"}, time_tracking=True)
     r = _invoke(double, ["set-todo-status", "--id", f"@{text}", "--status", "DONE"])
     assert r.exit_code == 0, r.stderr
     assert double.uuid_of(f"DONE task one\n:LOGBOOK:\n{CLOCK_OUT}\n:END:")
@@ -360,7 +361,7 @@ def test_doing_to_done_with_existing_drawer_is_success(monkeypatch):
 
 def test_marker_change_without_drawer_is_success(monkeypatch):
     # Time tracking off: read back is what was written (measured).
-    double = _one_page(monkeypatch, "TODO task one")
+    double = _one_page(monkeypatch, {"content": "TODO task one", "marker": "TODO"})
     for old, new in (("TODO", "DOING"), ("DOING", "DONE")):
         r = _invoke(double, ["set-todo-status", "--id", f"@{old} task one", "--status", new])
         assert r.exit_code == 0, r.stderr

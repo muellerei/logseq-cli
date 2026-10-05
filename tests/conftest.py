@@ -459,9 +459,12 @@ class PageGraph:
         if strip_ids:
             content = "\n".join(ln for ln in content.split("\n")
                                 if not re.match(r"(?i)[\s\ufeff]*id:: ", ln))
-        return {"uuid": uuid, "content": prefix + content,
+        node = {"uuid": uuid, "content": prefix + content,
                 "children": [self._node(c, keep=keep, strip_ids=strip_ids, prefix=prefix)
                              for c in spec.get("children") or []]}
+        if "marker" in spec:
+            node["marker"] = spec["marker"]
+        return node
 
     # --- lookup ------------------------------------------------------------
     def page_named(self, name):
@@ -512,7 +515,7 @@ class PageGraph:
         # Logseq's shapes, measured 0.10.15: parent and page by database id;
         # without children the page as {id} alone and each direct child as a
         # ["uuid", <uuid>] pair; with them the page named and children blocks.
-        return {"id": self._db_id(block["uuid"]),
+        out = {"id": self._db_id(block["uuid"]),
                 "uuid": block["uuid"], "content": block["content"],
                 "preBlock?": bool(block.get("pre")),
                 "page": ({"id": page["id"], "name": page["name"].lower(),
@@ -521,6 +524,9 @@ class PageGraph:
                 "parent": {"id": self._db_id(parent["uuid"]) if parent else page["id"]},
                 "children": [self._out(c, page, block) for c in block["children"]]
                             if children else [["uuid", c["uuid"]] for c in block["children"]]}
+        if block.get("marker"):
+            out["marker"] = block["marker"]
+        return out
 
     # --- API surface -------------------------------------------------------
     def get_page(self, name):

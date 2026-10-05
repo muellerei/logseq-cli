@@ -19,7 +19,7 @@ from logseq_cli.ids import uuids_in_use
 from logseq_cli.lookup import find_blocks_by_content, incoming_block_refs
 from logseq_cli.pagenames import alias_sources, resolve_page
 from tests.conftest import split_runner
-from tests.logseq_http_double import LogseqHttpDouble
+from tests.logseq_http_double import CLOCK_IN, CLOCK_OUT, LogseqHttpDouble
 
 URL = "http://127.0.0.1:12315/api"
 UNKNOWN = "5f0c7a8e-1b2d-4c3e-9f4a-6b7c8d9e0f1a"
@@ -656,7 +656,7 @@ def test_insert_opens_the_new_block_unless_focus_false(double):
 
 
 def test_time_tracking_off_by_default(double):
-    double.add_page("Probe Page", ["TODO task"])
+    double.add_page("Probe Page", [{"content": "TODO task", "marker": "TODO"}])
     uuid = double.uuid_of("TODO task")
     answer(double, "updateBlock", uuid, "DOING task")
     assert double.tree("Probe Page") == [("DOING task", [])]
@@ -666,7 +666,7 @@ def test_time_tracking_clocks_in_and_out(double):
     # Upstream util/clock.cljs clock-in and clock-out, 0.10.15; the format
     # is assumed, not measured.
     double.time_tracking = True
-    double.add_page("Probe Page", ["TODO task"])
+    double.add_page("Probe Page", [{"content": "TODO task", "marker": "TODO"}])
     uuid = double.uuid_of("TODO task")
     answer(double, "updateBlock", uuid, "DOING task")
     content = answer(double, "getBlock", uuid, {"includeChildren": False})["content"]
@@ -678,7 +678,137 @@ def test_time_tracking_clocks_in_and_out(double):
                        ":END:")
     answer(double, "updateBlock", uuid, content.replace("DONE", "NOW", 1))
     content = answer(double, "getBlock", uuid, {"includeChildren": False})["content"]
-    assert content.endswith("00:05:00\nCLOCK: [2026-09-26 Sat 14:00]\n:END:")
+    # DONE -> NOW is in neither list of pairs: Logseq leaves the text alone
+    # (with-marker-time, 0.10.15), so the closed clock stays and no new one starts.
+    assert content == ("NOW task\n:LOGBOOK:\n"
+                       "CLOCK: [2026-09-26 Sat 14:00]--[2026-09-26 Sat 14:05] =>  00:05:00\n"
+                       ":END:")
+
+
+def _block(double, uuid):
+    return answer(double, "getBlock", uuid, {"includeChildren": False})
+
+
+class TestMarkerIsStoredState:
+    """A fixture says what Logseq stored as the block's marker; the double
+    does not guess it from the text. After a write it reads the text again,
+    as Logseq does."""
+
+    def test_a_fixture_marker_is_read_back(self, double):
+        double.add_page("Probe Page", [{"content": "TODO x", "marker": "TODO"}])
+        assert _block(double, double.uuid_of("TODO x"))["marker"] == "TODO"
+
+    def test_the_double_does_not_guess_from_the_text(self, double):
+        double.add_page("Probe Page", ["TODO plain", {"content": "TODO\nnotes"}])
+        assert "marker" not in _block(double, double.uuid_of("TODO plain"))
+        assert "marker" not in _block(double, double.uuid_of("TODO\nnotes"))
+
+    @pytest.mark.parametrize("text,marker", [
+        ("DOING x", "DOING"), ("todo x", None), ("## DONE x", "DONE"), ("TODO\nnotes", None)])
+    def test_update_block_reads_the_marker_again(self, double, text, marker):
+        double.add_page("Probe Page", [{"content": "TODO a", "marker": "TODO"}])
+        uuid = double.uuid_of("TODO a")
+        answer(double, "updateBlock", uuid, text)
+        assert _block(double, uuid).get("marker") == marker
+
+    def test_insert_block_reads_the_marker(self, double):
+        double.add_page("Probe Page", [{"content": "TODO a", "marker": "TODO"}])
+        out = answer(double, "insertBlock", double.uuid_of("TODO a"), "WAIT y", {"sibling": True})
+        assert out["marker"] == "WAIT"
+
+    def test_append_block_in_page_reads_the_marker(self, double):
+        double.add_page("Probe Page", ["a"])
+        out = answer(double, "appendBlockInPage", "Probe Page", "STARTED z")
+        assert out["marker"] == "STARTED"
+
+    def test_insert_batch_block_reads_the_marker_of_every_node(self, double):
+        double.add_page("Probe Page", ["a"])
+        anchor = double.uuid_of("a")
+        answer(double, "insertBatchBlock", anchor, [{"content": "IN-PROGRESS q"}],
+               {"sibling": True})
+        assert _block(double, double.uuid_of("IN-PROGRESS q"))["marker"] == "IN-PROGRESS"
+        answer(double, "insertBatchBlock", anchor,
+               [{"content": "TODO p", "children": [{"content": "DOING c"}]}], {"sibling": False})
+        assert _block(double, double.uuid_of("TODO p"))["marker"] == "TODO"
+        assert _block(double, double.uuid_of("DOING c"))["marker"] == "DOING"
+
+
+# Logseq 0.10.15 with-marker-time (handler/editor.cljs) and clock-in/clock-out
+# (util/clock.cljs), read in the source, not measured (time tracking was off
+# in the measured graph). The pair (old marker, new marker) decides, not the
+# target. Two known gaps: Logseq reads the new marker with its own
+# marker-pattern, not with mldoc (DOING followed by a line break starts a
+# clock there, not here; STARTED is not in marker-pattern); and "without a
+# LOGBOOK" is judged on the stored block's body there, on the text after the
+# write here: the cases put the same drawer in both texts, so the difference
+# stays untested, and none of the cases is affected by it.
+CLOCKS = [
+    (None, "DOING", None, "in"), (None, "NOW", None, "in"), ("TODO", "DOING", None, "in"),
+    ("LATER", "NOW", None, "in"), ("TODO", "DOING", "closed", "in"),
+    ("DOING", "DOING", None, "in"), ("NOW", "NOW", None, "in"),
+    ("DOING", "DOING", "closed", "none"), ("NOW", "NOW", "closed", "none"),
+    ("DOING", "TODO", "open", "out"), ("NOW", "LATER", "open", "out"),
+    ("DOING", "DONE", "open", "out"), ("NOW", "DONE", "open", "out"),
+    ("WAIT", "DOING", None, "none"), ("WAITING", "DOING", None, "none"),
+    ("TODO", "NOW", None, "none"), ("LATER", "DOING", None, "none"),
+    ("TODO", "DONE", None, "none"), ("DONE", "NOW", "closed", "none"),
+    ("DOING", "DONE", "closed", "none"),
+]
+
+
+def _clock_texts(old, new, drawer):
+    head_old = f"{old} task" if old else "task"
+    head_new = f"{new} task changed" if old == new else f"{new} task"
+    lines = {None: [], "closed": [CLOCK_OUT], "open": [CLOCK_IN]}[drawer]
+
+    def text(head):
+        return head if drawer is None else "\n".join([head, ":LOGBOOK:", *lines, ":END:"])
+
+    return text(head_old), text(head_new), head_new, lines
+
+
+class TestTimeTrackingFollowsThePair:
+    @pytest.mark.parametrize("old,new,drawer,effect", CLOCKS,
+                             ids=[f"{o}-{n}-{d}-{e}" for o, n, d, e in CLOCKS])
+    def test_clock(self, double, old, new, drawer, effect):
+        double.time_tracking = True
+        old_text, new_text, head, lines = _clock_texts(old, new, drawer)
+        fixture = {"content": old_text}
+        if old:
+            fixture["marker"] = old
+        double.add_page("Probe Page", [fixture])
+        uuid = double.uuid_of(old_text)
+        answer(double, "updateBlock", uuid, new_text)
+        content = _block(double, uuid)["content"]
+        if effect == "in":
+            expected = "\n".join([head, ":LOGBOOK:", *lines, CLOCK_IN, ":END:"])
+        elif effect == "out":
+            expected = "\n".join([head, ":LOGBOOK:", CLOCK_OUT, ":END:"])
+        else:
+            expected = new_text
+        assert content == expected
+
+
+class TestContentSearchCarriesTheMarker:
+    QUERY = ('[:find (pull ?b [:block/content :block/uuid {PULL} '
+             '{:block/page [:block/original-name :block/name]}]) '
+             ':where [?p :block/name "probe page"] [?b :block/page ?p] '
+             '[?b :block/content ?c] [(clojure.string/includes? ?c "task")]]')
+
+    def _rows(self, double, pull):
+        double.add_page("Probe Page", [{"content": "TODO task", "marker": "TODO"}, "plain task"])
+        query = self.QUERY.replace("{PULL} ", pull)
+        return {r[0]["content"]: r[0] for r in
+                answer(double, "logseq.DB.datascriptQuery", query)}
+
+    def test_a_pull_that_names_the_marker_gets_it(self, double):
+        rows = self._rows(double, ":block/marker ")
+        assert rows["TODO task"]["marker"] == "TODO"
+        assert "marker" not in rows["plain task"]
+
+    def test_a_pull_that_does_not_name_it_gets_none(self, double):
+        rows = self._rows(double, "")
+        assert all("marker" not in r for r in rows.values())
 
 
 # --- protocol ------------------------------------------------------------------

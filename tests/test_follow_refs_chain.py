@@ -32,7 +32,7 @@ def run(blocks, *args, placeholders=()):
 
 
 def task():
-    return {"uuid": TASK, "content": f"TODO ship it\nid:: {TASK}"}
+    return {"uuid": TASK, "content": f"TODO ship it\nid:: {TASK}", "marker": "TODO"}
 
 
 def pointer(uuid, to, embed=False):
@@ -54,7 +54,7 @@ class TestWhatStays:
 
     @pytest.mark.parametrize("ref", [TASK, TASK.upper()], ids=["lower", "capitals"])
     def test_a_ref_to_a_task_changes_the_task(self, ref):
-        result, content, _ = run([{"uuid": TASK, "content": "TODO ship it"},
+        result, content, _ = run([{"uuid": TASK, "content": "TODO ship it", "marker": "TODO"},
                                  {"uuid": HOST, "content": f"(({ref}))"}],
                                  "--id", HOST, "--follow-refs")
         assert result.exit_code == 0, result.stderr
@@ -62,13 +62,13 @@ class TestWhatStays:
         assert content(HOST) == f"(({ref}))"
 
     def test_a_block_without_a_ref_is_changed_itself(self):
-        result, content, _ = run([{"uuid": HOST, "content": "TODO ship it"}],
+        result, content, _ = run([{"uuid": HOST, "content": "TODO ship it", "marker": "TODO"}],
                                  "--id", HOST, "--follow-refs")
         assert result.exit_code == 0, result.stderr
         assert content(HOST) == "DONE ship it"
 
     def test_a_labelled_ref_is_a_link_and_is_changed_itself(self):
-        result, content, _ = run([{"uuid": TASK, "content": "TODO ship it"},
+        result, content, _ = run([{"uuid": TASK, "content": "TODO ship it", "marker": "TODO"},
                                  {"uuid": HOST, "content": f"[see]((({TASK})))"}],
                                  "--id", HOST, "--follow-refs")
         assert result.exit_code == 0, result.stderr
@@ -81,7 +81,7 @@ class TestWhatStays:
         assert f"Block {GONE} not found." in result.stderr
 
     def test_without_follow_refs_the_output_has_no_chain(self):
-        result, _, _ = run([{"uuid": HOST, "content": "TODO ship it"}], "--id", HOST, "--json")
+        result, _, _ = run([{"uuid": HOST, "content": "TODO ship it", "marker": "TODO"}], "--id", HOST, "--json")
         assert "followed" not in json.loads(result.stdout)
 
 
@@ -220,13 +220,13 @@ class TestFollowed:
         assert json.loads(result.stdout)["followed"] == [TASK]
 
     def test_an_unchanged_result_carries_it(self):
-        result, _, _ = run([{"uuid": TASK, "content": "DONE ship it"}, pointer(HOST, TASK)],
+        result, _, _ = run([{"uuid": TASK, "content": "DONE ship it", "marker": "DONE"}, pointer(HOST, TASK)],
                            "--id", HOST, "--follow-refs", "--json")
         payload = json.loads(result.stdout)
         assert payload["status"] == "unchanged" and payload["followed"] == [TASK]
 
     def test_without_a_chain_it_is_empty(self):
-        result, _, _ = run([{"uuid": HOST, "content": "TODO ship it"}],
+        result, _, _ = run([{"uuid": HOST, "content": "TODO ship it", "marker": "TODO"}],
                            "--id", HOST, "--follow-refs", "--json")
         assert json.loads(result.stdout)["followed"] == []
 

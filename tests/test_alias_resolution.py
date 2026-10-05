@@ -29,7 +29,7 @@ TODO = "00000000-0000-4000-8000-00000000aaaa"
 
 def _graph(**extra):
     pages = {TARGET: [f"alias:: {ALIAS}\ncolor:: red",
-                      {"content": "TODO errand", "uuid": TODO}]}
+                      {"content": "TODO errand", "uuid": TODO, "marker": "TODO"}]}
     pages.update(extra.pop("pages", {}))
     return PageGraph(pages, aliases=extra.pop("aliases", {ALIAS: [TARGET]}), **extra)
 

@@ -36,6 +36,23 @@ STATES = tuple(dict.fromkeys(STATE[m] for m in ORDER))
 # What Logseq offers in its own UI: every marker but STARTED.
 FRONTEND_MARKERS = tuple(m for m in ORDER if m != "STARTED")
 
+# Which marker changes move Logseq's clock, as (old marker, new marker), None
+# for a block without one. The pair decides, not the target: WAIT -> DOING and
+# DONE -> NOW leave the text alone. Read from Logseq 0.10.15, not measured:
+# with-marker-time in handler/editor.cljs and clock-in/clock-out in
+# util/clock.cljs; only with time tracking on, Logseq's default. The last two
+# starting pairs count only while the block has no logbook yet. Known gaps:
+# Logseq judges that on the stored block's body, a double on the text after
+# the write, and Logseq reads the new marker with its own marker-pattern
+# instead of mldoc.
+CLOCK_IN_STEPS = (
+    (None, "DOING"), (None, "NOW"), ("TODO", "DOING"), ("LATER", "NOW"),
+    ("NOW", "NOW"), ("DOING", "DOING"),
+)
+CLOCK_OUT_STEPS = (
+    ("DOING", "TODO"), ("NOW", "LATER"), ("DOING", "DONE"), ("NOW", "DONE"),
+)
+
 # Derived from ORDER, longest first, so WAITING is tried before WAIT.
 _WORD = "|".join(re.escape(m) for m in sorted(ORDER, key=len, reverse=True))
 

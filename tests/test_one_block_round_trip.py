@@ -239,7 +239,7 @@ def test_replace_text_and_set_todo_status_leave_an_existing_line_alone():
     # Logseq's editor makes such blocks too; changing another line of one is
     # no reason to refuse.
     api = page_graph_api(PageGraph({"Page A": [
-        {"uuid": ANCHOR, "content": "TODO a word\n- b"}]}))
+        {"uuid": ANCHOR, "content": "TODO a word\n- b", "marker": "TODO"}]}))
     api.update_block.side_effect = lambda u, c, properties=None, replacing=None: \
         api.graph.locate(u)[1][api.graph.locate(u)[2]].update(content=c)
     r = _run(["replace-text", "--page", "Page A", "--find", "word", "--replace", "term"], api)
