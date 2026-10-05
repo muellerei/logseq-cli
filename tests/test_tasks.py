@@ -656,7 +656,8 @@ class TestOrderAndStates:
     page, Logseq 0.10.15, STARTED included, which Logseq's own marker-pattern
     does not name). block-checkbox (components/block.cljs, 0.10.15) draws an
     empty box for NOW LATER DOING IN-PROGRESS TODO WAIT WAITING, a ticked one
-    for DONE, none for CANCELED/CANCELLED and none for STARTED either; that
+    for DONE, none for CANCELED/CANCELLED and none for STARTED either (common.css
+    strikes a cancelled task through instead); that
     STARTED is open here is this module's decision, not a drawing."""
 
     def test_order(self):
@@ -920,7 +921,8 @@ PACKAGE = pathlib.Path(tasks.__file__).parent
 
 
 class TestOneRuleForAttachedLines:
-    @pytest.mark.parametrize("filename,function", [("tasks.py", "task_text")])
+    @pytest.mark.parametrize("filename,function",
+                             [("tasks.py", "task_text"), ("outlinetext.py", None)])
     def test_the_source_reads_the_shared_rule(self, filename, function):
         assert _source_uses_the_shared_rule(PACKAGE / filename, function)
 

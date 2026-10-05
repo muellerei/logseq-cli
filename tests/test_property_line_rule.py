@@ -10,6 +10,7 @@ into a page file, the file parsed by Logseq, and ``:block/properties`` read
 back. The characters that stop a line from being a property are exactly the
 ones #21 measured for the writer, except ``/``, which reads as a namespace.
 """
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,6 +20,8 @@ from logseq_cli.cli import cli
 from logseq_cli.blocktext import PROPERTY_LINE_RE
 from logseq_cli.outlinetext import parse_hierarchical_content
 from logseq_cli.render import is_properties_block
+from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 READ_AS_PROPERTY = [
@@ -266,6 +269,180 @@ class TestAttachedLineMask:
         from logseq_cli.blocktext import drawer_lines
         assert drawer_lines(["a", ":LOGBOOK:", "b", ":END:"]) == {1, 2, 3}
         assert drawer_lines([":LOGBOOK:", "x"]) == set()
+
+
+PLAN = "SCHEDULED: <2026-09-25 Fri>"
+DUE = "DEADLINE: <2026-09-30 Wed>"
+LOG = "CLOCK: [2026-09-25 Fri 10:00:00]--[2026-09-25 Fri 10:05:00] =>  00:05:00"
+
+
+def _contents(tree):
+    return [n["content"] for n in tree]
+
+
+class TestOutlineKeepsAttachedLines:
+    """A SCHEDULED/DEADLINE line and a closed logbook drawer belong to the
+    block above, as in Logseq's files; the one rule is blocktext's
+    attached_line_mask."""
+
+    @pytest.mark.parametrize("text", [
+        f"TODO x\n{PLAN}", f"TODO x\n{DUE}", f"TODO x\n{PLAN}\n{DUE}",
+        f"TODO x\n:LOGBOOK:\n{LOG}\n:END:",
+        f"TODO x\n{PLAN}\n:LOGBOOK:\n{LOG}\n:END:\nprio:: high",
+    ], ids=["scheduled", "deadline", "both", "drawer", "all three"])
+    def test_the_lines_stay_with_their_task(self, text):
+        tree = parse_hierarchical_content(text)
+        assert [(n["content"], n["children"]) for n in tree] == [(text, [])]
+
+    def test_an_indented_planning_line_under_a_bullet(self):
+        tree = parse_hierarchical_content(f"- TODO x\n  {PLAN}\n  {DUE}")
+        assert [(n["content"], n["children"]) for n in tree] == \
+            [(f"TODO x\n{PLAN}\n{DUE}", [])]
+
+    def test_a_planning_line_in_a_code_block_stays_code(self):
+        tree = parse_hierarchical_content(f"- note\n  ```\n  {PLAN}\n  ```")
+        assert len(tree) == 1
+        assert tree[0]["content"].count(PLAN) == 1
+
+    def test_a_bullet_fence_with_a_drawer_inside_stays_one_block(self):
+        fence = "```sh\n:LOGBOOK:\nx\n```"
+        tree = parse_hierarchical_content("- ```sh\n  :LOGBOOK:\n  x\n  ```\n  :END:\n- b")
+        assert tree == [{"content": fence, "children": [{"content": ":END:", "children": []}]},
+                        {"content": "b", "children": []}]
+        tree = parse_hierarchical_content("- ```sh\n  :LOGBOOK:\n  x\n  ```\n- b")
+        assert tree == [{"content": fence, "children": []}, {"content": "b", "children": []}]
+
+    @pytest.mark.parametrize("text", [
+        PLAN, DUE, f":LOGBOOK:\n{LOG}\n:END:"], ids=["scheduled", "deadline", "drawer"])
+    def test_a_leading_line_has_no_block_to_join(self, text):
+        tree = parse_hierarchical_content(text)
+        assert [(n["content"], n["children"]) for n in tree] == [(text, [])]
+
+    def test_a_bullet_fence_line_inside_a_code_block_opens_nothing(self):
+        text = ("- TODO a\n```md\n- ```js\n```\n  :LOGBOOK:\n"
+                "  CLOCK: [2026-09-25 Fri 10:00:00]\n  :END:\n- b\n```\nx\n```")
+        tree = parse_hierarchical_content(text)
+        assert [n["children"] for n in tree] == [[], []]
+        assert tree[0]["content"].endswith(":END:")
+
+    def test_a_bullet_line_ends_a_drawer_that_nothing_closed_before_it(self):
+        # An opener whose closer comes only after a bullet line is text, like
+        # an opener nothing closes: no block is swallowed, every line is a block.
+        tree = parse_hierarchical_content("TODO x\n:LOGBOOK:\n- foo\n:END:")
+        assert _contents(tree) == ["TODO x", ":LOGBOOK:", "foo", ":END:"]
+        tree = parse_hierarchical_content("- a\n:LOGBOOK:\n- b\n:END:")
+        assert _contents(tree) == ["a", ":LOGBOOK:", "b", ":END:"]
+        tree = parse_hierarchical_content("- TODO a\n:LOGBOOK:\n- TODO b\n- c\n:END:")
+        assert _contents(tree) == ["TODO a", ":LOGBOOK:", "TODO b", "c", ":END:"]
+
+    def test_a_drawer_closed_before_the_next_bullet_stays_with_its_block(self):
+        text = f"- TODO a\n  :LOGBOOK:\n  {LOG}\n  :END:\n- TODO b"
+        assert _contents(parse_hierarchical_content(text)) == [
+            f"TODO a\n:LOGBOOK:\n{LOG}\n:END:", "TODO b"]
+
+    def test_a_blank_line_inside_a_drawer_goes_and_the_drawer_stays(self):
+        tree = parse_hierarchical_content(f"TODO x\n:LOGBOOK:\n\n{LOG}\n:END:")
+        assert _contents(tree) == [f"TODO x\n:LOGBOOK:\n{LOG}\n:END:"]
+
+    def test_siblings_are_not_swallowed(self):
+        tree = parse_hierarchical_content(f"- TODO x\n  {PLAN}\n- TODO y")
+        assert _contents(tree) == [f"TODO x\n{PLAN}", "TODO y"]
+
+
+def _page_blocks(double, name="P"):
+    page = next(p for p in double.pages if p["name"] == name)
+    return [n["content"] for n in double._walk(page["blocks"])]
+
+
+def _command(monkeypatch, args, *, page="P"):
+    double = LogseqHttpDouble().install(monkeypatch)
+    double.add_page(page, ["first"])
+    result = split_runner().invoke(cli, ["--token", "t", *args])
+    return result, double
+
+
+class TestAnUnclosedLogbookIsText:
+    """An opener no closer ends is text, not a drawer (mldoc 1.5.7). The outline
+    parser makes a block of every line without a bullet, so the opener and what
+    follows it are blocks of their own: nothing is swallowed, nothing refused,
+    nothing said on stderr."""
+
+    def test_the_parser(self):
+        tree = parse_hierarchical_content("TODO x\n:LOGBOOK:\nno end")
+        assert _contents(tree) == ["TODO x", ":LOGBOOK:", "no end"]
+        tree = parse_hierarchical_content("TODO x\n:LOGBOOK:\nno end\n- TODO y")
+        assert _contents(tree) == ["TODO x", ":LOGBOOK:", "no end", "TODO y"]
+
+    @pytest.mark.parametrize("text,count", [
+        ("TODO x\n:LOGBOOK:\nno end", 3),
+        ("TODO x\n:LOGBOOK:\nno end\n- TODO y", 4),
+        (f"TODO x\n:LOGBOOK:\n{LOG}\n:END:", 1),
+    ])
+    def test_the_command(self, monkeypatch, text, count):
+        result, double = _command(monkeypatch, ["add-note-content", "--page", "P",
+                                                "--content", text, "--dry-run", "--json"])
+        assert result.exit_code == 0, result.stderr
+        assert json.loads(result.stdout)["blocks_added"] == count
+        assert result.stderr == ""
+        result, double = _command(monkeypatch, ["add-note-content", "--page", "P",
+                                                "--content", text, "--json"])
+        assert result.exit_code == 0, result.stderr
+        assert result.stderr == ""
+        assert len(_page_blocks(double)) == 1 + count
+        if text.endswith("TODO y"):
+            assert _page_blocks(double)[-1] == "TODO y"
+
+
+class TestTheCommandsKeepAScheduledTaskInOneBlock:
+    """What took two blocks, a task and a block holding only its date, is one."""
+
+    @pytest.mark.parametrize("text", [
+        f"TODO x\n{PLAN}", f"TODO x\n{DUE}", f"TODO x\n:LOGBOOK:\n{LOG}\n:END:"],
+        ids=["scheduled", "deadline", "drawer"])
+    def test_add_note_content(self, monkeypatch, text):
+        args = ["add-note-content", "--page", "P", "--content", text, "--json"]
+        result, double = _command(monkeypatch, [*args, "--dry-run"])
+        assert json.loads(result.stdout)["blocks_added"] == 1
+        result, double = _command(monkeypatch, args)
+        assert result.exit_code == 0, result.stderr
+        assert _page_blocks(double) == ["first", text]
+
+    def test_other_parser_users_keep_the_scheduled_line(self, monkeypatch):
+        text = f"- TODO x\n  {PLAN}"
+        result, double = _command(monkeypatch, ["add-journal-content", "--content", text,
+                                                "--date", "2026-09-25", "--dry-run", "--json"])
+        assert json.loads(result.stdout)["blocks"] == 1
+        result, double = _command(monkeypatch, ["add-journal-content", "--content", text,
+                                                "--date", "2026-09-25", "--json"])
+        assert f"TODO x\n{PLAN}" in _page_blocks(double, "2026-09-25, Friday")
+
+        child = f"- TODO x\n  {PLAN}\n  - child"
+        result, double = _command(monkeypatch, ["insert-block", "--page", "P", "--content",
+                                                child, "--dry-run", "--json"])
+        assert json.loads(result.stdout)["blocks"] == 2
+        result, double = _command(monkeypatch, ["insert-block", "--page", "P", "--content",
+                                                child, "--json"])
+        assert _page_blocks(double) == ["first", f"TODO x\n{PLAN}", "child"]
+
+        result, double = _command(monkeypatch, ["add-journal-block", "--content", child,
+                                                "--date", "2026-09-25", "--json"])
+        assert json.loads(result.stdout)["blocks_added"] == 2
+        assert f"TODO x\n{PLAN}" in _page_blocks(double, "2026-09-25, Friday")
+
+    def test_a_content_file_and_a_text_tree(self, monkeypatch, tmp_path):
+        path = tmp_path / "in.txt"
+        path.write_text(f"TODO x\n{PLAN}", encoding="utf-8")
+        result, double = _command(monkeypatch, ["add-journal-block", "--content-file", str(path),
+                                                "--date", "2026-09-25", "--json"])
+        assert json.loads(result.stdout)["blocks_added"] == 1
+        double = LogseqHttpDouble().install(monkeypatch)
+        double.add_page("P", ["first"])
+        result = split_runner().invoke(cli, ["--token", "t", "insert-block", "--child-of",
+                                             double.uuid_of("first"), "--tree",
+                                             f"TODO x\n{PLAN}", "--json"])
+        assert result.exit_code == 0, result.stderr
+        assert json.loads(result.stdout)["blocks_added"] == 1
+        assert f"TODO x\n{PLAN}" in _page_blocks(double)
 
 
 class TestOnlyThePageOwnPropertiesLoseTheirBullet:

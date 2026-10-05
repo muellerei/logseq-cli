@@ -158,6 +158,19 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- A task with a date can be written in one call. `add-note-content --content
+  $'TODO x\nSCHEDULED: <2026-09-25 Fri>'` made two blocks: the `SCHEDULED:` line
+  became a block of its own and had no effect, and the dry run said "2
+  block(s)". Found by reproducing it on a probe page. Logseq's own files keep
+  `SCHEDULED:` and `DEADLINE:` lines and a `:LOGBOOK:` drawer with the block
+  above, as they keep a `key:: value` line, and the outline parser now does
+  too, for every command that reads its text as an outline (`add-note-content`,
+  `add-journal-content`, `add-journal-block`, `insert-block` with an indented
+  outline, `--tree` given as text). A `:LOGBOOK:` that no `:END:` closes is
+  text, not a drawer (measured with Logseq's parser, mldoc 1.5.7), and so is
+  one whose `:END:` comes only after a bullet line, so it hides nothing and
+  swallows no bullet after it (#92).
+
 - `set-todo-status` no longer breaks a heading task: `## TODO ship it` became
   `DONE ## TODO ship it`, a block Logseq reads no task in, because the command
   took the first word of the text for the marker. It now swaps the marker where
