@@ -48,25 +48,41 @@ def find_backlinks(api, page_name: str) -> list:
     return sorted(backlink_pages)
 
 
-def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool = False) -> list:
+def _block_pull(with_task_fields: bool) -> str:
+    """The pull of a content search: content, uuid, the page, and with
+    ``with_task_fields`` the marker Logseq stored. The marker comes after the
+    uuid, where the double's query switch looks for the start of the pull."""
+    task_fields = " :block/marker" if with_task_fields else ""
+    return ("(pull ?b [:block/content :block/uuid" + task_fields
+            + " {:block/page [:block/original-name :block/name]}])")
+
+
+def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool = False,
+                           with_task_fields: bool = False) -> list:
     """Blocks whose content matches ``content``, optionally scoped to a page.
 
     Single source for the content lookup shared by ``find-block`` and the
     ``--where-content`` selectors, so a query fix cannot land in one and miss
     the other. Substring matching happens in datalog; ``use_regex`` pulls the
     candidates and filters them here, because datalog has no regex predicate.
+
+    ``with_task_fields`` also pulls ``:block/marker``, what Logseq stored for
+    the block (a row without a marker has no ``marker`` key). Only
+    ``set-todo-status`` asks for it; ``find-block`` and ``--where-content`` do
+    not, so their queries stay as they were.
     """
+    pull = _block_pull(with_task_fields)
     if use_regex:
         if page:
             query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+                f'[:find {pull}'
                 f' :where [?p :block/name {page_name_literal(page)}]'
                 ' [?b :block/page ?p]'
                 ' [?b :block/content _]]'
             )
         else:
             query = (
-                '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+                f'[:find {pull}'
                 ' :where [?b :block/content _]]'
             )
         raw = api.datascript_query(query) or []
@@ -76,7 +92,7 @@ def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool 
     content_literal = edn_string(content)
     if page:
         query = (
-            '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+            f'[:find {pull}'
             f' :where [?p :block/name {page_name_literal(page)}]'
             ' [?b :block/page ?p]'
             ' [?b :block/content ?c]'
@@ -84,7 +100,7 @@ def find_blocks_by_content(api, content: str, page: str = None, use_regex: bool 
         )
     else:
         query = (
-            '[:find (pull ?b [:block/content :block/uuid {:block/page [:block/original-name :block/name]}])'
+            f'[:find {pull}'
             ' :where [?b :block/content ?c]'
             f' [(clojure.string/includes? ?c {content_literal})]]'
         )

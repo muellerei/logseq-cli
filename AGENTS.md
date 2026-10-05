@@ -194,6 +194,14 @@ logseq-cli set-todo-status --id JOURNAL-REF-UUID --status DONE --follow-refs
 at the end; `followed` in `--json` lists the blocks it passed. A chain that
 loops or reaches a missing block is refused and nothing is written.
 
+`set-todo-status` changes a task only. A block Logseq reads no marker in
+(`todo x`, `TODO:`, `TODO` followed directly by a line break) is refused with
+`not_a_task`, and nothing is written; so is a block whose marker is not at the
+start of the text, and a block that only points to another one (the message
+names `--follow-refs`). `--content` that matches blocks but no task is refused
+with `no_task_matches`, unless `--follow-refs` is given. A heading task
+(`## TODO x`) keeps its heading: `## DONE x`.
+
 Do not use `replace-text` to change a marker: it rewrites by text match, so it
 also hits the word elsewhere on the page and silently retypes the rest of the
 line. `set-todo-status` swaps only the marker, in one call.
@@ -443,9 +451,13 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
 | `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
 | `config_error` | The config file cannot be used: it does not parse, `LOGSEQ_CLI_CONFIG` names a file that is not there, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean, or a `[graph] keep_empty_blocks_last` that is not. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
-| `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id` |
+| `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id`; for `set-todo-status --content` the `content` and `page` searched instead, no `id` |
 | `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
+| `not_a_task` | `set-todo-status` on a block Logseq reads no marker in, or whose marker is not at the start of the text (after an optional `#` prefix and a space), or that only points to another block and `--follow-refs` is missing | `id`; `points_to` for the pointer case |
+| `no_task_matches` | `set-todo-status --content`: blocks match, none is a task; not given with `--follow-refs` | `content`, `page`, `match_count` |
+| `ambiguous` | `set-todo-status --content`: several blocks match | `content`, `page`, `matches` (the uuids of all candidates) |
+| `missing_selector` | `set-todo-status` without `--id` and without `--content` plus `--page`; refused before any request | none |
 
 `set-property` and `remove-property --name` check the page themselves and
 name `page` and `property` instead.

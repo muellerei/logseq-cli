@@ -103,7 +103,9 @@ def with_marker(text: str, marker: str) -> str:
 
     The heading prefix stays as written; the spaces and tabs after the old
     marker become one space, none at the end of the text. A line break is
-    never replaced. Raises ValueError for a marker outside ORDER and for a
+    never replaced, and only the first line changes: split over the whole
+    text, a line break counts as the blank after the marker, and "TODO\\nnotes"
+    came out joined as "DONE notes". Raises ValueError for a marker outside ORDER and for a
     text without a marker: a swap must not put a marker on a block that is no
     task.
     """
@@ -156,5 +158,9 @@ def task_text(content: str, marker) -> str:
     drop = [a or p for a, p in zip(attached_line_mask(raw), property_line_mask(raw))]
     clean = "\n".join(line for line, d in zip(raw, drop) if not d).strip()
     if marker:
-        clean = re.sub(rf"^{re.escape(marker)}(?:\s+|$)", "", clean)
+        # The DB marker has decided; mldoc also reads the marker after "#" plus
+        # a tab, which marker_of refuses on purpose (it is used for writing).
+        # A heading prefix stays, hashes and blanks only: "\s" would take a line
+        # break and a no-break space, which mldoc does not.
+        clean = re.sub(rf"^(#+[ \t]+)?{re.escape(marker)}(?:\s+|$)", r"\1", clean).rstrip()
     return clean

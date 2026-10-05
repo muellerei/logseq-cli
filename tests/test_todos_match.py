@@ -10,8 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from logseq_cli.cli import cli
-from logseq_cli.commands.todos import _TODO_MARKERS
+from logseq_cli import tasks
 from tests.conftest import split_runner
+from tests.logseq_http_double import LogseqHttpDouble
 
 
 def _rows():
@@ -100,7 +101,7 @@ class TestMarkerIsStrippedForEveryMarker:
     "^ship" missed "CANCELED ship it" and --match cancel hit them all. The
     block's own :block/marker now says what to strip."""
 
-    @pytest.mark.parametrize("marker", sorted(_TODO_MARKERS | {"CANCELLED", "IN-PROGRESS"}))
+    @pytest.mark.parametrize("marker", sorted(tasks.ORDER))
     def test_marker_is_not_part_of_the_content(self, marker):
         api = MagicMock()
         api.datascript_query.return_value = [
@@ -150,3 +151,156 @@ class TestLogbookOpenerAndFenceAreText:
         out = self._run_block(content)
         assert out["todos"][0]["content"] == "x\n#urgent"
         assert self._run_block(content, "--match", "CLOCK")["count"] == 0
+
+
+HOST = "00000000-0000-4000-8000-0000000000b1"
+TARGET = "00000000-0000-4000-8000-0000000000b2"
+
+
+def _status_run(rows, *args, blocks=None):
+    """set-todo-status --content over a mocked search that answers ``rows``
+    (pull dicts, a marker where Logseq stored one); ``blocks`` answers getBlock."""
+    api = MagicMock()
+    api.datascript_query.return_value = [[r] for r in rows]
+    api.get_block.side_effect = lambda uuid, **_: (blocks or {}).get(uuid)
+    with patch("logseq_cli.group.LogseqAPI", return_value=api):
+        r = split_runner().invoke(cli, ["set-todo-status", "--content", "x", "--page", "P",
+                                        "--status", "DONE", *args])
+    return r, api
+
+
+class TestSetTodoStatusNeedsATask:
+    """--content finds blocks by text; only a block with a marker is a task."""
+
+    NOT_TASKS = [{"uuid": "u-A", "content": "see x above"}, {"uuid": "u-B", "content": "x again"}]
+
+    @pytest.mark.parametrize("dry", [[], ["--dry-run"]], ids=["write", "dry-run"])
+    def test_matches_without_a_task_are_refused(self, dry):
+        r, api = _status_run(self.NOT_TASKS, "--json", *dry)
+        assert r.exit_code != 0
+        out = json.loads(r.stderr)
+        assert out["reason"] == "no_task_matches"
+        assert (out["content"], out["match_count"]) == ("x", 2)
+        assert out["error"].endswith(
+            'none is a task (no marker). Pass --id of a task, or write one as "TODO …".')
+        assert "matches" not in out
+        api.update_block.assert_not_called()
+
+    def test_the_page_is_named_after_the_alias_resolution(self, monkeypatch):
+        double = LogseqHttpDouble().install(monkeypatch)
+        double.add_page("Target", ["alias:: zz-al", "see x above"])
+        r = split_runner().invoke(cli, ["--token", "t", "set-todo-status", "--content", "x",
+                                        "--page", "zz-al", "--status", "DONE", "--json"])
+        out = json.loads(r.stderr)
+        assert out["reason"] == "no_task_matches"
+        assert out["page"] == "Target"
+        assert "on page 'Target'" in out["error"]
+
+    @pytest.mark.parametrize("dry", [[], ["--dry-run"]], ids=["write", "dry-run"])
+    def test_with_follow_refs_one_match_without_a_marker_is_refused_as_no_task(self, dry):
+        r, api = _status_run([{"uuid": "u-A", "content": "see x above"}],
+                             "--follow-refs", "--json", *dry)
+        assert r.exit_code != 0
+        assert json.loads(r.stderr)["reason"] == "not_a_task"
+        api.update_block.assert_not_called()
+
+    def test_with_follow_refs_two_matches_without_a_marker_are_ambiguous(self):
+        r, _ = _status_run(self.NOT_TASKS, "--follow-refs", "--json")
+        assert json.loads(r.stderr)["reason"] == "ambiguous"
+
+    def test_follow_refs_takes_a_match_that_only_points_to_a_task(self):
+        pointer = {"uuid": HOST, "content": f"(({TARGET}))"}
+        target = {"uuid": TARGET, "content": "TODO x", "marker": "TODO"}
+        r, api = _status_run([pointer], "--follow-refs", "--json", blocks={TARGET: target})
+        assert r.exit_code == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["new"] == "DONE x"
+        assert out["followed"] == [TARGET]
+        assert api.update_block.call_args.args[0] == TARGET
+
+    def test_a_pointer_without_follow_refs_names_follow_refs(self):
+        api = MagicMock()
+        api.get_block.return_value = {"uuid": HOST, "content": f"{{{{embed (({TARGET}))}}}}"}
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["set-todo-status", "--id", HOST,
+                                            "--status", "DONE", "--dry-run", "--json"])
+        out = json.loads(r.stderr)
+        assert out["reason"] == "not_a_task" and out["points_to"] == TARGET
+        assert "--follow-refs" in out["error"] and "TODO" not in out["error"]
+
+
+class TestSetTodoStatusReasons:
+    """The three refusals that were plain text now carry a reason."""
+
+    def test_not_found_over_content_has_no_id(self):
+        r, _ = _status_run([], "--json")
+        assert r.exit_code != 0
+        out = json.loads(r.stderr)
+        assert out["reason"] == "block_not_found"
+        assert (out["content"], "id" in out) == ("x", False)
+        assert "No block found matching 'x' on page" in out["error"]
+
+    def test_ambiguous_lists_every_candidate_in_matches(self):
+        rows = [{"uuid": f"u-{i:02d}", "content": ("TODO " + "w" * 76) if i == 0 else f"TODO t{i}",
+                 "marker": "TODO"} for i in range(12)]
+        r, _ = _status_run(rows, "--json")
+        out = json.loads(r.stderr)
+        assert out["reason"] == "ambiguous"
+        assert out["matches"] == [f"u-{i:02d}" for i in range(12)]
+        assert "refusing to guess which one to update" in out["error"]
+        assert out["error"].endswith("... and 2 more")
+        first = next(ln for ln in out["error"].split("\n") if ln.startswith("  u-00"))
+        assert first == "  u-00  " + ("TODO " + "w" * 76)[:70]
+
+    def test_an_id_wins_over_content(self):
+        api = MagicMock()
+        api.get_block.return_value = {"uuid": TARGET, "content": "TODO x", "marker": "TODO"}
+        with patch("logseq_cli.group.LogseqAPI", return_value=api), \
+                patch("logseq_cli.commands.todos.find_blocks_by_content") as search:
+            r = split_runner().invoke(cli, ["set-todo-status", "--id", TARGET, "--content", "x",
+                                            "--page", "P", "--status", "DONE", "--json"])
+        assert r.exit_code == 0, r.stderr
+        search.assert_not_called()
+
+    @pytest.mark.parametrize("args", [["--status", "DONE"], ["--content", "x", "--status", "DONE"]],
+                             ids=["nothing", "content without page"])
+    def test_a_missing_selector_is_refused_before_any_request(self, args):
+        api = MagicMock()
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["set-todo-status", *args, "--json"])
+        assert r.exit_code != 0
+        out = json.loads(r.stderr)
+        assert out == {"error": "Specify either --id or both --content and --page.",
+                       "reason": "missing_selector"}
+        assert api.method_calls == []
+
+    def test_plain_text_gets_the_error_prefix_and_leaves_stdout_empty(self):
+        for rows, text in (([], "Error: No block found matching 'x' on page"),
+                           ([{"uuid": "a", "content": "TODO a", "marker": "TODO"},
+                             {"uuid": "b", "content": "TODO b", "marker": "TODO"}],
+                            "Error: 2 blocks match 'x' on page")):
+            r, _ = _status_run(rows)
+            assert r.exit_code != 0 and r.stdout == ""
+            assert text in r.stderr
+        api = MagicMock()
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["set-todo-status", "--status", "DONE"])
+        assert r.stderr.startswith("Error: Specify either --id or both --content and --page.")
+
+
+class TestAHeadingTaskKeepsItsHeadingInContent:
+    def _content(self, *args):
+        api = MagicMock()
+        api.datascript_query.return_value = [
+            [{"content": "## TODO ship it", "marker": "TODO", "uuid": "u1"},
+             {"original-name": "Page A", "name": "page a"}]]
+        with patch("logseq_cli.group.LogseqAPI", return_value=api):
+            r = split_runner().invoke(cli, ["get-todos", "--no-follow-refs", "--json", *args])
+        return json.loads(r.stdout)
+
+    def test_the_marker_goes_the_heading_stays(self):
+        assert self._content()["todos"][0]["content"] == "## ship it"
+
+    def test_match_sees_the_text_not_the_marker(self):
+        assert self._content("--match", "^## ship")["count"] == 1
+        assert self._content("--match", "TODO ship")["count"] == 0

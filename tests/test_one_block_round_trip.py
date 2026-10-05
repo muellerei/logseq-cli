@@ -302,12 +302,14 @@ def test_other_text_is_checked_before_the_first_write(args):
 
 
 @pytest.mark.parametrize("dry", [[], ["--dry-run"]], ids=["write", "dry-run"])
-def test_set_todo_status_on_a_block_that_starts_with_a_fence(dry):
-    # "TODO ```js" is no fence: the closing one would be left open.
+def test_set_todo_status_refuses_a_block_that_starts_with_a_fence(dry):
+    # Logseq reads no marker in it, so it is no task and nothing is written; the
+    # refusal comes before a marker could be put in front of the fence, which
+    # would leave the closing one open.
     api = page_graph_api(PageGraph({"Page A": [{"uuid": ANCHOR, "content": "```js\nrun()\n```"}]}))
-    r = _run(["set-todo-status", "--id", ANCHOR, "--status", "TODO", *dry], api)
-    assert r.exit_code == 2
-    assert "first line of text" in r.stderr
+    r = _run(["set-todo-status", "--id", ANCHOR, "--status", "TODO", "--json", *dry], api)
+    assert r.exit_code != 0
+    assert json.loads(r.stderr)["reason"] == "not_a_task"
     assert _writes(api) == 0
 
 

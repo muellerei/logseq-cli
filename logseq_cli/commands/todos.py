@@ -1,10 +1,9 @@
 import datetime
 import re
-import sys
 
 import click
 
-from logseq_cli.blocktext import pointer_target, refuse_split_block
+from logseq_cli.blocktext import pointer_target
 from logseq_cli.datalog import edn_string
 from logseq_cli.dates import (
     journal_day_to_date,
@@ -17,25 +16,7 @@ from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.safety import WriteCommand
-from logseq_cli.tasks import task_text
-
-
-_TODO_MARKERS = {"TODO", "DOING", "DONE", "LATER", "NOW", "CANCELED", "WAIT", "WAITING"}
-
-def _swap_todo_marker(content: str, new_status: str) -> str:
-    """Replace the leading TODO-marker in content with new_status.
-
-    On the first line only: split over the whole content, a line break counts
-    as the whitespace after the marker, and "TODO\nnotes" came out joined as
-    "DONE notes".
-    """
-    first, newline, rest = content.partition("\n")
-    parts = first.split(None, 1)
-    if parts and parts[0].upper() in _TODO_MARKERS:
-        first = f"{new_status} {parts[1]}".strip() if len(parts) > 1 else new_status
-    else:
-        first = f"{new_status} {first}"
-    return first + newline + rest
+from logseq_cli.tasks import marker_before_newline, marker_of, task_text, with_marker
 
 
 def follow_ref_chain(api, block: dict, as_json: bool):
@@ -441,6 +422,32 @@ def get_todos(ctx, status, page, tag, match, from_date, to_date, due_from, due_t
                 elif t.get("references_withheld"):
                     click.echo(f"      also on {t['references_withheld']} other page(s)")
 
+def _refuse_no_task(block: dict, content: str, as_json: bool):
+    """Refuse a block that is no task to this command (never returns). Which
+    sentence fits is checked in this order: a block that only points to
+    another, a marker Logseq stored that this command cannot reach, a line
+    break right behind a marker word, anything else. The marker rules
+    themselves are tasks'."""
+    uuid = block.get("uuid")
+    target = pointer_target(content)
+    if target:
+        fail(f"Block {uuid} is not a task: it only points to block {target}. "
+             "Pass --follow-refs to change the task it points to.",
+             as_json, reason="not_a_task", id=uuid, points_to=target)
+    if block.get("marker"):
+        fail(f"Block {uuid} is a task, but its marker is not where this command can change "
+             'it: it must start the text, after an optional "#" prefix and a space. Change '
+             "the marker in Logseq, or rewrite the text so the marker starts it.",
+             as_json, reason="not_a_task", id=uuid)
+    word = marker_before_newline(content)
+    if word:
+        fail(f"Block {uuid} is not a task: Logseq reads no marker in it, because a line "
+             f'break follows "{word}" directly. Put text or a space after "{word}" on the '
+             "first line.", as_json, reason="not_a_task", id=uuid)
+    fail(f"Block {uuid} is not a task: Logseq reads no marker in it. A task starts with a "
+         'marker, e.g. "TODO …".', as_json, reason="not_a_task", id=uuid)
+
+
 @cli.command("set-todo-status", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN set-todo-status --id UUID --status DONE
@@ -453,6 +460,11 @@ Notes:
   follows it, and on through every such block, and updates the one at the end.
   A chain that loops or reaches a missing block is refused, nothing written.
   Prefer this over replace-text for marker changes — 1 call, deterministic.
+  A block Logseq reads no marker in is not a task: it is refused and nothing is
+  written, also with --dry-run. A block that holds only a ((uuid)) ref is refused
+  too, and the message names --follow-refs.
+  --content that matches blocks but none with a marker is refused too (without
+  --follow-refs).
 """)
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
@@ -483,24 +495,25 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     api = ctx.obj["api"]
 
     if not block_id and not (content and page):
-        click.echo("Specify either --id or both --content and --page.", err=True)
-        sys.exit(1)
+        fail("Specify either --id or both --content and --page.", as_json,
+             reason="missing_selector")
 
     # Resolve UUID via content search if needed
     if not block_id:
-        if page:
-            ref = follow_page(api, page, as_json)
-            page = ref.page
-        matches = find_blocks_by_content(api, content, page=page)
-        # Prefer blocks that actually carry a TODO marker: a status change is
-        # only meaningful there, and it disambiguates a text that also appears
-        # in prose.
-        todo_matches = [m for m in matches if m.get("content", "").split()[0:1] and
-                        m.get("content", "").split()[0].upper() in _TODO_MARKERS]
-        candidates = todo_matches or matches
+        page = follow_page(api, page, as_json).page
+        matches = find_blocks_by_content(api, content, page=page, with_task_fields=True)
+        # Prefer blocks that carry a marker: a status change is only meaningful
+        # there, and it disambiguates a text that also appears in prose.
+        task_matches = [m for m in matches if m.get("marker")]
+        candidates = task_matches or matches
+        if matches and not task_matches and not follow_refs:
+            fail(f"{len(matches)} blocks match '{content}' on page '{page}', none is a task "
+                 f'(no marker). Pass --id of a task, or write one as "TODO …".',
+                 as_json, reason="no_task_matches", content=content, page=page,
+                 match_count=len(matches))
         if not candidates:
-            click.echo(f"No block found matching '{content}' on page '{page}'.", err=True)
-            sys.exit(1)
+            fail(f"No block found matching '{content}' on page '{page}'.", as_json,
+                 reason="block_not_found", content=content, page=page)
         if len(candidates) > 1:
             # Taking the first match would silently rewrite one of several
             # equally valid blocks, and the caller could not tell which. This
@@ -510,11 +523,10 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
                 for m in candidates[:10]
             )
             more = f"\n  ... and {len(candidates) - 10} more" if len(candidates) > 10 else ""
-            click.echo(
-                f"{len(candidates)} blocks match '{content}' on page '{page}'; refusing "
-                f"to guess which one to update. Narrow --content or pass --id:\n"
-                f"{listing}{more}", err=True)
-            sys.exit(1)
+            fail(f"{len(candidates)} blocks match '{content}' on page '{page}'; refusing "
+                 f"to guess which one to update. Narrow --content or pass --id:\n"
+                 f"{listing}{more}", as_json, reason="ambiguous", content=content, page=page,
+                 matches=[m.get("uuid") for m in candidates])
         block = candidates[0]
     else:
         block_id = block_id.strip("()")
@@ -529,28 +541,24 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     block_id = block.get("uuid")
     old_content = block.get("content", "")
 
-    new_content = _swap_todo_marker(old_content, status)
+    # A task is a block Logseq stored a marker for. The text must show it where
+    # with_marker can change it, too: it writes on what marker_of reads.
+    old_marker = marker_of(old_content)
+    if not block.get("marker") or old_marker is None:
+        _refuse_no_task(block, old_content, as_json)
+
+    new_content = with_marker(old_content, status)
     if new_content == old_content:
         if as_json:
             output({"uuid": block_id, "status": "unchanged", "content": old_content, **chain},
                    True)
         else:
-            click.echo("No change (block already has status or no marker found).")
+            click.echo("No change (block already has this status).")
         return
 
     # The marker swap is the whole change, so the preview shows both markers and
-    # the line they sit on — enough to tell the right block from a near-identical
+    # the line they sit on: enough to tell the right block from a near-identical
     # one before committing. Resolution and the ambiguity guard above already ran.
-    old_marker = old_content.split()[0] if old_content.split() else ""
-    if old_marker.upper() not in _TODO_MARKERS:
-        old_marker = ""
-
-    # Checked before the preview, which would otherwise show what the write
-    # refuses: a marker put in front of an opening fence leaves the code block
-    # open (#47). Lines the block already had may stay.
-    refuse_split_block(new_content, command="set-todo-status", where="The block",
-                       replacing=old_content)
-
     if dry_run:
         if as_json:
             output({"uuid": block_id, "old_marker": old_marker, "new_marker": status,
@@ -560,7 +568,7 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
             click.echo(f"[DRY RUN] Would set status on block {block_id}")
             if chain.get("followed"):
                 click.echo(f"  followed: {' -> '.join(chain['followed'])}")
-            click.echo(f"  marker: {old_marker or '(none)'} -> {status}")
+            click.echo(f"  marker: {old_marker} -> {status}")
             preview = old_content[:60] + ("..." if len(old_content) > 60 else "")
             click.echo(f"  was: {preview}")
             preview = new_content[:60] + ("..." if len(new_content) > 60 else "")
