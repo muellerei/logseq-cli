@@ -20,12 +20,16 @@ def escape_regex(s: str) -> str:
     return re.escape(s)
 
 
-def get_page_content(api, page_name: str) -> str:
-    """Fetch page blocks and return formatted text."""
-    blocks = api.get_page_blocks_tree(page_name)
+def page_text(blocks) -> str:
+    """The text of a page from its block tree, ``""`` for an empty or missing tree."""
     if not blocks:
         return ""
     return process_blocks(blocks)
+
+
+def get_page_content(api, page_name: str) -> str:
+    """Fetch page blocks and return formatted text."""
+    return page_text(api.get_page_blocks_tree(page_name))
 
 
 def find_backlinks(api, page_name: str) -> list:

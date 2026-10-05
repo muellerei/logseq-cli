@@ -2,6 +2,7 @@ import datetime
 
 import click
 
+from logseq_cli import tasks
 from logseq_cli.config import load_config, require
 from logseq_cli.datalog import edn_keyword, edn_string, page_name_literal
 from logseq_cli.group import cli
@@ -112,12 +113,14 @@ def smart_query(ctx, request, include_query, advanced, as_json):
         },
         "tasks": {
             "keywords": ["todo", "task", "tasks", "incomplete", "pending", "aufgaben", "offene", "offen"],
-            "query": '[:find (pull ?b [*]) :where [?b :block/marker ?m] [(contains? #{"TODO" "LATER" "NOW" "DOING"} ?m)]]',
+            "query": ("[:find (pull ?b [*]) :where [?b :block/marker ?m] "
+                      + tasks.marker_clause("?m", tasks.markers_in(["open"])) + "]"),
             "description": "Open tasks",
         },
         "done": {
             "keywords": ["done", "completed", "finished", "erledigt", "fertig", "abgeschlossen"],
-            "query": '[:find (pull ?b [*]) :where [?b :block/marker "DONE"]]',
+            "query": ("[:find (pull ?b [*]) :where [?b :block/marker ?m] "
+                      + tasks.marker_clause("?m", tasks.markers_in(["done"])) + "]"),
             "description": "Completed tasks",
         },
         "journal": {

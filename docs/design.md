@@ -149,7 +149,9 @@ erfolgreich" as positive, 16% of positive hits in a 90-day sample; and
 by-products. None of that was caught by tests asserting that output exists —
 it took reading the numbers next to a graph whose real answer was known. A
 plausible number that gets believed is worse than an obvious failure, so these
-commands now measure one defined thing each and agree with one another.
+commands now measure one defined thing each, and the tasks that
+`analyze-graph`, `get-todos` and `smart-query` report come from the same
+classification of `:block/marker`.
 See [0.9.0, Fixed](../CHANGELOG.md#090---2026-09-14).
 
 ## Output is bounded because the consumer has a context limit

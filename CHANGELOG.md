@@ -96,6 +96,21 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `analyze-graph` counts tasks from the database, like `get-todos`:
+  `total_todos` is replaced by `tasks` (`open`, `done`, `cancelled`,
+  `open_by_marker`) and the text line reads `Tasks: N open (…), M done, K
+  cancelled`. Before, a pattern over the page text counted `TODO:`, a lowercase
+  `todo`, a block that starts with `[ ]` and a marker on a later line, so the
+  two commands disagreed on the same graph. A note says how many blocks start
+  with `[ ]`, which Logseq shows as text. `--days` limits only the Recently
+  updated list; its help now says so (#92).
+
+- `smart-query --request tasks` now also finds WAIT, WAITING, IN-PROGRESS and
+  STARTED tasks. The pattern is matched by every keyword it lists (`todo`,
+  `task`, `tasks`, `incomplete`, `pending`, `aufgaben`, `offene`, `offen`), not
+  only `tasks`, so all of them return more. The old list was TODO, LATER, NOW,
+  DOING; `--advanced` with your own query keeps it. `done` is unchanged (#92).
+
 - `set-todo-status --status` no longer tells upper case from lower case
   (`--status done` is taken, as `--status todo` always was for `get-todos`),
   and sets every marker Logseq's frontend knows: WAIT, WAITING, IN-PROGRESS and
@@ -182,6 +197,12 @@ file carries most of the reasoning behind the tool.
   Properties no longer show, not even for a target that holds nothing else,
   where Logseq shows them. The body is still one `get-block` away. See
   [#98](https://github.com/muellerei/logseq-cli/issues/98).
+
+### Removed
+
+- `analyze-graph` no longer reports `total_todos`; `tasks` replaces it (#92).
+  A key that changes its value never keeps its old name, so a reader of the
+  old key fails loudly.
 
 ### Fixed
 
