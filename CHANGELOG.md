@@ -225,6 +225,17 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-todos` reported `next_due` one repeat too late for a repeating task whose
+  date is today or still ahead. `SCHEDULED: <2026-10-11 Sun +1w>` with today
+  at 2026-10-06 reported 2026-10-18, and `.+1d` dated today reported tomorrow,
+  so `--due-from` and `--due-to` left the task out of the range that holds it.
+  That is the normal state of a task that was ticked off before, because
+  Logseq then writes the next date into the text. Only `++` kept such a date.
+  Found by trying every form with a stored date from today onward; the error
+  was already on `main`. A stored date that is not past is now the next
+  occurrence for `+`, `.+` and `++` alike. A date that is past is unchanged
+  (#92).
+
 - `get-todos` stopped with a traceback and exit 1 on a block whose repeater
   holds a number no date can reach, such as `SCHEDULED: <2026-01-01 Thu
   +99999999999d>`, or one of more than 4300 digits. A single such block, typed

@@ -38,10 +38,20 @@ class TestNextOccurrence:
         start = datetime.date(2026, 5, 10)
         assert next_occurrence(start, ("++", 1, "w"), self.TODAY) == datetime.date(2026, 5, 17)
 
-    def test_double_plus_keeps_a_future_date(self):
-        """A date still ahead is already the next occurrence."""
+    @pytest.mark.parametrize("kind", ["+", ".+", "++"])
+    def test_a_date_ahead_is_the_next_occurrence_for_every_form(self, kind):
+        """A task ticked off before has its next date written into the text.
+
+        That date is the occurrence that is due next; one more step would skip it
+        and put the task outside the range that holds it.
+        """
         start = datetime.date(2026, 5, 20)
-        assert next_occurrence(start, ("++", 1, "w"), self.TODAY) == start
+        assert next_occurrence(start, (kind, 1, "w"), self.TODAY) == start
+
+    @pytest.mark.parametrize("kind", ["+", ".+", "++"])
+    def test_a_date_of_today_is_the_next_occurrence_for_every_form(self, kind):
+        """A task due today is due today, not tomorrow."""
+        assert next_occurrence(self.TODAY, (kind, 1, "d"), self.TODAY) == self.TODAY
 
     def test_plus_keeps_stepping_until_it_reaches_the_future(self):
         """One step off a 2020 date is still 2020; the answer must be ahead.
