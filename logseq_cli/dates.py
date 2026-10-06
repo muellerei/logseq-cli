@@ -238,12 +238,16 @@ def next_occurrence(start: datetime.date, repeater, today: datetime.date = None)
     # ticked off, "+" and "++" return a date that is still in the past — useless
     # for "what is due", which has to look forward from today whatever the form.
     #
-    # So the single step is kept where it lands in the future, and otherwise the
-    # ".+" loop runs for every form. The interval is still Logseq's, and so is
-    # the weekday rule; only the starting point differs, because the question
-    # does.
+    # So a stored date that is not past is the occurrence itself: a task ticked
+    # off before has its next date written into the text, and one more step would
+    # skip it. Past that, the single step is kept where it lands in the future,
+    # and otherwise the ".+" loop runs for every form. The interval is still
+    # Logseq's, and so is the weekday rule; only the starting point differs,
+    # because the question does.
+    if start >= today:
+        return start
     if kind in ("+", "++"):
-        stepped = start if (kind == "++" and start > today) else _add_interval(start, num, unit)
+        stepped = _add_interval(start, num, unit)
         if stepped is None or stepped > today:
             return stepped
 
