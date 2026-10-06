@@ -175,12 +175,18 @@ logseq-cli get-todos --page "Project Alpha"
 # Filter by tag
 logseq-cli get-todos --tag urgent
 
+# Only tasks whose block stands on a journal page (or on any other page: `page`)
+logseq-cli get-todos --page-type journal
+
 # Filter by what the task says (regex, case-insensitive)
 logseq-cli get-todos --match "review|contract" --json
 # --json: {"todos": [{marker, content, page, uuid, journal_day?, ...}], "count": N}
 
 # Tasks standing in a date range, including ones carried forward by ((block-ref))
 logseq-cli get-todos --from 2026-09-14 --to 2026-09-16 --json
+
+# Journal tasks older than a date, by the day of their own block
+logseq-cli get-todos --page-type journal --no-follow-refs --to 2026-09-01 --json
 
 # Mark as done
 logseq-cli set-todo-status --id UUID --status DONE

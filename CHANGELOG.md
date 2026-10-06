@@ -12,6 +12,16 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `get-todos --page-type journal|page` keeps the tasks whose block stands on a
+  journal page, or on any other page (#118). Before, the only way to split the
+  two was `jq` on `journal_day`, which leaves `count` at the unfiltered value and
+  has nothing to filter on in text output. The option only narrows: with
+  `--from/--to` a task still counts as in the range through a journal it was
+  carried into by a block ref, so a carried task from an ordinary page is a
+  `page` task that a range can contain. For "journal tasks older than a date" by
+  their own day, add `--no-follow-refs`, which already measured the range that
+  way.
+
 - `get-todos --state open|done|cancelled` (repeatable, default `open`) selects
   tasks by state, so `--state done` lists the finished ones and `--state
   cancelled` both spellings of the cancelled marker (#92).
