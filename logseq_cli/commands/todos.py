@@ -155,6 +155,7 @@ Examples:
   logseq-cli --token TOKEN get-todos --page "Projects" --tag urgent
   logseq-cli --token TOKEN get-todos --from 2026-05-01 --to 2026-05-31 --state open --state done
   logseq-cli --token TOKEN get-todos --due-from today --due-to 2026-05-08
+  logseq-cli --token TOKEN get-todos --page-type journal --no-follow-refs --to 2025-10-06
 Notes:
 """ f"""  --state {'|'.join(STATES)} (repeatable, default open: {', '.join(markers_in(['open']))}) selects by state;
   --status picks single markers and overrides --state.
@@ -181,6 +182,13 @@ Notes:
               help=f"Select single markers instead of states (repeatable, case does not matter): "
                    f"{', '.join(ORDER)}. Given together with --state, --status applies.")
 @click.option("--page", "--name", default=None, help="Filter by page name (substring, case-insensitive)")
+@click.option("--page-type", "page_type", default=None,
+              type=click.Choice(["journal", "page"], case_sensitive=False),
+              help="Only tasks whose block stands on a journal page ('journal') or on any "
+                   "other page ('page'). The block counts, not the pages it was carried to "
+                   "by ((block-ref)): with --from/--to a task still counts as in the range "
+                   "through such a page. To measure the range by the block's own day, add "
+                   "--no-follow-refs.")
 @click.option("--tag", default=None, help="Filter by hashtag (e.g. 'urgent', without #)")
 @click.option("--match", "match", default=None, help="Filter by what the task says: a regular expression, case-insensitive, searched in the task text (not its properties)")
 @click.option("--from", "from_date", default=None, help="Only TODOs on or after this date (YYYY-MM-DD or 'today'/'yesterday'/'tomorrow'). Dates come from the journal pages a task stands on — the one its block lives on and the ones it was carried into by ((block-ref)) — so tasks found only on ordinary pages are excluded whenever a range is given.")
@@ -191,11 +199,11 @@ Notes:
 @click.option("--refs-limit", "refs_limit", type=int, default=10, show_default=True,
               help="Occurrences kept per task in 'references'; 0 lifts the cap. references_withheld counts everything left out, which with --from/--to also includes occurrences outside the range and on pages with no journal-day — so 0 does not make it zero")
 @click.option("--no-follow-refs", "no_follow_refs", is_flag=True,
-              help="Do not resolve block-refs: report only where task blocks live, not where they appear. Saves one read")
+              help="Do not resolve block-refs: report only where task blocks live, not where they appear. Saves one read. With --from/--to the range is measured by the day of the page the block lives on")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def get_todos(ctx, state, status, page, tag, match, from_date, to_date, due_from, due_to,
+def get_todos(ctx, state, status, page, page_type, tag, match, from_date, to_date, due_from, due_to,
               include_done, refs_limit, no_follow_refs, as_json):
     """List all TODOs/tasks in the graph."""
     api = ctx.obj["api"]
@@ -293,6 +301,12 @@ def get_todos(ctx, state, status, page, tag, match, from_date, to_date, due_from
     if page:
         page_lower = page.lower()
         todos = [t for t in todos if page_lower in t["page"].lower()]
+
+    # journal_day is set only for a block on a journal page, so it tells the
+    # kind of page its block stands on, whatever refs carried it elsewhere.
+    if page_type:
+        on_journal = page_type.lower() == "journal"
+        todos = [t for t in todos if ("journal_day" in t) == on_journal]
 
     # Filter by tag if requested
     if tag:
