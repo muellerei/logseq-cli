@@ -2,7 +2,8 @@
 
 Working on this repository rather than using the tool? See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the tests, the link check and the
-conventions a change follows.
+conventions a change follows. The domain vocabulary is in
+[GLOSSARY.md](GLOSSARY.md).
 
 Instructions for any AI agent or automation tool driving logseq-cli from a
 shell. Nothing here is specific to one assistant: the CLI is a plain Python
