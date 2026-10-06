@@ -225,6 +225,15 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-todos` stopped with a traceback and exit 1 on a block whose repeater
+  holds a number no date can reach, such as `SCHEDULED: <2026-01-01 Thu
+  +99999999999d>`, or one of more than 4300 digits. A single such block, typed
+  or pasted, made the command unusable for the whole graph. The task now lists
+  like one whose interval cannot be read: it has no `next_due`, and a
+  `--due-from` or `--due-to` range leaves it out, counts it in
+  `repeating_excluded` and names it on stderr. Found by trying oversized numbers on every unit and form of repeater;
+  the crash was already on `main`.
+
 - `analyze-graph` reported the size of the first cluster it found as
   `largest_cluster`, not the size of the largest one. The order of the clusters
   follows the order of the pages, so a graph whose first linked group was small

@@ -110,6 +110,18 @@ _TIMESTAMP_BODY_RE = re.compile(
 _INTERVAL_RE = re.compile(r"(\+\+|\.\+|\+)(\d+)([hdwmy])")
 
 
+# No date lies this many days, weeks, months or years away (the year stops at
+# 9999), so every number past it means the same: the repeater cannot be placed.
+_TOO_FAR = 10 ** 12
+
+
+def _interval_number(digits: str) -> int:
+    """The number of a repeater. Digits past what any date can hold are read as
+    _TOO_FAR, because int() refuses a string of more than 4300 digits and the
+    text is whatever a person typed or pasted."""
+    return int(digits) if len(digits) <= 12 else _TOO_FAR
+
+
 def parse_timestamp(text: str):
     """The text between ``<`` and ``>`` of a timestamp, as a Timestamp without
     ``kind``, or None. Forgiving on purpose: a wrong or missing weekday, and
@@ -125,7 +137,7 @@ def parse_timestamp(text: str):
     except ValueError:
         return None
     interval = _INTERVAL_RE.search(rest)
-    repeater = (interval.group(1), int(interval.group(2)), interval.group(3)) if interval else None
+    repeater = (interval.group(1), _interval_number(interval.group(2)), interval.group(3)) if interval else None
     return Timestamp(None, date, time, repeater)
 
 
@@ -173,30 +185,34 @@ def timestamps(content: str) -> list:
 
 
 def _add_interval(start: datetime.date, num: int, unit: str):
-    """Add ``num`` units to ``start``. Returns None for an unknown unit.
+    """Add ``num`` units to ``start``. Returns None for an unknown unit, and
+    for a result no date can hold (a repeater typed as +99999999999d).
 
     Months and years are handled by arithmetic on the calendar fields rather
     than by a fixed day count, clamping the day to the target month's length
     (31 January plus one month is 28 or 29 February, as a calendar reads it).
     """
-    if unit == "h":
-        # Hour repeats exist in the grammar; at date granularity the smallest
-        # step that can move the result is a day.
-        return start + datetime.timedelta(days=1)
-    if unit == "d":
-        return start + datetime.timedelta(days=num)
-    if unit == "w":
-        return start + datetime.timedelta(weeks=num)
-    if unit == "m":
-        month_index = start.month - 1 + num
-        year = start.year + month_index // 12
-        month = month_index % 12 + 1
-        day = min(start.day, calendar.monthrange(year, month)[1])
-        return datetime.date(year, month, day)
-    if unit == "y":
-        year = start.year + num
-        day = min(start.day, calendar.monthrange(year, start.month)[1])
-        return datetime.date(year, start.month, day)
+    try:
+        if unit == "h":
+            # Hour repeats exist in the grammar; at date granularity the smallest
+            # step that can move the result is a day.
+            return start + datetime.timedelta(days=1)
+        if unit == "d":
+            return start + datetime.timedelta(days=num)
+        if unit == "w":
+            return start + datetime.timedelta(weeks=num)
+        if unit == "m":
+            month_index = start.month - 1 + num
+            year = start.year + month_index // 12
+            month = month_index % 12 + 1
+            day = min(start.day, calendar.monthrange(year, month)[1])
+            return datetime.date(year, month, day)
+        if unit == "y":
+            year = start.year + num
+            day = min(start.day, calendar.monthrange(year, start.month)[1])
+            return datetime.date(year, start.month, day)
+    except (OverflowError, ValueError):
+        return None
     return None
 
 

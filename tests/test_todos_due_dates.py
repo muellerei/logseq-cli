@@ -20,6 +20,8 @@ import json
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from logseq_cli.cli import cli
 from logseq_cli.dates import next_occurrence
 from tests.conftest import split_runner
@@ -179,6 +181,26 @@ class TestRepeatingTasks:
         assert payload["repeating_excluded"] == 1
         assert "opaque repeat" in result.stderr
         assert "next_due" not in json.dumps(payload)
+
+    # The number of a repeater is typed text: a date it leads to may not exist.
+    # One such block lists like an unreadable one, and the others still list.
+    @pytest.mark.parametrize("digits", ["9" * 11, "9" * 5000], ids=["11-digits", "5000-digits"])
+    def test_an_interval_no_date_can_hold_does_not_stop_the_listing(self, digits):
+        rows = self.REPEATER + _rows(
+            ("TODO huge repeat\nSCHEDULED: <2020-01-06 Mon +" + digits + "d>",
+             "TODO", "Work", None, 20200106, None, True),
+        )
+        result = _run(["get-todos", "--json"], rows)
+        assert result.exit_code == 0, result.output
+        todos = json.loads(result.stdout)["todos"]
+        assert len(todos) == 2
+        huge = next(t for t in todos if "huge repeat" in t["content"])
+        assert huge["repeating"] is True and "next_due" not in huge
+        ranged = _run(["get-todos", "--due-from", "2026-05-01", "--due-to", "2026-05-31",
+                       "--json"], rows)
+        assert ranged.exit_code == 0, ranged.output
+        assert json.loads(ranged.stdout)["repeating_excluded"] == 1
+        assert "huge repeat" in ranged.stderr
 
     def test_repeater_appears_normally_without_a_due_range(self):
         result = _run(["get-todos", "--json"], self.REPEATER)

@@ -106,6 +106,36 @@ D = datetime.date
 T = datetime.time
 
 
+class TestAnIntervalNoDateCanHold:
+    """A repeater is text a person typed or pasted, so its number can be any
+    size. The date it would lead to does not exist then, and the answer is
+    "cannot be derived" (None), never an exception: one such block must not
+    take get-todos down for the whole graph. Four sizes, four ways it failed:
+    past the date range of a day count (11 digits), past the range of the year
+    (5 digits, unit y), past what a date takes at all, and past the 4300 digits
+    Python converts to an integer."""
+
+    TODAY = datetime.date(2026, 10, 6)
+
+    # 99999 days or weeks still land on a date; 99999 months and years do not.
+    @pytest.mark.parametrize("digits,unit", [
+        (digits, unit)
+        for digits in ("99999", "9" * 11, "9" * 13, "9" * 5000)
+        for unit in "dwmy"
+        if not (digits == "99999" and unit in "dw")
+    ], ids=lambda value: f"{len(value)}-digits" if value.startswith("9") else value)
+    @pytest.mark.parametrize("kind", ["+", "++", ".+"])
+    def test_is_read_as_a_repeater_and_has_no_next_occurrence(self, kind, digits, unit):
+        stamp = parse_timestamp(f"2026-01-01 Thu {kind}{digits}{unit}")
+        assert stamp is not None and stamp.repeater is not None, "still a repeater"
+        assert (stamp.repeater[0], stamp.repeater[2]) == (kind, unit)
+        assert next_occurrence(stamp.date, stamp.repeater, self.TODAY) is None
+
+    def test_a_large_interval_that_a_date_can_hold_is_not_cut(self):
+        stamp = parse_timestamp("2026-01-01 Thu .+100y")
+        assert next_occurrence(stamp.date, stamp.repeater, self.TODAY) == datetime.date(2126, 1, 1)
+
+
 class TestTimestamps:
     """Every SCHEDULED/DEADLINE of a block, each with the repeater of its own."""
 
