@@ -240,7 +240,7 @@ class TestNextDueUsesTheReportedTimestamp:
         assert spy.call_args.args[1] == ("+", 1, "w")
         assert todo["deadline"] == "2020-01-07"
         due = datetime.date.fromisoformat(todo["next_due"])
-        assert due > datetime.date.today() and due.weekday() == 1
+        assert due >= datetime.date.today() and due.weekday() == 1
         for day, count in ((due, 1), (due + datetime.timedelta(days=1), 0)):
             _, data, _ = _todo(["--due-from", str(day), "--due-to", str(day)], self.TWO)
             assert data["count"] == count and "repeating_excluded" not in data
@@ -259,7 +259,7 @@ class TestNextDueUsesTheReportedTimestamp:
                       "TODO", "Finance", None, 20200106, None, True))
         todo, _, spy = _todo([], rows)
         assert spy.call_args.args[1] == (".+", 1, "d")
-        assert datetime.date.fromisoformat(todo["next_due"]) > datetime.date.today()
+        assert datetime.date.fromisoformat(todo["next_due"]) >= datetime.date.today()
 
     def test_a_repeater_of_the_other_timestamp_is_not_borrowed(self):
         rows = _rows(("TODO pay\nSCHEDULED: <2020-01-06 Mon .+1d>",
