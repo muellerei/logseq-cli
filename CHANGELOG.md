@@ -225,6 +225,16 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `get-todos` skipped today when working out `next_due` of an overdue repeating
+  task whose next occurrence falls on today. With today at 2026-10-06, a task
+  last due 2026-09-29 with `+1w` reported 2026-10-13, and one due yesterday
+  with `+1d` reported tomorrow, so `--due-from today --due-to today` missed a
+  task that is due today. Found while checking the fix below against the case
+  one step before it; the error was already on `main`. The single step and the
+  loop now stop at a date that is today or later, as a stored date from today
+  onward already did. Three tests had written the old reading down as "after
+  today" and now say "on or after today" (#92).
+
 - `get-todos` reported `next_due` one repeat too late for a repeating task whose
   date is today or still ahead. `SCHEDULED: <2026-10-11 Sun +1w>` with today
   at 2026-10-06 reported 2026-10-18, and `.+1d` dated today reported tomorrow,

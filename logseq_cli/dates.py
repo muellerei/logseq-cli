@@ -248,7 +248,7 @@ def next_occurrence(start: datetime.date, repeater, today: datetime.date = None)
         return start
     if kind in ("+", "++"):
         stepped = _add_interval(start, num, unit)
-        if stepped is None or stepped > today:
+        if stepped is None or stepped >= today:
             return stepped
 
     current = start
@@ -256,7 +256,7 @@ def next_occurrence(start: datetime.date, repeater, today: datetime.date = None)
         current = _add_interval(current, num, unit)
         if current is None:
             return None
-        if current > today:
+        if current >= today:
             break
     else:
         return None

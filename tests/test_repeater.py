@@ -15,9 +15,11 @@ near today and one step suffices:
 
 "What is due" asks something else. Applied to a task that was never ticked off,
 `+` and `++` land on a date that is still in the past — a weekly task from 2020
-would answer 2020-01-13. So the single step is kept where it lands in the
-future, and otherwise the `.+` loop runs for every form. Same interval, same
-weekday rule, different starting point, because the question differs.
+would answer 2020-01-13. So a stored date from today onward is the next
+occurrence itself (a task ticked off before has its next date written into the
+text), a past one keeps its single step where that lands on or after today, and
+otherwise the `.+` loop runs for every form. Same interval, same weekday rule,
+different starting point, because the question differs.
 
 Derived rather than stored: Logseq keeps no "next occurrence" anywhere, and
 :block/scheduled holds the date as written.
@@ -53,6 +55,15 @@ class TestNextOccurrence:
         """A task due today is due today, not tomorrow."""
         assert next_occurrence(self.TODAY, (kind, 1, "d"), self.TODAY) == self.TODAY
 
+    @pytest.mark.parametrize("kind", ["+", ".+", "++"])
+    @pytest.mark.parametrize("start, repeater", [
+        (datetime.date(2026, 5, 14), (1, "d")),
+        (datetime.date(2026, 5, 8), (1, "w")),
+    ])
+    def test_an_occurrence_that_falls_on_today_is_not_skipped(self, kind, start, repeater):
+        """An overdue task whose next date is today is due today, not at the one after."""
+        assert next_occurrence(start, (kind, *repeater), self.TODAY) == self.TODAY
+
     def test_plus_keeps_stepping_until_it_reaches_the_future(self):
         """One step off a 2020 date is still 2020; the answer must be ahead.
 
@@ -69,11 +80,11 @@ class TestNextOccurrence:
         assert next_occurrence(start, ("+", 1, "w"), self.TODAY) == datetime.date(2026, 5, 17)
 
     def test_dotted_repeats_until_future(self):
-        """.+ loops forward until it lands after today."""
+        """.+ loops forward until it lands on or after today."""
         start = datetime.date(2026, 5, 1)
         result = next_occurrence(start, (".+", 1, "w"), self.TODAY)
-        assert result > self.TODAY
-        assert result == datetime.date(2026, 5, 22)
+        assert result >= self.TODAY
+        assert result == datetime.date(2026, 5, 15)
 
     def test_dotted_over_years_still_terminates(self):
         """The 2020 weekly case from the reference graph."""
