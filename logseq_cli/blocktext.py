@@ -164,6 +164,9 @@ def without_block_ids(content: str) -> str:
     the line would name a uuid the block does not have, and a copy would put
     the original's id into the file, where the next parse finds two blocks
     claiming it. A line in a code block is code and stays.
+
+    Also what ``LogseqAPI.update_block`` compares: an Id Line is Logseq's, not
+    text anyone wrote, so it does not make a block "changed".
     """
     return "\n".join(line for line, value in id_lines(content) if not value)
 

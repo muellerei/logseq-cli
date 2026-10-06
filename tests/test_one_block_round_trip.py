@@ -27,7 +27,7 @@ import pytest
 from logseq_cli.api import LogseqAPI
 from logseq_cli.cli import cli
 from logseq_cli.blocktext import SplitBlockError, block_boundaries
-from tests.conftest import PageGraph, page_graph_api, split_runner
+from tests.conftest import PageGraph, holds_until_written, page_graph_api, split_runner
 
 ANCHOR = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
 DATE = ["--date", "2026-01-05"]
@@ -87,8 +87,9 @@ class TestTheApiRefusesBeforeSending:
 
     def test_an_update_may_keep_a_line_the_block_had(self):
         api = self._api()
-        # Logseq holds the text once written: the update reads it back.
-        api.call.return_value = {"uuid": ANCHOR, "content": "DONE x\n- b", "page": {"id": 1}}
+        # Logseq holds the old text until the write, the new one after: the
+        # re-read before the write finds the first, the proof the second.
+        api.call.side_effect = holds_until_written(ANCHOR, "TODO x\n- b", "DONE x\n- b")
         api.update_block(ANCHOR, "DONE x\n- b", replacing="TODO x\n- b")
         assert [c.args for c in api.call.call_args_list
                 if c.args[0] == "logseq.Editor.updateBlock"] == [

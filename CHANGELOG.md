@@ -225,6 +225,22 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- A change made to a block while a command was changing it was written over
+  without a word. `set-todo-status`, `replace-text`, `set-property` and
+  `remove-property` read the block, build the new text from it and send the
+  whole text back, so an edit made in between (a parallel call of the CLI, a
+  sync, Logseq itself) was lost, and the read-back passed because it compares
+  with what was just sent. Found by an adversarial pass that asked how two calls
+  on one block could interleave; the gap was already on `main`. `update_block`
+  now reads the block again, past the cache, directly before the write when it
+  is told what it replaces, and refuses with the new reason `block_changed`
+  when the text is another, naming the block and writing nothing. An `id::`
+  line is left out of the comparison: a ref written earlier in the same
+  `replace-text` stores the id of a block it then replaces, and that is not a
+  change made elsewhere (measured, #95). The window is smaller, not closed: it
+  is now the requests between that read and the write, the same kind of gap the
+  editor check leaves (#92).
+
 - `get-todos` skipped today when working out `next_due` of an overdue repeating
   task whose next occurrence falls on today. With today at 2026-10-06, a task
   last due 2026-09-29 with `+1w` reported 2026-10-13, and one due yesterday

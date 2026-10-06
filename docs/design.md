@@ -41,6 +41,16 @@ write from elsewhere that lands between the CLI's write and its read makes a
 write that did land fail as `write_not_verified`; the error shows what was
 expected and what was read, so read the block before retrying.
 
+The same gap exists before a write. A command that changes a block reads it,
+builds the new text from what it read and sends the whole text, so a change
+made to the block in between would be written over, and the read-back would
+pass, because it compares with what was just sent. The API reads the block
+again past the cache directly before such a write and refuses with
+`block_changed` when the text is another. An `id::` line does not count: Logseq
+adds it when a ref to the block is written earlier in the same call. This
+shrinks the window to the requests between that read and the write; it does
+not close it, as no read can.
+
 The second half of the sentence answers a loss no read-back can catch.
 Measured on Logseq 0.10.15: a write to the block being edited replaced the
 editor content at once and dropped what had not been saved; Logseq answered

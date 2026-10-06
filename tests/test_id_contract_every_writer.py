@@ -25,7 +25,7 @@ import pytest
 from logseq_cli.api import LogseqAPI
 from logseq_cli.blocktext import IdLineError
 from logseq_cli.cli import cli
-from tests.conftest import PageGraph, page_graph_api, split_runner
+from tests.conftest import PageGraph, holds_until_written, page_graph_api, split_runner
 
 OWN = "6d0f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 FOREIGN = "7e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a70"
@@ -121,8 +121,10 @@ class TestTheApiRefusesAnUndecidedIdLine:
         # A copy carries its source's line until the file is read again
         # (measured); replace-text and set-todo-status change another line.
         text = f"DONE x\nid:: {FOREIGN}"
+        old = f"TODO x\nid:: {FOREIGN}"
         api = self._updated(text)
-        api.update_block(TARGET, text, replacing=f"TODO x\nid:: {FOREIGN}")
+        api.call = MagicMock(side_effect=holds_until_written(TARGET, old, text))
+        api.update_block(TARGET, text, replacing=old)
         assert self._updates_sent(api) == [("logseq.Editor.updateBlock", [TARGET, text])]
 
     def test_but_not_add_one(self):

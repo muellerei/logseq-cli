@@ -463,6 +463,7 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `logseq_error` | Logseq threw on the write and answered with an error object | `method`, `logseq_message` |
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
+| `block_changed` | `set-todo-status`, `replace-text`, `set-property` and `remove-property` (every write that replaces a block's text) read the block again right before writing, and it no longer holds the text they read: someone changed it in between, and the write would have replaced that change. Nothing was written | `block` |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
 | `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
 | `config_error` | The config file cannot be used: it does not parse, `LOGSEQ_CLI_CONFIG` names a file that is not there, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean, or a `[graph] keep_empty_blocks_last` that is not. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
@@ -505,6 +506,11 @@ write into X). A `--keep-ids` write is refused while any block is open.
 
 `write_not_verified` can be a false alarm when someone else wrote the block
 between the write and the read-back; read the block before retrying.
+
+On `block_changed`: nothing was written to that block, and the change made
+elsewhere stands. Read the block again and repeat the command if it still
+makes sense. The check narrows the time between reading and writing to one
+request; it does not close it.
 
 `replace-text` writes the other blocks when one is refused, and names each
 refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
