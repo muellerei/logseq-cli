@@ -38,6 +38,12 @@ class EditorOpen(WriteRefused):
     reason = "open_in_editor"
 
 
+class BlockChanged(WriteRefused):
+    """The block no longer holds the text the caller read and meant to replace.
+    Field: block."""
+    reason = "block_changed"
+
+
 class EditorStateUnknown(WriteRefused):
     """checkEditing answered something not understood. Field: answer."""
     reason = "editor_state_unknown"

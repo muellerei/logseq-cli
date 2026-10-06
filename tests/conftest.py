@@ -132,6 +132,19 @@ def journal_day(days_ago=1):
     return int(day.strftime("%Y%m%d"))
 
 
+def holds_until_written(uuid, before, after):
+    """A ``call`` for a mocked API whose Logseq holds ``before`` until an
+    ``updateBlock`` is sent and ``after`` from then on: the read before a write
+    finds the old text, the proof read after it the new one."""
+    state = {"written": False}
+
+    def call(method, *args, **kwargs):
+        state["written"] = state["written"] or method == "logseq.Editor.updateBlock"
+        return {"uuid": uuid, "content": after if state["written"] else before,
+                "page": {"id": 1}}
+    return call
+
+
 def split_runner():
     """CliRunner that captures stderr separately from stdout.
 

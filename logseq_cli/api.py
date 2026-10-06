@@ -24,6 +24,7 @@ from logseq_cli.blocktext import (
     refuse_split_tree,
     stored_property_key,
     tree_texts,
+    without_block_ids,
 )
 from logseq_cli.outlinetext import preorder_blocks, subtree_uuids
 from logseq_cli.pagenames import js_trim, page_name_to_create, title_as_created
@@ -32,6 +33,7 @@ from logseq_cli.safety import guard_write
 # from the API they call. They live in a leaf module, so that
 # strictinsert and output need not import the HTTP client for them.
 from logseq_cli.writerefused import (  # noqa: F401  re-exported
+    BlockChanged,
     EditorOpen,
     EditorStateUnknown,
     LogseqWriteError,
@@ -1256,13 +1258,30 @@ class LogseqAPI:
 
         ``replacing`` is the text this replaces, for a caller that changes a
         block rather than writing one: a line it already had passes the check
-        every write here goes through (#47).
+        every write here goes through (#47). It is also what the block must
+        still hold, bar its Id Line: a caller builds ``content`` from what it
+        read, and the whole text goes back, so a change made to the block since
+        would be written over, and the proof reads back what was just sent.
+        The block is read again past the cache directly before the write, and
+        BlockChanged is raised when its text is another. That shrinks the
+        window to the requests between this read and the write; it does not
+        close it, as the editor gate's does not (see ``_write``).
 
-        Raises WriteNotVerified unless the block then reads back with
-        ``content`` and ``properties`` (``_prove_text``).
+        Raises BlockChanged as above, and WriteNotVerified unless the block
+        then reads back with ``content`` and ``properties`` (``_prove_text``).
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
+        if replacing is not None:
+            current = self.get_block(block_uuid, include_children=False, cached=False)
+            # An Id Line is Logseq's, not text anyone wrote: a ref written
+            # earlier in the same call stores the id of a block this call
+            # then replaces (#95), and that is not a change made elsewhere.
+            if without_block_ids((current or {}).get("content", "")) != without_block_ids(replacing):
+                raise BlockChanged(
+                    f"Block {block_uuid[:8]}.. changed since it was read; nothing was "
+                    "written over it. Read it again and repeat the command.",
+                    block=block_uuid)
         # Properties carried along are written again, a ref among them too.
         texts = [content, *map(str, (properties or {}).values())]
         args = [block_uuid, content]

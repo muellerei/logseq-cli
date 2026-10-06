@@ -22,6 +22,7 @@ MESSAGE = "The write was refused here."
 
 # (type, reason, fields): the contract --json callers rely on.
 TYPES = [
+    ("BlockChanged", "block_changed", {"block": BLOCK}),
     ("EditorOpen", "open_in_editor", {"block": BLOCK, "page": "Probe Page"}),
     ("EditorStateUnknown", "editor_state_unknown", {"answer": '{"ok": 1}'}),
     ("LogseqWriteError", "logseq_error",
