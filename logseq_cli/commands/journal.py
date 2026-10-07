@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import click
 
 from logseq_cli.blockprops import kept_properties
-from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, without_block_ids
+from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, with_hashes_in, without_block_ids
 from logseq_cli.cliinput import content_or_file, read_content_file, require_content
 from logseq_cli.config import keep_empty_blocks_last, load_config, resolve_heading
 from logseq_cli.dates import (
@@ -19,9 +19,8 @@ from logseq_cli.dates import (
 from logseq_cli.group import cli
 from logseq_cli.headings import (
     first_empty_under,
-    find_heading,
+    find_upsert_target,
     find_or_create_heading,
-    normalize_heading,
     strip_title_heading,
 )
 from logseq_cli.ids import (
@@ -53,7 +52,8 @@ from logseq_cli.output import (
     uuid_fields,
     would_go_before_fields,
 )
-from logseq_cli.safety import WriteCommand
+from logseq_cli.preconditions import Expect, check_precondition, read_fresh
+from logseq_cli.safety import Owed, WriteCommand, require_precondition
 from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
     blocks_to_markdown,
@@ -263,6 +263,11 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
             blocks = api.get_page_blocks_tree(page_name)
             if heading and blocks:
                 blocks = extract_section(blocks, heading)
+            if as_json:
+                # From the content as stored: before --resolve-refs rewrites
+                # the text. The cut hands back the stored blocks, so only the
+                # section is hashed.
+                blocks = with_hashes_in(blocks)
             if resolve_refs and blocks:
                 resolve_refs_in_blocks(api, blocks)
             return {
@@ -446,7 +451,10 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     else:
         click.echo(f"Added {blocks_added} block(s) to journal: {page_name}")
 
-@cli.command("add-journal-block", cls=WriteCommand, epilog="""\b
+# The precondition belongs to the block --upsert-heading replaces, which is
+# unknown until the command has chosen it: so nothing is owed up front, and the
+# body asks for it after the choice (see find_upsert_target).
+@cli.command("add-journal-block", cls=WriteCommand, owes=lambda params: None, epilog="""\b
 Examples:
   logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting with [[Bob]]"
   logseq-cli --token TOKEN add-journal-block --date 2026-05-07 --content "**14:30** Nachtrag"
@@ -461,6 +469,9 @@ Notes:
   The replaced block keeps its properties, as with update-block; a property
   line in the new text is the new value of its key. A first block that is
   nothing but id:: lines is refused: it would empty the replaced block.
+  --expect-hash H (with --upsert-heading) refuses, without writing, unless the
+  block it would replace is still the one H was read from. With no match there
+  is no block: the hash has no object and the block is created.
   Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
   --content-file reads the whole file as ONE tree: flush "- " lines become
   sibling roots, tab-indented lines their children. No shell quoting, so
@@ -488,6 +499,8 @@ Notes:
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--upsert-heading", default=None, help="Find child block matching this heading under --under-heading and update it; insert as new block if not found.")
+@click.option("--expect-hash", "expect_hash", default=None,
+              help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read from (the hash field of get-block --json). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
@@ -495,7 +508,7 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, top_level, preserve_formatting, dry_run, keep_ids, as_json):
+def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, expect_hash, top_level, preserve_formatting, dry_run, keep_ids, as_json):
     """Add one or more blocks to a journal page.
 
     Pass --content multiple times for batch inserts under the same heading.
@@ -539,6 +552,12 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # --upsert-heading rewrites a block that already exists, and an existing
     # block's uuid cannot change. The flag would half work there, so the
     # combination is refused rather than honoured for some blocks only.
+    if expect_hash is not None and not upsert_heading:
+        raise click.UsageError("--expect-hash goes with --upsert-heading: it is the hash of "
+                               "the block that option replaces.")
+    if expect_hash is not None and len(contents) > 1:
+        raise click.UsageError("--expect-hash takes one --content: --upsert-heading replaces "
+                               "one block.")
     if keep_ids and upsert_heading:
         raise click.UsageError("--keep-ids cannot be combined with --upsert-heading: "
                                "the block it replaces keeps its own uuid.")
@@ -729,6 +748,28 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
     tree = trees[0]
 
+    # Which block --upsert-heading replaces is chosen first: before the journal
+    # page and the heading are created, from reads that skip the cache, and the
+    # same way for the preview as for the run.
+    heading_uuid, found_uuid = (find_upsert_target(api, page_name, under_heading, upsert_heading)
+                                if upsert_heading else (None, None))
+    # The precondition is for that block, so it is checked now: on a read past
+    # the cache, before --dry-run and before the page or heading are created.
+    # With no match there is no block and no hash, and creating one is free.
+    expect = Expect(hash=expect_hash)
+    held = {}
+    if upsert_heading and found_uuid:
+        if expect:
+            matched = read_fresh(api, found_uuid)
+            check_precondition(matched, expect)
+            # Held to the text the hash was checked on, as update-block does.
+            held = {"expect": matched.get("content") or ""}
+        else:
+            require_precondition(Owed(("--expect-hash",)), False)
+    elif expect:
+        print_note("Note: --expect-hash has no object: no block matches "
+                   f"'{upsert_heading}' under '{under_heading}', so one is created.")
+
     # Ensure the journal page exists. Deferred when only
     # previewing: a dry run must not bring the page into existence.
     existing = api.get_page(page_name)
@@ -743,18 +784,10 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             # A block to update is written in place; only one that is not there
             # yet goes at the end of the heading, before the empty blocks there.
             would_anchor = None
-            heading_uuid = (find_heading(api, page_name, under_heading)
-                            if keep_on and not would_create_page else None)
-            if heading_uuid:
-                kids = (api.get_block(heading_uuid, include_children=True, cached=False)
-                        or {}).get("children") or []
-                target_norm = normalize_heading(upsert_heading)
-                if not any(isinstance(k, dict)
-                           and normalize_heading(k.get("content", "")) == target_norm
-                           for k in kids):
-                    would_anchor = first_empty_at_end(
-                        api, tree if tree is not None else [{"content": content, "children": []}],
-                        parent_uuid=heading_uuid)
+            if keep_on and heading_uuid and not found_uuid:
+                would_anchor = first_empty_at_end(
+                    api, tree if tree is not None else [{"content": content, "children": []}],
+                    parent_uuid=heading_uuid)
             if as_json:
                 output({"page": page_name, "date": str(d), "position": position_desc, "content": content, "dry_run": True,
                         **would_go_before_fields(would_anchor)}, True)
@@ -765,15 +798,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                     click.echo(f"  would go before the empty block {would_anchor[:8]}...")
             return
 
-        heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-        found_uuid = None
-        heading_block = api.get_block(heading_uuid, include_children=True)
-        children = heading_block.get("children", []) if heading_block else []
-        target_norm = normalize_heading(upsert_heading)
-        for child in children:
-            if normalize_heading(child.get("content", "")) == target_norm:
-                found_uuid = child.get("uuid")
-                break
+        if not heading_uuid:
+            heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
 
         if found_uuid:
             root_uuid = found_uuid
@@ -784,7 +810,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             text = tree[0]["content"] if tree else content
             # The matched block keeps its properties, as with update-block (#67).
             _, kept = kept_properties(api, found_uuid, text)
-            api.update_block(found_uuid, text, properties=kept or None)
+            api.update_block(found_uuid, text, properties=kept or None, **held)
             # n counts the UUIDs the inserts returned, plus 1 for the
             # update. The API proves each insert and raises on one that did
             # not land, so this is what the graph took, not the size asked

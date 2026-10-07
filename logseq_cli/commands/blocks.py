@@ -2,6 +2,7 @@ import datetime
 
 import click
 
+from logseq_cli.blocktext import tree_hash, with_hashes, with_hashes_in
 from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
@@ -39,6 +40,12 @@ def get_block(ctx, block_id, no_children, as_json):
              id=block_id, exists=False)
 
     if as_json:
+        # Hashes come from the raw content. Without children Logseq answers
+        # uuid pairs, from which no tree can be hashed: the block's own hash
+        # stays, tree_hash is left out.
+        block = with_hashes(block)
+        if include_children:
+            block["tree_hash"] = tree_hash(block)
         output(block, True)
     else:
         # Logseq answers page and parent as database ids no command takes:
@@ -184,7 +191,7 @@ def find_block(ctx, content, page, use_regex, first_only, exactly_one, limit, wi
         return
 
     if as_json:
-        output(matches, True)
+        output(with_hashes_in(matches), True)
     else:
         if not matches:
             click.echo("No blocks found.")

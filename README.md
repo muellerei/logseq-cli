@@ -97,6 +97,7 @@ files would not.
 | report a write that did not land as done | never; every write is proven |
 | show a change before making it | does it: `--dry-run` on every command that writes (not under `read_only`, below) |
 | write when it was told to only read | refuses: `[safety] read_only = true` switches every write off, before the first request |
+| change a block you edited after your agent read it | refuses when the agent passes what it read (`--expect-hash`); `[safety] require_preconditions` makes that mandatory, see [docs/safety.md](docs/safety.md#requiring-a-precondition) |
 | undo a change | cannot; a deletion is final, so preview first |
 | write while Logseq is closed | cannot; your agent is told to stop rather than edit the files |
 | read more than fits in its context | cuts page and journal reads and searches to a size it asks for, and says what it left out |
@@ -126,6 +127,12 @@ itself, and one that can write files can edit the config or the Markdown files.
 [docs/safety.md](docs/safety.md) covers how binding each way of setting it is
 (config file, environment variable, `--read-only`), how to keep the config file
 out of an agent's reach, and what to check when it seems not to apply.
+
+To have the agent say what it read before it changes a block, add
+`require_preconditions = true` to the same section. A command that changes a
+block it read then refuses without `--expect-hash` (`--expect-tree-hash` for
+`remove-block`), and `doctor` shows the switch like `read_only`; see
+[Requiring a precondition](docs/safety.md#requiring-a-precondition).
 
 ### Bounded output
 
@@ -241,7 +248,7 @@ non-zero rather than returning an empty result. See
 [docs/configuration.md](docs/configuration.md) for every option, what happens
 without it, and how to read the right values out of your own graph.
 
-The same file can switch writes off for an agent (`[safety] read_only`, see
+The same file can switch writes off for an agent (`[safety] read_only` and `require_preconditions`, see
 [Limiting what an agent can do](#limiting-what-an-agent-can-do)), and keep the
 empty blocks you leave at the end of a section last, so entries land before them
 and no empty line is left (`[graph] keep_empty_blocks_last`, off by default, see

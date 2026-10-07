@@ -50,7 +50,9 @@ from logseq_cli.output import (
     uuid_fields,
     would_go_before_fields,
 )
-from logseq_cli.safety import WriteCommand
+from logseq_cli.preconditions import (
+    EXPECT_HASH_HELP, Expect, check_precondition, read_checked, read_fresh)
+from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
     BEFORE_EMPTY_SUFFIX,
@@ -71,7 +73,7 @@ from logseq_cli.strictinsert import (
 from logseq_cli.writerefused import WriteRefused, partial_state
 
 
-@cli.command("update-block", cls=WriteCommand, epilog="""\b
+@cli.command("update-block", cls=WriteCommand, owes=lambda params: Owed(("--expect-hash",)), epilog="""\b
 Example:
   logseq-cli --token TOKEN update-block --id 12345678-... --content "New text"
   logseq-cli --token TOKEN update-block --where-content "**14:22**" --page "2026-08-21, friday" --content "New text"
@@ -96,6 +98,8 @@ Note:
   The block's own id:: line (as get-block shows it) may stay in --content;
   one naming another uuid is dropped with a Note, since Logseq would make
   it this block's uuid and every ((ref)) to the block would dangle.
+  --expect-hash H (the hash field of get-block --json) refuses, without
+  writing, unless the block is still the one H was read from.
 """)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
@@ -103,11 +107,16 @@ Note:
 @click.option("--regex", "use_regex", is_flag=True, help="With --where-content: interpret it as a regex")
 @click.option("--content", default=None, help="New content for the block; this or --content-file is required")
 @click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
+@click.option("--expect-hash", "expect_hash", default=None,
+              help="Refuse, without writing, unless the block is still the one this hash was read "
+                   "from (the hash field of get-block --json). Checked on a read past the cache, "
+                   "before --dry-run and before the write")
 @click.option("--dry-run", is_flag=True, help="Show the block that would be overwritten, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def update_block(ctx, block_id, where_content, page, use_regex, content, content_file, dry_run, as_json):
+def update_block(ctx, block_id, where_content, page, use_regex, content, content_file, expect_hash,
+                 dry_run, as_json):
     """Update the content of an existing block."""
     content = content_or_file(content, content_file)
     # This command has no tree path: it replaces ONE block's content, so a
@@ -133,6 +142,14 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
     block = api.get_block(clean_id, include_children=False)
     if not block:
         fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
+
+    # The precondition is checked on a read past the cache, ahead of anything
+    # that writes, so a refusal also keeps a ref in the new text from giving
+    # its target an id. The write then holds the block to that same text.
+    expect = Expect(hash=expect_hash)
+    if expect:
+        block = read_fresh(api, clean_id)
+        check_precondition(block, expect)
 
     old_content = block.get("content", "") if isinstance(block, dict) else ""
     # The block's own id:: line, as getBlock hands it out, goes back as it
@@ -168,7 +185,9 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
                 click.echo(f"  keeps: {', '.join(f'{k}::' for k in kept_texts)}")
         return
 
-    api.update_block(clean_id, content, properties=kept_texts or None)
+    # Held to the text the precondition was checked on; without one, as before.
+    held = {"expect": old_content} if expect else {}
+    api.update_block(clean_id, content, properties=kept_texts or None, **held)
 
     if as_json:
         output({"id": clean_id, "old_content": old_content, "new_content": content,
@@ -181,7 +200,8 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
         preview = content[:60] + ("..." if len(content) > 60 else "")
         click.echo(f"  now: {preview}")
 
-@cli.command("remove-block", cls=WriteCommand, epilog="""\b
+@cli.command("remove-block", cls=WriteCommand,
+             owes=lambda params: Owed(("--expect-tree-hash",)), epilog="""\b
 Examples:
   logseq-cli --token TOKEN remove-block --id 12345678-... --dry-run
   logseq-cli --token TOKEN remove-block --id 12345678-...
@@ -192,18 +212,25 @@ Note:
 """)
 @click.option("--id", "block_id", required=True, help="UUID of the block to remove")
 @click.option("--ignore-refs", is_flag=True, help="Remove even though ((block-refs)) from elsewhere point into it")
+@click.option("--expect-tree-hash", "expect_tree_hash", default=None,
+              help="Refuse, without removing, unless the block and everything under it is still what "
+                   "this hash was read from (the tree_hash field of get-block --json). A child added "
+                   "since changes it. Checked before --dry-run.")
 @click.option("--dry-run", is_flag=True, help="Show the block and its descendant count, without deleting")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def remove_block_cmd(ctx, block_id, ignore_refs, dry_run, as_json):
+def remove_block_cmd(ctx, block_id, ignore_refs, expect_tree_hash, dry_run, as_json):
     """Remove a block by UUID."""
     api = ctx.obj["api"]
     clean_id = unwrap_block_id(block_id)
 
     # Fetch WITH children: removal cascades, so the descendant count is the
     # decisive fact for --dry-run (and for the confirmation the caller may want).
-    block = api.get_block(clean_id, include_children=True)
+    # With a precondition the read is past the cache, children included: the
+    # hash covers them, and what is counted and removed below is this read.
+    block = read_checked(api, clean_id, Expect(tree_hash=expect_tree_hash),
+                         include_children=True)
     if not block:
         fail(f"Block not found: {clean_id}", as_json=as_json, id=clean_id)
 
@@ -886,7 +913,9 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
         click.echo(f"  {ref_content}")
         click.echo(f"  uuid: {new_uuid}")
 
-@cli.command("copy-block", cls=WriteCommand, epilog="""\b
+@cli.command("copy-block", cls=WriteCommand,
+             owes=lambda params: Owed(("--expect-hash",)) if params.get("remove") else None,
+             epilog="""\b
 Examples:
   logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page"
   logseq-cli --token TOKEN copy-block --id UUID --to-page "Target Page" --remove
@@ -901,18 +930,22 @@ Note:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
+  --expect-hash goes with --remove only: a plain copy changes no block.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
 @click.option("--remove", is_flag=True, help="Remove source block after copying (move)")
 @click.option("--ignore-refs", is_flag=True, help="With --remove: remove even though ((block-refs)) point into the source")
+@click.option("--expect-hash", "expect_hash", default=None, help="With --remove: " + EXPECT_HASH_HELP)
 @click.option("--dry-run", is_flag=True, help="Show what would be copied/moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
+def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run, as_json):
     """Copy a block (with children) to another page."""
     api = ctx.obj["api"]
+    if expect_hash is not None and not remove:
+        raise click.UsageError("--expect-hash goes with --remove: a plain copy changes no block.")
     keep_on = keep_empty_blocks_last(load_config())
     # A missing page under the name Logseq creates it with, as for
     # insert-block --page.
@@ -920,7 +953,9 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
     names = ref.fields("to_page")
     to_page = target.name
     block_id = block_id.strip("()")
-    source = api.get_block(block_id, include_children=True)
+    # With --expect-hash the copy and the removal both come from a read past
+    # the cache, so what is checked is what is copied.
+    source = read_checked(api, block_id, Expect(hash=expect_hash), include_children=True)
     if not source:
         fail("Block not found.", as_json=as_json, id=block_id)
 
@@ -1009,7 +1044,8 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, dry_run, as_json):
         if refs:
             click.echo(f"  {len(refs)} block ref(s) into the source now point at nothing")
 
-@cli.command("move-block", cls=WriteCommand, epilog="""\b
+@cli.command("move-block", cls=WriteCommand, owes=lambda params: Owed(("--expect-hash",)),
+             epilog="""\b
 Examples:
   logseq-cli --token TOKEN move-block --id UUID --under UUID
   logseq-cli --token TOKEN move-block --id UUID --before UUID
@@ -1027,11 +1063,12 @@ Note:
 @click.option("--id", "block_id", required=True, help="UUID of the block to move")
 @click.option("--under", default=None, help="UUID of the new parent (block becomes its first child)")
 @click.option("--before", default=None, help="UUID of the block to move in front of (as sibling)")
+@click.option("--expect-hash", "expect_hash", default=None, help=EXPECT_HASH_HELP)
 @click.option("--dry-run", is_flag=True, help="Show what would be moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def move_block_cmd(ctx, block_id, under, before, dry_run, as_json):
+def move_block_cmd(ctx, block_id, under, before, expect_hash, dry_run, as_json):
     """Move a block (with children) under or before another block."""
     api = ctx.obj["api"]
     if bool(under) == bool(before):
@@ -1039,7 +1076,7 @@ def move_block_cmd(ctx, block_id, under, before, dry_run, as_json):
 
     target = under or before
     block_id = block_id.strip("()")
-    source = api.get_block(block_id, include_children=True)
+    source = read_checked(api, block_id, Expect(hash=expect_hash), include_children=True)
     if not source:
         fail("Block not found.", as_json=as_json, id=block_id)
 

@@ -1237,7 +1237,7 @@ class LogseqAPI:
         )
 
     def update_block(self, block_uuid: str, content: str, properties: dict = None, *,
-                     replacing: str = None):
+                     replacing: str = None, expect: str = None):
         """Replace a block's content, optionally carrying its properties along.
 
         Block properties live *inside* the content (``prio:: 1`` as a line of
@@ -1267,17 +1267,24 @@ class LogseqAPI:
         window to the requests between this read and the write; it does not
         close it, as the editor gate's does not (see ``_write``).
 
+        ``expect`` is the same comparison without the allowance: the text the
+        block must still hold, for a caller that writes text of its own (a line
+        in it is wanted, whether or not the block had it) and has checked a
+        precondition against that read. ``replacing``, when given, is the text
+        compared and ``expect`` is ignored.
+
         Raises BlockChanged as above, and WriteNotVerified unless the block
         then reads back with ``content`` and ``properties`` (``_prove_text``).
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
-        if replacing is not None:
+        held = replacing if replacing is not None else expect
+        if held is not None:
             current = self.get_block(block_uuid, include_children=False, cached=False)
             # An Id Line is Logseq's, not text anyone wrote: a ref written
             # earlier in the same call stores the id of a block this call
             # then replaces (#95), and that is not a change made elsewhere.
-            if without_block_ids((current or {}).get("content", "")) != without_block_ids(replacing):
+            if without_block_ids((current or {}).get("content", "")) != without_block_ids(held):
                 raise BlockChanged(
                     f"Block {block_uuid[:8]}.. changed since it was read; nothing was "
                     "written over it. Read it again and repeat the command.",

@@ -46,8 +46,9 @@ Copy one, delete what you do not need, keep what you do.
 | `LOGSEQ_CLI_CONFIG` | (none) | Path to a config file, overriding the default locations |
 | `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST` | (none) | `1`, `true`, `yes` or `on` turns on, `0`, `false`, `no` or `off` turns off, over `[graph] keep_empty_blocks_last` (see [`[graph] keep_empty_blocks_last`](#graph-keep_empty_blocks_last)); empty is not set, any other value counts as off with a warning |
 | `LOGSEQ_CLI_READ_ONLY` | (none) | `1`, `true`, `yes` or `on` switches every command that writes off; `0`, `false`, `no`, `off` and empty do nothing; any other value switches it on with a warning. Only tightens (see [`[safety] read_only`](#safety-read_only)) |
+| `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` | (none) | Same values and same rule as `LOGSEQ_CLI_READ_ONLY`, for [`[safety] require_preconditions`](#safety-require_preconditions) |
 
-All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`. `--read-only` is a flag too, not a connection setting: see [`[safety] read_only`](#safety-read_only).
+All connection settings can also be passed as CLI flags: `--host`, `--port`, `--token`. `--read-only` and `--require-preconditions` are flags too, not connection settings: see [`[safety] read_only`](#safety-read_only) and [`[safety] require_preconditions`](#safety-require_preconditions).
 
 ### Journal heading
 
@@ -117,10 +118,11 @@ none of them set, entries go to the top level of the page.
 `LOGSEQ_JOURNAL_HEADING` predates the config file and stays authoritative, so
 existing shell profiles keep working unchanged after you add a config file.
 
-One rule breaks the order: [`[safety] read_only`](#safety-read_only) only
-tightens. A config that says `true` is not switched off by an environment
-value of `false` or by leaving out `--read-only`; the flag or the environment
-can switch it on when the config says nothing.
+One rule breaks the order: the `[safety]` switches ([`read_only`](#safety-read_only),
+[`require_preconditions`](#safety-require_preconditions)) only tighten. A config
+that says `true` is not switched off by an environment value of `false` or by
+leaving out the flag; the flag or the environment can switch it on when the
+config says nothing.
 
 ## The options
 
@@ -339,6 +341,25 @@ keeps the `[safety]` section; it refuses a file it cannot parse.
 How binding each way of setting it is, and what it does not stop, is in
 [safety.md](safety.md).
 
+### `[safety] require_preconditions`
+
+```toml
+[safety]
+require_preconditions = true
+```
+
+| | |
+|---|---|
+| Values | `true` or `false` (a TOML boolean); default `false` |
+| Effect | a command that changes a block it read refuses, before its first request, unless the call says what it read: `--expect-hash` (also `--expect-marker` for `set-todo-status`), `--expect-tree-hash` for `remove-block`. Refused with `reason: precondition_required`, and the message names where the switch was set. The rule is the call's, not the command's: a command that changes nothing in a given form stays free in it. Only the commands that take such an option ask for it. `add-journal-block --upsert-heading` asks only when a block matches; creating one stays free |
+| Also set by | `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` and `--require-preconditions`; all three only tighten, like `read_only` |
+| Order | `read_only` comes first: with both on, a call without a precondition is refused as `read_only` |
+| Shown by | `logseq-cli doctor`, every run, in the same forms as `read_only` |
+
+A config that cannot be read, a `LOGSEQ_CLI_CONFIG` that names a file that is
+not there and a value that is not a boolean refuse the commands that ask for a
+precondition, as they do for `read_only`: the switch cannot be told to be off.
+
 ## When a section does not exist in your graph
 
 Graphs differ. The answer is almost always "leave the setting out", and the
@@ -519,7 +540,7 @@ logseq-cli --token "TOKEN" doctor
 listening on the port, is a token supplied, does the API answer, is a graph
 loaded. Each step is reported separately, so a failure names which one broke.
 Exit 0 means ready to read. It also says whether writes are switched off
-(`read_only`) and by what; that does not fail it, and the closing line says
+(`read_only`) and whether a precondition is required (`require_preconditions`), and by what; that does not fail it, and the closing line says
 "Ready to read; writes are off." when they are. A config file that does not
 parse fails it, and the advice is to fix the file, never to remove it: removing
 a file that holds a limit lifts the limit.

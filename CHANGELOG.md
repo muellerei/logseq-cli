@@ -12,6 +12,46 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- A write can say which state of a block it was decided on, and is refused when
+  the block is another by then. `get-block --json` gives a block a `hash` (and
+  `tree_hash` for the block with everything under it); `get-page`,
+  `get-journal-range`, `find-block` and `get-todos` give each block a `hash`
+  under `--json`. The write commands take it back: `--expect-hash` on
+  `set-todo-status`, `update-block`, `set-block-property`, `remove-property
+  --id`, `move-block`, `copy-block --remove` and `add-journal-block
+  --upsert-heading`, `--expect-tree-hash` on `remove-block` (and its alias
+  `delete-block`), and `--expect-marker` on `set-todo-status`. A block that is
+  not what was read is refused with `precondition_failed`, before `--dry-run`
+  and before anything is written; the refusal never carries the current hash,
+  since the next step is to read the block and decide again, not to repeat the
+  change with a hash that now matches (`examples/safe-update-block.sh`). It is
+  not the check `block_changed` makes: that one compares a command with its own
+  read, this one the caller with its read, minutes earlier.
+  - The hash is 12 hex characters over the block's text without collapsing,
+    `id::` and the clock lines of the logbook, so folding a block or a running
+    clock leaves it alone while an edit, a marker change or a completion moves
+    it. It sees content, not position: `move-block` does not notice that the
+    block was moved since. `remove-block` takes the hash of the whole subtree,
+    because the hash of the block alone would not see a child added after the
+    read.
+  - `[safety] require_preconditions = true` (also `LOGSEQ_CLI_REQUIRE_PRECONDITIONS`
+    and `--require-preconditions`; all three only tighten, like `read_only`)
+    makes the option mandatory: a call that changes a block it read and passes
+    none is refused with `precondition_required` before its first request.
+    `add-journal-block --upsert-heading` owes it only when a block matches;
+    creating one stays free. It is off by default: calls without a hash would
+    start to refuse, and since a write's output carries no new hash yet, a
+    second write to the same block needs a fresh read in between, which protects
+    no more than `block_changed`. `doctor` shows it.
+  - Cost: one `hash` line per block in the output, about 30 bytes. Measured on
+    the HTTP test double with invented blocks: 100 short blocks add 3,000
+    characters to indented `get-page --json`; the relative growth depends on
+    how large the rest of each block is (7% for the double's block shape, with
+    no children and no properties).
+  - Not covered, and said so in [docs/safety.md](docs/safety.md): there is no
+    compare-and-swap (a change between the check and the write is not caught),
+    the hash does not see position, and write outputs carry no new hash.
+
 - `get-todos --page-type journal|page` keeps the tasks whose block stands on a
   journal page, or on any other page (#118). Before, the only way to split the
   two was `jq` on `journal_day`, which leaves `count` at the unfiltered value and

@@ -138,6 +138,38 @@ they cannot use.
 What it does not do is stated in [safety.md](safety.md): an agent with the
 token or write access to the files is not stopped by a refusal in this CLI.
 
+## A caller can say what it read, and the check is a gate of its own
+
+`block_changed` already catches a block that changed between a command's read
+and its write. It cannot catch a block that changed between the caller's read
+and the call: the command reads the block fresh and finds it as it is now, so
+the write of a decision made on older text goes through. Only the caller knows
+what it read, so it says so: `--expect-hash` (`--expect-tree-hash` for
+`remove-block`, `--expect-marker` for a task's marker), and the command refuses
+with `precondition_failed` unless the block is still that. The two are not one
+check: one compares the command with itself, the other compares it with the
+caller.
+
+The hash is of the block's content, with what Logseq rewrites on its own
+taken out (collapsing, `id::` lines, the clock lines of the logbook), because
+a hash that moved when a block was folded would refuse writes nobody changed.
+`DONE` lines of the logbook stay in, so a completion does move it. It sees no
+position: a moved block has the hash it had. A parent's hash does not see a new
+child either, so deleting a block, which deletes what is under it, takes a
+separate hash over the whole subtree.
+
+The check sits in one module (`preconditions.py`) and runs on a read past the
+cache, before `--dry-run` and before anything is written. Whether a call owes a
+precondition is a mark on the command like the one for `read_only`, asked once
+in the same place before the first request, so a command that gains the option
+cannot forget to be asked, and a form of a command that changes no block it
+read (`copy-block` without `--remove`) owes none. `require_preconditions`
+turns the obligation on; it is off by default because the write outputs carry
+no new hash yet, see [safety.md](safety.md#why-it-is-off-by-default-and-when-to-turn-it-on).
+The refusal never prints the block's current hash: the next step is to read the
+block and decide again, not to send the same change with a hash that now
+matches.
+
 ## Query values are escaped in one place
 
 Values entering datalog queries were interpolated with f-strings: one call site

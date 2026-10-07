@@ -38,8 +38,9 @@ logseq-cli/
 │   ├── outlinetext.py  # Indented outline text to a block tree, and back
 │   ├── output.py       # Results on stdout, failures on stderr, --json
 │   ├── pagenames.py    # Which page a name means (an alias as Logseq resolves it), and the name Logseq creates a page under
+│   ├── preconditions.py # Does the block still match what the caller read: --expect-hash, --expect-tree-hash, --expect-marker
 │   ├── render.py       # Blocks to text; finding and resolving references
-│   ├── safety.py       # What keeps a command from writing: [safety] read_only, the gate every writing command carries
+│   ├── safety.py       # What keeps a command from writing: [safety] read_only and require_preconditions, the gates every writing command carries
 │   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible; which empty block a write at the end goes before
 │   ├── tasks.py        # What a task is: the eleven markers, their states, reading and swapping a marker
 │   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason
@@ -76,6 +77,10 @@ logseq-cli/
      if it writes: that mark is what makes the command refuse under
      `[safety] read_only`. `tests/test_read_only.py` fails by comparing the
      commands that carry it with the commands that write
+   - A command that changes a block it read also declares `owes=` on that
+     mark, naming the `--expect-*` options it takes.
+     `tests/test_precondition_coverage.py` finds such commands by those
+     options and fails when one of them skips the check
 
    A Logseq method the client has not sent before goes into `_METHODS` in
    `api.py` first, a write with its editor rule and its proof: `call()`

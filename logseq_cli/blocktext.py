@@ -3,6 +3,7 @@
 Kept in a module of its own so that LogseqAPI, which checks every write, depends
 on this rule and nothing else. Measured against Logseq 0.10.15 throughout.
 """
+import hashlib
 import re
 from collections import Counter
 from typing import NamedTuple
@@ -190,6 +191,13 @@ def drawer_lines(lines: list) -> set:
     return drawer
 
 
+# The line Logseq writes into a drawer when a task is completed:
+# ``* State "DONE" from "<marker>" [yyyy-MM-dd E HH:mm]`` (star, not a dash).
+# Recognised by its start, after the indent. One pattern for everything that
+# reads those lines; the task rules import it from here, never the reverse.
+DONE_LINE_RE = re.compile(r'^[ \t]*\* State "DONE"')
+
+
 def attached_line_mask(lines: list) -> list:
     """For each line of a block's content, whether it belongs to the block
     above it rather than to its text: a SCHEDULED/DEADLINE line, or a line of
@@ -206,7 +214,7 @@ def attached_line_mask(lines: list) -> list:
             for i, line in enumerate(lines)]
 
 
-def normalize_block_text(text: str) -> str:
+def normalize_block_text(text: str, *, keep_logbook: bool = False) -> str:
     """``text`` as a write's proof compares it: what Logseq rewrites on its
     own is taken out, on the sent and the read side alike.
 
@@ -228,13 +236,88 @@ def normalize_block_text(text: str) -> str:
       fail a write that landed. Whether a drawer arrived at all is
       block_text_matches' check.
 
+    ``keep_logbook=True`` leaves the drawer lines in place, for a caller that
+    picks among them itself; every other step runs as before. The proof never
+    sets it.
+
     Nothing else: a rule as loose as "whitespace does not matter" would let a
     write through that did not land.
     """
     lines = without_block_ids(text).split("\n")
-    drawer = drawer_lines(lines)
+    drawer = set() if keep_logbook else drawer_lines(lines)
     kept = [line.rstrip() for i, line in enumerate(lines) if i not in drawer]
     return "\n".join(kept).strip()
+
+
+_COLLAPSED_RE = re.compile(r'^[ \t]*collapsed:: ', re.IGNORECASE)
+
+
+def strip_volatile(text: str) -> str:
+    """``text`` without the lines that change on their own, for a hash.
+
+    - ``collapsed::``: folding a block in the UI leaves ``content`` alone, but
+      a block created with the line carries it and one rewritten by
+      update-block loses it, so whether it is there depends on how the block
+      came about, not on what it says. In a code block it is code and stays.
+    - Every line of a closed ``:LOGBOOK:`` drawer except the ``State "DONE"``
+      lines: ``CLOCK`` lines only change together with a marker change, which
+      the hash sees; a completion is a decision, and a replayed one has to
+      show. A drawer of ``CLOCK`` lines alone hashes like no drawer.
+
+    An unclosed drawer is text (drawer_lines) and stays.
+    """
+    lines = text.split("\n")
+    in_code, _ = code_block_lines(lines)
+    drawer = drawer_lines(lines)
+    mask = property_line_mask(lines)
+    kept = [line for i, line in enumerate(lines)
+            if not (i in drawer and not DONE_LINE_RE.match(line))
+            and not (mask[i] and not in_code[i] and _COLLAPSED_RE.match(line))]
+    return "\n".join(kept).strip()
+
+
+def block_hash(content: str) -> str:
+    """The hash a reader gets for one block, from its raw ``content``.
+
+    12 hex characters of SHA-256 over the normalised text (normalize_block_text
+    with the drawer kept, then strip_volatile): change detection, not a
+    security property. What the write proof ignores, the hash ignores too;
+    what it also ignores is above.
+    """
+    text = strip_volatile(normalize_block_text(content or "", keep_logbook=True))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def tree_hash(block: dict) -> str:
+    """The hash of a block and all its descendants: content and order.
+
+    Each block contributes its block_hash and, in brackets, its children's
+    tree hashes in order, so a new child, a moved child and a child one level
+    deeper all change it. ``block`` is a block as Logseq answers it with its
+    children as blocks; a child that is only a ``["uuid", ...]`` pair has no
+    content to hash and is not counted.
+    """
+    kids = ",".join(tree_hash(c) for c in block.get("children") or [] if isinstance(c, dict))
+    return hashlib.sha256(f"{block_hash(block.get('content'))}[{kids}]".encode("utf-8")).hexdigest()[:12]
+
+
+def with_hashes(block: dict) -> dict:
+    """A copy of ``block`` with ``hash`` on it and on each descendant block.
+
+    A copy, because the API client caches what it returns. Computed from the
+    raw ``content``, so call it before anything rewrites the content.
+    """
+    out = dict(block, hash=block_hash(block.get("content")))
+    if "children" in block:
+        out["children"] = [with_hashes(c) if isinstance(c, dict) else c for c in block["children"]]
+    return out
+
+
+def with_hashes_in(blocks):
+    """``with_hashes`` over a list of blocks; anything else comes back as it is."""
+    if not isinstance(blocks, list):
+        return blocks
+    return [with_hashes(b) if isinstance(b, dict) else b for b in blocks]
 
 
 def block_text_matches(sent: str, read: str) -> bool:

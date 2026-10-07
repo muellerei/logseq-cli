@@ -181,7 +181,7 @@ logseq-cli get-todos --page-type journal
 
 # Filter by what the task says (regex, case-insensitive)
 logseq-cli get-todos --match "review|contract" --json
-# --json: {"todos": [{marker, content, page, uuid, journal_day?, ...}], "count": N}
+# --json: {"todos": [{marker, content, page, uuid, hash, journal_day?, ...}], "count": N}
 
 # Tasks standing in a date range, including ones carried forward by ((block-ref))
 logseq-cli get-todos --from 2026-09-14 --to 2026-09-16 --json
@@ -470,10 +470,12 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `logseq_error` | Logseq threw on the write and answered with an error object | `method`, `logseq_message` |
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
-| `block_changed` | `set-todo-status`, `replace-text`, `set-property` and `remove-property` (every write that replaces a block's text) read the block again right before writing, and it no longer holds the text they read: someone changed it in between, and the write would have replaced that change. Nothing was written | `block` |
+| `block_changed` | `set-todo-status`, `update-block --expect-hash`, `add-journal-block --upsert-heading --expect-hash`, `replace-text`, `set-property` and `remove-property` (every write that replaces a block's text) read the block again right before writing, and it no longer holds the text they read: someone changed it in between, and the write would have replaced that change. Nothing was written | `block` |
 | `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
 | `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
+| `precondition_required` | A precondition is required and the call gave none: `[safety] require_preconditions`, `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` or `--require-preconditions` is on, and the command got none of the options it takes: `--expect-hash` (`update-block` takes it too; `set-todo-status` also takes `--expect-marker`; `add-journal-block --upsert-heading` owes it only when it matches a block, otherwise it creates one and owes nothing), or `--expect-tree-hash` for `remove-block` / `delete-block`. Refused before the first request, nothing was written | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found), `options` |
 | `config_error` | The config file cannot be used: it does not parse, `LOGSEQ_CLI_CONFIG` names a file that is not there, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean, or a `[graph] keep_empty_blocks_last` that is not. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
+| `precondition_failed` | `--expect-hash` / `--expect-marker` (`set-todo-status`, `update-block`, `set-block-property`, `remove-property --id`, `move-block`, `copy-block --remove`, `add-journal-block --upsert-heading` when it matches a block: the hash is of that match, not of the `--under-heading` host; with no match the block is created and the precondition is moot), `remove-block --expect-tree-hash`: the block (for `remove-block`: the block or anything under it) is no longer the one the hash was read from, or its marker is not the expected one. Nothing was written. The current hash is not given, on purpose | `expected_hash`, `expected_tree_hash` and/or `expected_marker` (as given), `actual_marker` (`null` for a block without one), `first_line` |
 | `block_not_found` | The block the command names does not exist; the placeholder Logseq keeps for a missing ref target counts as none | `id`; for `set-todo-status --content` the `content` and `page` searched instead, no `id` |
 | `dead_ref` | `set-todo-status --follow-refs`: the chain of refs leads to a block that does not exist | `id` (the missing block), `followed` |
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
@@ -511,6 +513,22 @@ without moving the cursor. An insert whose text holds `((X))` is refused
 while X is open in the editor and has no `id::` yet (storing the id would
 write into X). A `--keep-ids` write is refused while any block is open.
 
+On `precondition_required`: read the block with `get-block --json` and pass
+its `hash` as `--expect-hash` (or the marker you decided on as
+`--expect-marker`). Do not switch the requirement off to get past it; the user
+set it. `read_only` is checked first: if both apply, you get `read_only`.
+
+On `precondition_failed`: the block changed after you read it. Read it again
+with `get-block --json` and decide again on what it says now. Do not repeat
+the same change with the fresh hash: that writes your old decision over the
+change that was made. It differs from `block_changed`, which the command finds
+itself between its own read and its write.
+
+What a precondition does not catch: a change between the check and the write
+(reading and writing are two requests), and a move (the hash sees content, not
+position). A write's output carries no new hash yet, so read the block again
+before changing it a second time.
+
 `write_not_verified` can be a false alarm when someone else wrote the block
 between the write and the read-back; read the block before retrying.
 
@@ -522,6 +540,28 @@ request; it does not close it.
 `replace-text` writes the other blocks when one is refused, and names each
 refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 
+### 9. Changing a Block You Read Earlier
+
+Under `--json`, the blocks of `get-block`, `get-page`, `get-journal-range`,
+`find-block` and `get-todos` carry a `hash`; `get-block` also carries a
+`tree_hash` (not with `--no-children`). The text output shows neither.
+
+When you read a block, decide, and change it later, pass what you read. The
+user may have edited the block in Logseq in between, and without a
+precondition the write goes through over that edit, even if the user has not
+switched `require_preconditions` on. Read with `get-block --json`, then give
+its `hash` as `--expect-hash` (for `set-todo-status` the marker you decided
+on can be `--expect-marker`; `remove-block` takes `--expect-tree-hash`):
+
+```bash
+HASH=$(logseq-cli get-block --id 6650a1b2-0000-4000-8000-000000000001 --json | jq -r .hash)
+logseq-cli update-block --id 6650a1b2-0000-4000-8000-000000000001 \
+  --content "TODO ship the parser, fixed" --expect-hash "$HASH"
+```
+
+On `precondition_failed` read the block again and decide again; see the
+section above.
+
 ## Environment Variables
 
 Two matter in agent work: `LOGSEQ_TOKEN`, the documented way to pass the
@@ -530,7 +570,9 @@ heading for journal writes. A config setting works like them:
 `[graph] keep_empty_blocks_last` (or
 `LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST`) makes a write that ends a section go before
 the empty blocks that end it, instead of leaving one in front of the entry; it is
-off by default, and nothing is overwritten. Every variable, with its default, is in
+off by default, and nothing is overwritten. `LOGSEQ_CLI_READ_ONLY` and `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` switch the two
+`[safety]` guards on; they only tighten, and are not yours to unset. Every
+variable, with its default, is in
 [docs/configuration.md](docs/configuration.md#environment-variables-and-flags).
 
 ## Command Summary

@@ -6,6 +6,8 @@ import pytest
 from click.testing import CliRunner
 
 from logseq_cli.api import _not_verified, block_or_none
+from logseq_cli.config import SAFETY_KEYS
+from logseq_cli.safety import env_var
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +20,8 @@ def isolate_environment(monkeypatch, tmp_path_factory):
     the search paths start there. Both point at an empty directory. Tests
     that want a setting set it themselves.
     """
-    for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING", "LOGSEQ_CLI_READ_ONLY"):
+    safety_vars = [env_var(key) for key in SAFETY_KEYS]
+    for var in ("LOGSEQ_CLI_CONFIG", "LOGSEQ_JOURNAL_HEADING", *safety_vars):
         monkeypatch.delenv(var, raising=False)
     empty_home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(empty_home))
@@ -260,7 +263,7 @@ class FakeGraph:
         bucket.insert(0, block) if opts.get("before") else bucket.append(block)
         return {"uuid": uuid}
 
-    def get_block(self, uuid, include_children=True):
+    def get_block(self, uuid, include_children=True, cached=True):
         def find(node_uuid):
             if node_uuid in self.children:
                 return {"uuid": node_uuid, "children": self.children[node_uuid]}
@@ -552,13 +555,13 @@ class PageGraph:
             found["file"] = {"id": page["id"] + 5000}
         return found
 
-    def get_page_blocks_tree(self, name):
+    def get_page_blocks_tree(self, name, cached=True):
         page = self.page_named(name)
         if page is None:
             return None
         return [self._out(b, page, None) for b in page["blocks"]]
 
-    def get_block(self, uuid, include_children=True):
+    def get_block(self, uuid, include_children=True, cached=True):
         if isinstance(uuid, int):       # getBlock takes a database id too
             uuid = next((u for u, i in self._block_ids.items() if i == uuid), None)
         elif isinstance(uuid, str):     # and one in capitals (measured, 0.10.15)

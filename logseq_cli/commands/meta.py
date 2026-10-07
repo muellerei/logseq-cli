@@ -13,7 +13,8 @@ from logseq_cli.config import (
     get, read_config,
 )
 from logseq_cli.safety import (
-    decide, describe, refuse_missing_named_config, render_safety, safety_to_keep,
+    decide, describe, refuse_missing_named_config, render_safety, safety_keys,
+    safety_to_keep,
 )
 from logseq_cli.group import cli, resolve_version
 from logseq_cli.headings import normalize_heading
@@ -313,7 +314,8 @@ Examples:
   logseq-cli --token TOKEN doctor --json
 Note:
   Read-only. Exits 0 when ready to read, non-zero otherwise. Says whether
-  writes are switched off (read_only) and by what; that does not fail it.
+  writes are switched off (read_only), whether a precondition is required
+  (require_preconditions) and by what; neither fails it.
   Distinguishes "Logseq not running" from "running but HTTP API off" and
   from "API up but token rejected" - each needs a different fix.
 """)
@@ -503,12 +505,13 @@ def doctor(ctx, as_json):
             decision = decide(cfg)
         except ConfigError as e:
             problem = e
-    if decision is not None:
-        add("read_only", None, describe(decision))
-    else:
-        add("read_only", None,
-            f"unknown, commands that write refuse until this is fixed: "
-            f"{str(problem).splitlines()[0]}")
+    for key in safety_keys():
+        if decision is not None:
+            add(key, None, describe(decision, key))
+        else:
+            add(key, None,
+                f"unknown, commands that write refuse until this is fixed: "
+                f"{str(problem).splitlines()[0]}")
 
     healthy = all(c["ok"] for c in checks if c["ok"] is not None)
 
@@ -535,7 +538,7 @@ def doctor(ctx, as_json):
         click.echo()
         if healthy and decision is None:
             click.echo("Ready to read; commands that write refuse until the config is fixed.")
-        elif healthy and decision.read_only:
+        elif healthy and decision.is_on("read_only"):
             click.echo("Ready to read; writes are off.")
         elif healthy:
             click.echo("Ready: reads and writes should work.")

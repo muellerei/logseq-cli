@@ -44,6 +44,12 @@ class BlockChanged(WriteRefused):
     reason = "block_changed"
 
 
+class BlockNotFound(WriteRefused):
+    """The block the caller meant is gone, found out before anything was
+    written. Field: id (or content and page, for a block picked by its text)."""
+    reason = "block_not_found"
+
+
 class EditorStateUnknown(WriteRefused):
     """checkEditing answered something not understood. Field: answer."""
     reason = "editor_state_unknown"
@@ -57,6 +63,22 @@ class LogseqWriteError(WriteRefused):
 class PageExists(WriteRefused):
     """createPage on a page that exists would drop the properties. Field: page."""
     reason = "page_exists"
+
+
+class PreconditionFailed(WriteRefused):
+    """The block no longer is what the caller said it read. Fields: the
+    ``expected_*`` the call gave, ``actual_marker`` (None for a block without
+    one) and ``first_line``. Never the current hash: with it, a caller could
+    repeat its old text in one step and write over what the check protects."""
+    reason = "precondition_failed"
+
+
+class PreconditionRequired(WriteRefused):
+    """The call changes a block it read and gave no precondition, which it owes.
+    Fields: source (a list of "config", "env", "flag"; empty when the command
+    asks for it whatever the switch says), config_path (None when no config
+    file was found), options (the ones, any of which would do)."""
+    reason = "precondition_required"
 
 
 class RenameRefused(WriteRefused):

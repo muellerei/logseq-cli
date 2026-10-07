@@ -111,3 +111,52 @@ esac
     assert "could not export: a_b (its file name is taken by another page)" in result.stderr
     assert (out / "a_b.json").read_text().strip() == '{"page": "a/b"}'
     assert list(out.glob("*.part")) == []
+
+
+SAFE_UPDATE = EXAMPLES / "safe-update-block.sh"
+BLOCK = "6650a1b2-0000-4000-8000-000000000001"
+SAFE_UPDATE_STUB = """case "$1" in
+  get-block) echo '{"uuid": "%s", "content": "TODO ship the parser", "hash": "0123456789ab"}';;
+  update-block) echo "$@" >> "$CALLS"
+                %s;;
+esac
+"""
+
+
+def _run_safe_update(tmp_path, update_body):
+    calls = tmp_path / "calls"
+    env = _stub(tmp_path, SAFE_UPDATE_STUB % (BLOCK, update_body))
+    env["CALLS"] = str(calls)
+    result = subprocess.run(["bash", str(SAFE_UPDATE), BLOCK, "TODO ship the parser, fixed"],
+                            capture_output=True, text=True, env=env, timeout=30)
+    return result, calls.read_text().splitlines() if calls.exists() else []
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_passes_the_hash_it_read(tmp_path):
+    result, calls = _run_safe_update(tmp_path, "exit 0")
+    assert result.returncode == 0, result.stderr
+    assert len(calls) == 1 and "--expect-hash 0123456789ab" in calls[0]
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_does_not_repeat_a_refused_change_with_a_fresh_hash(tmp_path):
+    """After `precondition_failed` the text was decided on content that is gone:
+    the script stops, says so, and sends no second update."""
+    refusal = """echo '{"error": "refused", "reason": "precondition_failed"}' >&2; exit 1"""
+    result, calls = _run_safe_update(tmp_path, refusal)
+    assert result.returncode == 3
+    assert len(calls) == 1
+    assert "decide again" in result.stderr
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_shows_any_other_failure(tmp_path):
+    result, calls = _run_safe_update(
+        tmp_path, """echo '{"error": "boom", "reason": "read_only"}' >&2; exit 1""")
+    assert result.returncode == 1
+    assert "boom" in result.stderr
+    assert len(calls) == 1

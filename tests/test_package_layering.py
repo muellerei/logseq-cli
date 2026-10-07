@@ -197,3 +197,10 @@ def test_the_pure_modules_need_no_logseq_api():
         f"{offenders} — a module in PURE reaches LogseqAPI. Move what needs "
         f"the API into a module that already takes it, or take the module out "
         f"of PURE and say why in ADR 0003")
+
+
+def test_tasks_may_import_blocktext_but_blocktext_never_tasks():
+    """The ``State "DONE"`` pattern lives in blocktext beside the drawer rule;
+    the task rules read it from there. The other way round would be a cycle."""
+    assert "logseq_cli.tasks" not in _package_imports(PACKAGE / "blocktext.py")
+    assert "logseq_cli.blocktext" in _package_imports(PACKAGE / "tasks.py")

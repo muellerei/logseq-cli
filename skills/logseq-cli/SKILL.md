@@ -65,7 +65,7 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
     how many. Ask the user to leave the block, then retry once (not in a loop).
   - `write_not_verified`: read the block before retrying. Someone writing
     there at the same time can make a write that landed look missing.
-  - `block_changed`: the block changed after the command read it; read it again.
+  - `block_changed`, `precondition_failed`: the block changed after it was read; read it again and decide again. `precondition_required`: pass `--expect-hash` (from `get-block --json`) or `--expect-marker`; `remove-block` wants `--expect-tree-hash` (its `tree_hash`). `precondition_failed` is the caller's check (`block_changed` is the command's own re-read): never repeat the same change with a fresh hash. The hash sees content, not position; a write's output has no new hash, so read again before a second write to the block. Pass `--expect-hash` whenever you change a block you read earlier, switch or not.
   - `rename_refused`, `page_exists`: nothing was written.
   - `read_only`: writes are off on purpose. Do not retry or go around it; tell the user.
 

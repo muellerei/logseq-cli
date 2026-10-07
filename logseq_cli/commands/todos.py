@@ -3,7 +3,7 @@ import re
 
 import click
 
-from logseq_cli.blocktext import pointer_target
+from logseq_cli.blocktext import block_hash, pointer_target
 from logseq_cli.dates import (
     journal_day_to_date,
     next_occurrence,
@@ -14,7 +14,8 @@ from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
-from logseq_cli.safety import WriteCommand
+from logseq_cli.preconditions import Expect, check_precondition, parse_marker, read_fresh
+from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.tasks import (FRONTEND_MARKERS, ORDER, STATES, marker_before_newline, marker_of,
                               markers_in, marker_clause,
                               task_text, with_marker)
@@ -253,6 +254,9 @@ def get_todos(ctx, state, status, page, page_type, tag, match, from_date, to_dat
             "content": clean_content,
             "page": page_name,
             "uuid": uuid,
+            # From the stored content, not from "content" above: that field
+            # has lost the marker, properties and timestamps.
+            "hash": block_hash(content),
             "_journal_day": journal_day,
         }
         # The day the task was noted on, for its age. Already read for
@@ -487,7 +491,18 @@ def _refuse_no_task(block: dict, content: str, as_json: bool):
          'marker, e.g. "TODO …".', as_json, reason="not_a_task", id=uuid)
 
 
-@cli.command("set-todo-status", cls=WriteCommand, epilog="""\b
+def _marker_option(ctx, param, value):
+    """--expect-marker as a usage error for an unknown marker, before any request."""
+    if value is None:
+        return None
+    try:
+        return parse_marker(value)
+    except ValueError as error:
+        raise click.BadParameter(str(error))
+
+
+@cli.command("set-todo-status", cls=WriteCommand,
+             owes=lambda params: Owed(("--expect-hash", "--expect-marker")), epilog="""\b
 Examples:
   logseq-cli --token TOKEN set-todo-status --id UUID --status DONE
   logseq-cli --token TOKEN set-todo-status --content "ship the parser" \\
@@ -515,11 +530,21 @@ Notes:
 @click.option("--follow-refs", is_flag=True,
               help="If the block holds only a ((uuid)) ref or an embed of one, follow it, "
                    "through every such block, and update the block at the end instead.")
+@click.option("--expect-hash", "expect_hash", default=None,
+              help="Refuse, without writing, unless the block is still the one this hash was read "
+                   "from (the hash field of get-block --json). With --follow-refs the block at "
+                   "the end of the refs counts. Checked before --dry-run and before a no-change answer.")
+@click.option("--expect-marker", "expect_marker", default=None, callback=_marker_option,
+              metavar="MARKER",
+              help="Refuse, without writing, unless the block's marker is this one: a task "
+                   "marker, or none for a block without one (case does not matter; an unknown "
+                   "marker is refused with the list of known ones). Combined with --expect-hash, both must hold. Checked at the same point.")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show the marker change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, as_json):
+def set_todo_status(ctx, block_id, content, page, status, follow_refs, expect_hash, expect_marker,
+                    dry_run, as_json):
     """Update the status of a TODO block (e.g. TODO → DONE).
 
     Identify the block either by UUID (--id) or by content substring + page (--content + --page).
@@ -579,6 +604,14 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, dry_run, 
     if follow_refs:
         block, chain["followed"] = follow_ref_chain(api, block, as_json)
     block_id = block.get("uuid")
+
+    # The caller's own read of the target, past the cache: the new content is
+    # worked out from it, and the check runs on it before anything else can end
+    # the command (the no-change answer, the preview, the write).
+    expect = Expect(hash=expect_hash, marker=expect_marker)
+    if expect:
+        block = read_fresh(api, block_id)
+        check_precondition(block, expect)
     old_content = block.get("content", "")
 
     # A task is a block Logseq stored a marker for. The text must show it where
