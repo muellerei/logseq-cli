@@ -78,7 +78,7 @@ def normalize_heading(text: str) -> str:
     return ' '.join(stripped.split())
 
 
-def find_heading(api, page_name: str, heading: str) -> str | None:
+def find_heading(api, page_name: str, heading: str, *, cached: bool = True) -> str | None:
     """Find an existing heading block's UUID on a page; never create one.
 
     Split out of :func:`find_or_create_heading` for the --dry-run paths: a
@@ -88,10 +88,35 @@ def find_heading(api, page_name: str, heading: str) -> str | None:
     Returns the UUID, or None if no block on the page matches the heading.
     """
     target = normalize_heading(heading)
-    for block in api.get_page_blocks_tree(page_name) or []:
+    # The flag goes on only when it is off: stand-ins for the client that
+    # predate it keep working for every caller that reads the cache.
+    fresh = {} if cached else {"cached": False}
+    for block in api.get_page_blocks_tree(page_name, **fresh) or []:
         if normalize_heading(block.get("content", "")) == target:
             return block.get("uuid")
     return None
+
+
+def find_upsert_target(api, page_name: str, under_heading: str, upsert_heading: str):
+    """Which block ``--upsert-heading`` replaces: ``(heading_uuid, child_uuid)``.
+
+    The one choice the live run and the preview share, so a preview cannot
+    name another block than the run writes. It reads without the cache, since
+    the answer decides which block is overwritten, and it never creates
+    anything: it runs before the journal page and the heading are brought into
+    existence. ``heading_uuid`` is None when the page has no such heading,
+    ``child_uuid`` None when no child of the heading matches (the first match
+    wins).
+    """
+    heading_uuid = find_heading(api, page_name, under_heading, cached=False)
+    if not heading_uuid:
+        return None, None
+    heading_block = api.get_block(heading_uuid, include_children=True, cached=False)
+    target = normalize_heading(upsert_heading)
+    for child in (heading_block or {}).get("children") or []:
+        if isinstance(child, dict) and normalize_heading(child.get("content", "")) == target:
+            return heading_uuid, child.get("uuid")
+    return heading_uuid, None
 
 
 def find_or_create_heading(api, page_name: str, heading: str, *, keep_last: bool = False) -> str:

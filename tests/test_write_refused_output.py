@@ -23,11 +23,17 @@ MESSAGE = "The write was refused here."
 # (type, reason, fields): the contract --json callers rely on.
 TYPES = [
     ("BlockChanged", "block_changed", {"block": BLOCK}),
+    ("BlockNotFound", "block_not_found", {"id": BLOCK}),
     ("EditorOpen", "open_in_editor", {"block": BLOCK, "page": "Probe Page"}),
     ("EditorStateUnknown", "editor_state_unknown", {"answer": '{"ok": 1}'}),
     ("LogseqWriteError", "logseq_error",
      {"method": "upsertBlockProperty", "logseq_message": "foo is not a valid UUID string."}),
     ("PageExists", "page_exists", {"page": "Probe Page"}),
+    ("PreconditionFailed", "precondition_failed",
+     {"expected_hash": "0123456789ab", "actual_marker": "DONE", "first_line": "DONE x"}),
+    ("PreconditionRequired", "precondition_required",
+     {"source": ["config"], "config_path": "/x/config.toml",
+      "options": ["--expect-hash", "--expect-marker"]}),
     ("RenameRefused", "rename_refused", {"old": "Old Page", "new": "Taken Page", "why": "exists"}),
     ("ReadOnly", "read_only", {"source": ["config"], "config_path": "/x/config.toml"}),
     ("WriteNotVerified", "write_not_verified",

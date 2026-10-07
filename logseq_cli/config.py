@@ -42,7 +42,7 @@ CONFIG_ENV_VAR = "LOGSEQ_CLI_CONFIG"
 KNOWN_SECTIONS = ("journal", "graph", "analysis", "safety")
 
 # The keys `[safety]` knows. Grows with every limit that gets built.
-SAFETY_KEYS = ("read_only",)
+SAFETY_KEYS = ("read_only", "require_preconditions")
 
 
 class ConfigError(Exception):
@@ -125,10 +125,11 @@ def check_safety(config: dict) -> None:
             close = difflib.get_close_matches(_norm(name), [_norm(k) for k in SAFETY_KEYS], n=1)
             hint = f", did you mean `{_safety_key(close[0])}`?" if close else ""
             raise ConfigError(f"{where}: unknown key `{name}` in [safety]{hint}")
-    value = section.get("read_only", False)
-    if not isinstance(value, bool):
-        raise ConfigError(
-            f"{where}: [safety] read_only must be true or false, got {value!r}.")
+    for key in SAFETY_KEYS:
+        value = section.get(key, False)
+        if not isinstance(value, bool):
+            raise ConfigError(
+                f"{where}: [safety] {key} must be true or false, got {value!r}.")
 
 
 def named_config_missing() -> Path | None:

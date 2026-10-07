@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from logseq_cli.blocktext import block_hash
 from logseq_cli.cli import cli
 from tests.test_get_todos import _mock_api_for_todos
 
@@ -23,15 +24,16 @@ P2_ON_MARCH_12 = ({"uuid": "u-p2"},
                   {"original-name": "Mar 12th, 2026", "name": "mar 12th, 2026",
                    "journal-day": 20260312})
 
-# The output before the option existed, taken from the unchanged command.
+# The output before the option existed, taken from the unchanged command (plus
+# the hash every block read carries).
 BEFORE_JSON = {
     "todos": [
         {"marker": "TODO", "content": "journal task", "page": "Mar 10th, 2026",
-         "uuid": "u-j1", "journal_day": "2026-03-10"},
+         "uuid": "u-j1", "hash": block_hash("TODO journal task"), "journal_day": "2026-03-10"},
         {"marker": "TODO", "content": "plain page task", "page": "Project Alpha",
-         "uuid": "u-p1"},
+         "uuid": "u-p1", "hash": block_hash("TODO plain page task")},
         {"marker": "TODO", "content": "carried task", "page": "Project Beta",
-         "uuid": "u-p2", "references": ["Mar 12th, 2026"]},
+         "uuid": "u-p2", "hash": block_hash("TODO carried task"), "references": ["Mar 12th, 2026"]},
     ],
     "count": 3,
 }

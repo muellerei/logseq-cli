@@ -106,6 +106,29 @@ refused. It exists because Logseq answers some failed writes with HTTP 200 and
 a `null` body, so a write is verified after the fact rather than trusted.
 _Avoid_: safe write, verified write
 
+**Precondition**:
+What a caller says it read before it changes a Block: the Hash (or
+Tree Hash) of the block, or for `set-todo-status` its marker. The write is
+refused, with `precondition_failed`, unless the block is still what the caller
+read. It guards the caller's decision across calls, which Strict Insert (was
+my write stored) and the `block_changed` re-read (did the block change between
+this command's own read and its write) do not: only the caller knows what it
+read. `[safety] require_preconditions` makes a Precondition mandatory.
+_Avoid_: lock, guard, version check
+
+**Hash**:
+A short digest of one Block's content, shown as `hash` by the read commands
+with `--json`. It sees text, properties and the DONE lines of the logbook; it
+ignores collapsing, `id::` lines, clock lines and where the block stands, so
+moving a block does not change it. Compared by value, never ordered.
+_Avoid_: version, etag, checksum
+
+**Tree Hash**:
+The Hash of a Block together with everything under it, content and order
+(`tree_hash` of `get-block --json`). The Precondition of `remove-block`, since
+the hash of the block alone would not see a child added after the read.
+_Avoid_: subtree hash, deep hash
+
 **Dry Run**:
 A preview of a write that performs no write. Available on every Command that
 writes.

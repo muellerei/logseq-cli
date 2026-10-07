@@ -20,7 +20,7 @@ from pathlib import Path
 import click
 
 from logseq_cli.api import LogseqAPI, InvalidPortError
-from logseq_cli.safety import FLAG_KEY
+from logseq_cli.safety import flag_key
 
 
 def resolve_version() -> str:
@@ -52,8 +52,9 @@ def resolve_version() -> str:
 @click.option("--token", default=None, help="Logseq API Bearer token")
 @click.option("--no-cache", "no_cache", is_flag=True, help="Bypass the in-memory read cache for this invocation")
 @click.option("--read-only", "read_only", is_flag=True, help="Refuse every command that writes, for this invocation. Can only tighten: nothing loosens a [safety] read_only = true")
+@click.option("--require-preconditions", "require_preconditions", is_flag=True, help="Refuse a command that changes a block it read unless it names what it read (--expect-hash, --expect-marker), for this invocation. Can only tighten: nothing loosens a [safety] require_preconditions = true")
 @click.pass_context
-def cli(ctx, host, port, token, no_cache, read_only):
+def cli(ctx, host, port, token, no_cache, read_only, require_preconditions):
     """CLI for Logseq knowledge graph - pages, journals, blocks, search, and graph analysis."""
     ctx.ensure_object(dict)
     try:
@@ -66,4 +67,5 @@ def cli(ctx, host, port, token, no_cache, read_only):
     if no_cache:
         api.cache_enabled = False
     ctx.obj["api"] = api
-    ctx.obj[FLAG_KEY] = read_only
+    ctx.obj[flag_key("read_only")] = read_only
+    ctx.obj[flag_key("require_preconditions")] = require_preconditions

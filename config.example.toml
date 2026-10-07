@@ -115,3 +115,11 @@ project_tag_prefix = "#projects/"
 # Keep this file out of the agent's reach, or it is only a request:
 # docs/safety.md. Check that it applies with `logseq-cli doctor`.
 # read_only = true
+
+# Makes a command that changes a block it read refuse unless the call says what
+# it read: --expect-hash (the hash of `get-block --json`) or --expect-marker.
+# Refused with reason precondition_required, before the first request. The
+# environment variable LOGSEQ_CLI_REQUIRE_PRECONDITIONS and the option
+# --require-preconditions can switch it on too, but nothing switches a `true`
+# here off. Turn it on when an agent writes while you edit in Logseq yourself.
+# require_preconditions = true

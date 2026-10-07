@@ -133,3 +133,45 @@ def test_update_block_with_a_ref_to_itself_is_proven(monkeypatch):
                                     "--content", f"see (({UUID})) here", "--json"])
     assert r.exit_code == 0, r.stderr
     assert double.tree("Probe Page") == [("see  here", [])]
+
+
+KEPT_DRAWER = (
+    "TODO task\n:LOGBOOK:\n"
+    '* State "DONE" from "TODO" [2026-09-29 Tue 10:00]\n'
+    f"{CLOCK_IN}\n:END:"
+)
+
+
+def test_keep_logbook_leaves_the_drawer_lines():
+    from logseq_cli.blocktext import normalize_block_text
+    kept = normalize_block_text(KEPT_DRAWER, keep_logbook=True)
+    assert kept == KEPT_DRAWER
+
+
+def test_keep_logbook_runs_the_other_steps_alike():
+    from logseq_cli.blocktext import normalize_block_text
+    text = f"  TODO task  \nid:: {UUID}\n:LOGBOOK:  \n{CLOCK_IN}   \n:END:\n\n"
+    assert normalize_block_text(text, keep_logbook=True) == (
+        f"TODO task\n:LOGBOOK:\n{CLOCK_IN}\n:END:")
+
+
+def test_keep_logbook_leaves_an_unclosed_opener_as_it_was():
+    from logseq_cli.blocktext import normalize_block_text
+    text = "TODO task\n:LOGBOOK:\nno end"
+    assert normalize_block_text(text, keep_logbook=True) == normalize_block_text(text)
+
+
+def test_the_drawer_goes_by_default():
+    # The proof calls without keep_logbook; its text must stay byte for byte.
+    assert _normalize(KEPT_DRAWER) == "TODO task"
+
+
+def test_done_line_pattern_is_one_public_name_next_to_the_drawer_rule():
+    from logseq_cli import blocktext
+    from logseq_cli.blocktext import DONE_LINE_RE
+    assert blocktext.drawer_lines  # the rule it sits beside
+    assert DONE_LINE_RE.match('* State "DONE" from "TODO" [2026-09-29 Tue 10:00]')
+    assert DONE_LINE_RE.match('  * State "DONE" from "NOW" [2026-09-29 Tue 10:00]')
+    assert not DONE_LINE_RE.match('- State "DONE" from "TODO" [2026-09-29 Tue 10:00]')
+    assert not DONE_LINE_RE.match('* State "TODO" from "DONE" [2026-09-29 Tue 10:00]')
+    assert not DONE_LINE_RE.match(CLOCK_IN)

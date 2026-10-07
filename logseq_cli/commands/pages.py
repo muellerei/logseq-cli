@@ -10,7 +10,7 @@ from logseq_cli.blockprops import (
     check_property_pairs,
     parse_property_pairs,
 )
-from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree
+from logseq_cli.blocktext import refuse_split_block, refuse_split_heading, refuse_split_tree, with_hashes_in
 from logseq_cli.cliinput import content_or_file
 from logseq_cli.config import keep_empty_blocks_last, load_config
 from logseq_cli.group import cli
@@ -228,6 +228,10 @@ def get_page(ctx, page, no_backlinks, resolve_refs, with_ids, heading, outline, 
         if api.get_page(page_name) is None:
             missing.append(name)
         blocks = api.get_page_blocks_tree(page_name)
+        if as_json:
+            # From the content as stored: before a cut keeps part of the tree
+            # and before --resolve-refs rewrites the text.
+            blocks = with_hashes_in(blocks)
         if no_backlinks or heading or outline:
             backlinks = []
         else:

@@ -1,6 +1,13 @@
 """What keeps a command from writing: ``[safety] read_only`` and its friends.
 
-One function decides whether writes are off and where the switch came from
+Each key of ``[safety]`` is a bool switch that only tightens, and every one is
+worked out the same way from config, environment and flag. The environment
+variable and the flag key are derived from the key (``read_only`` has
+``LOGSEQ_CLI_READ_ONLY`` and ``read_only_flag``), so a key added to
+``config.SAFETY_KEYS`` is decided, described and kept by ``init`` without a
+line of its own here.
+
+One function decides which switches are on and where each came from
 (:func:`decide`); everything else asks it, the checks through
 :func:`write_decision`. The commands that write ask through
 :class:`WriteCommand`, before their first request; ``LogseqAPI._post`` asks
@@ -21,35 +28,54 @@ A module of its own: it needs the config, the notes and the refusal type, and
 """
 import os
 from dataclasses import dataclass
-from typing import NamedTuple
 
 import click
 
+from logseq_cli import config as _config
 from logseq_cli.config import (
     CONFIG_ENV_VAR, ConfigError, check_safety, config_search_paths, named_config_missing,
     read_config,
 )
 from logseq_cli.notes import print_note
-from logseq_cli.writerefused import ReadOnly
-
-ENV_VAR = "LOGSEQ_CLI_READ_ONLY"
+from logseq_cli.writerefused import PreconditionRequired, ReadOnly
 
 _ON = ("1", "true", "yes", "on")
 _OFF = ("0", "false", "no", "off", "")
 _CACHE = "logseq_cli.safety.decision"
-FLAG_KEY = "read_only_flag"
+
+
+def env_var(key: str) -> str:
+    """The environment variable that switches ``key`` on: ``LOGSEQ_CLI_READ_ONLY``."""
+    return f"LOGSEQ_CLI_{key.upper()}"
+
+
+def flag_key(key: str) -> str:
+    """Where the group's flag for ``key`` leaves its value in the click context."""
+    return f"{key}_flag"
+
+
+def flag_name(key: str) -> str:
+    """The group option that switches ``key`` on: ``--read-only``."""
+    return "--" + key.replace("_", "-")
+
+
+def safety_keys() -> tuple:
+    """The keys ``[safety]`` knows, in the order they are shown."""
+    return _config.SAFETY_KEYS
 
 
 @dataclass(frozen=True)
 class WriteDecision:
-    """Whether writes are off, and which of config, env and flag switched them."""
-    sources: tuple = ()
+    """Which ``[safety]`` switches are on, and which of config, env and flag set each."""
+    by_key: tuple = ()          # ((key, (source, ...)), ...): every key, () when off
     config_path: str | None = None
     has_safety: bool = False    # the config file has a [safety] section
 
-    @property
-    def read_only(self) -> bool:
-        return bool(self.sources)
+    def sources_of(self, key: str) -> tuple:
+        return dict(self.by_key).get(key, ())
+
+    def is_on(self, key: str) -> bool:
+        return bool(self.sources_of(key))
 
 
 def _obj() -> dict | None:
@@ -58,8 +84,9 @@ def _obj() -> dict | None:
     return ctx.obj if ctx is not None and isinstance(ctx.obj, dict) else None
 
 
-def _env_on() -> bool:
-    raw = os.environ.get(ENV_VAR)
+def _env_on(key: str) -> bool:
+    name = env_var(key)
+    raw = os.environ.get(name)
     if raw is None:
         return False
     value = raw.strip().lower()
@@ -67,7 +94,7 @@ def _env_on() -> bool:
         return True
     if value in _OFF:
         return False
-    print_note(f"warning: {ENV_VAR}={raw!r} is not a value it knows; "
+    print_note(f"warning: {name}={raw!r} is not a value it knows; "
                "treating it as on (unknown means off-limits).")
     return True
 
@@ -87,27 +114,31 @@ def refuse_missing_named_config() -> None:
 
 
 def decide(config: dict) -> WriteDecision:
-    """Are writes off, from a loaded config, the environment and the flag.
+    """Which switches are on, from a loaded config, the environment and the flags.
 
-    The one place the three are put together; ``write_decision`` (the gate)
+    The one place the three are put together, per key; ``write_decision`` (the gate)
     and ``doctor`` both come here. Raises ConfigError for a ``[safety]`` that
     cannot be trusted.
     """
     check_safety(config)
-    sources = []
-    if (config.get("safety") or {}).get("read_only") is True:
-        sources.append("config")
-    if _env_on():
-        sources.append("env")
-    if (_obj() or {}).get(FLAG_KEY):
-        sources.append("flag")
-    return WriteDecision(tuple(sources), config.get("_path"), "safety" in config)
+    section = config.get("safety") or {}
+    by_key = []
+    for key in safety_keys():
+        sources = []
+        if section.get(key) is True:
+            sources.append("config")
+        if _env_on(key):
+            sources.append("env")
+        if (_obj() or {}).get(flag_key(key)):
+            sources.append("flag")
+        by_key.append((key, tuple(sources)))
+    return WriteDecision(tuple(by_key), config.get("_path"), "safety" in config)
 
 
 def write_decision() -> WriteDecision:
-    """Are writes off, and from where. Worked out once per call.
+    """Which switches are on, and from where. Worked out once per call.
 
-    The flag is the group's ``--read-only``, read from the click context. The
+    The flags are the group's, read from the click context. The
     answer is kept in that context, so the command gate and the network check
     see the same one and the config is read once. Without a context (the
     client used from a script) nothing is kept and the flag is off.
@@ -122,28 +153,89 @@ def write_decision() -> WriteDecision:
     return decision
 
 
-class _Words(NamedTuple):
-    refusal: str    # in the message of the refusal
-    state: str      # in the line doctor shows
+def refusal_reason(key: str, source: str, path) -> str:
+    """One source of a switch, put in words for a refusal."""
+    return {
+        "config": f"{key} = true in [safety] of {path}",
+        "env": f"{env_var(key)} is set",
+        "flag": f"{flag_name(key)} was passed",
+    }[source]
 
 
-# How each source is put in words.
-_WORDING = {
-    "config": _Words("read_only = true in [safety] of {path}", "config {path}"),
-    "env": _Words(f"{ENV_VAR} is set", "env"),
-    "flag": _Words("--read-only was passed", "flag"),
-}
+def _state_reason(source: str, path) -> str:
+    """One source of a switch, put in words for the line doctor shows."""
+    return f"config {path}" if source == "config" else source
 
 
 def guard_write() -> None:
     """Raise :class:`ReadOnly` when writes are off."""
     decision = write_decision()
-    if not decision.read_only:
+    sources = decision.sources_of("read_only")
+    if not sources:
         return
-    reasons = [_WORDING[name].refusal.format(path=decision.config_path)
-               for name in decision.sources]
+    reasons = [refusal_reason("read_only", name, decision.config_path) for name in sources]
     raise ReadOnly(f"Writes are off: {'; '.join(reasons)}.",
-                   source=list(decision.sources), config_path=decision.config_path)
+                   source=list(sources), config_path=decision.config_path)
+
+
+@dataclass(frozen=True)
+class Owed:
+    """What a call owes when it changes a block it read.
+
+    ``options`` are the ones that would do, any one of them. ``always`` names
+    why the call owes it whatever ``require_preconditions`` says (``"--next"``),
+    or is ``None`` when only the switch makes it owe.
+    """
+    options: tuple
+    always: str | None = None
+
+
+def _param_name(option: str) -> str:
+    return option.lstrip("-").replace("-", "_")
+
+
+def guard_preconditions(command, params: dict) -> None:
+    """Raise :class:`PreconditionRequired` when the call owes a precondition it was not given.
+
+    The one place the obligation is checked, right behind :func:`guard_write`
+    (a call that cannot write is refused as that, whatever it left out) and
+    before the command's first request. ``command.owes`` is asked with the
+    parsed parameters, so the answer is the call's, not the command's: it may
+    owe nothing for one set of options and something for another. A command
+    without ``owes`` owes nothing.
+    """
+    owes = getattr(command, "owes", None)
+    owed = owes(params) if owes is not None else None
+    if owed is None:
+        return
+    require_precondition(owed, any(params.get(_param_name(option)) is not None
+                                   for option in owed.options))
+
+
+def require_precondition(owed: Owed, given: bool) -> None:
+    """Raise :class:`PreconditionRequired` when ``owed`` is not met by ``given``.
+
+    Behind :func:`guard_preconditions`, and called by a command whose obligation
+    is only known once it has read something (``add-journal-block
+    --upsert-heading`` owes after it has picked the block it replaces), so the
+    refusal and its wording stay in one place.
+    """
+    if given:
+        return
+    decision = write_decision()
+    sources = decision.sources_of("require_preconditions")
+    if not (sources or owed.always):
+        return
+    options = " or ".join(owed.options)
+    if owed.always:
+        why = f"{owed.always} needs one"
+    else:
+        why = "; ".join(refusal_reason("require_preconditions", name, decision.config_path)
+                        for name in sources)
+    raise PreconditionRequired(
+        f"A precondition is required: {why}. Pass {options}.",
+        source=list(sources), config_path=decision.config_path if sources else None,
+        options=list(owed.options))
 
 
 class WriteCommand(click.Command):
@@ -156,8 +248,15 @@ class WriteCommand(click.Command):
     JSON whatever order the decorators are in (there is only the one), and
     ``--dry-run`` is refused too: a preview that says "would write" when the
     real run cannot would lie about it.
+
+    ``owes`` is the precondition the call owes (:func:`guard_preconditions`):
+    a function from the parsed parameters to an :class:`Owed`, or ``None``.
     """
     writes = True
+
+    def __init__(self, *args, owes=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.owes = owes
 
 
 def render_safety(section: dict) -> str:
@@ -170,16 +269,16 @@ def render_safety(section: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def describe(decision: WriteDecision) -> str:
-    """One line for doctor: the state of ``read_only`` and where it comes from."""
-    if decision.read_only:
-        return "on (" + ", ".join(_WORDING[name].state.format(path=decision.config_path)
-                                  for name in decision.sources) + ")"
+def describe(decision: WriteDecision, key: str) -> str:
+    """One line for doctor: the state of ``key`` and where it comes from."""
+    if decision.is_on(key):
+        return "on (" + ", ".join(_state_reason(name, decision.config_path)
+                                  for name in decision.sources_of(key)) + ")"
     if decision.config_path is None:
         return "off (no config file found)"
     if not decision.has_safety:
         return f"off (no [safety] in {decision.config_path})"
-    return f"off ([safety] read_only = false in {decision.config_path})"
+    return f"off ([safety] {key} = false in {decision.config_path})"
 
 
 def safety_to_keep(target, active):

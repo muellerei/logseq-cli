@@ -12,7 +12,8 @@ from logseq_cli.blockprops import (
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
-from logseq_cli.safety import WriteCommand
+from logseq_cli.preconditions import EXPECT_HASH_HELP, Expect, check_precondition, read_fresh
+from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.render import is_properties_block
 
 
@@ -343,7 +344,9 @@ def set_property(ctx, page, key, value, dry_run, as_json):
     else:
         click.echo(f"Set '{key}:: {value}' on page '{page}'")
 
-@cli.command("remove-property", cls=WriteCommand, epilog="""\b
+@cli.command("remove-property", cls=WriteCommand,
+             owes=lambda params: Owed(("--expect-hash",)) if params.get("block_id") else None,
+             epilog="""\b
 Examples:
   logseq-cli --token TOKEN remove-property --name "X" --key "deprecated_key"
   logseq-cli --token TOKEN remove-property --id UUID --key "prio"
@@ -353,19 +356,23 @@ Note:
   --id removes the property from that one block, wherever it sits.
   The key is addressed as set-property stores it ("Status" as "status");
   a key set-property would refuse is passed through as given.
+  --expect-hash goes with --id only: a page property has no block that was read.
 """)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
 @click.option("--key", required=True, help="Property key to remove")
+@click.option("--expect-hash", "expect_hash", default=None, help="With --id: " + EXPECT_HASH_HELP)
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show which property would be removed, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def remove_property(ctx, page, block_id, key, dry_run, as_json):
+def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
     """Remove a property from a page or from a single block."""
     api = ctx.obj["api"]
     if bool(page) == bool(block_id):
         fail("Specify exactly one of: --name, --id.", as_json=as_json)
+    if page and expect_hash is not None:
+        raise click.UsageError("--expect-hash goes with --id: a page property has no block that was read.")
 
     # Address the key under the name set-property stores it as, or "set
     # --key Status" followed by "remove --key Status" removes nothing and still
@@ -384,6 +391,8 @@ def remove_property(ctx, page, block_id, key, dry_run, as_json):
         block = api.get_block(block_uuid, include_children=False)
         if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)
+        if expect_hash is not None:
+            check_precondition(read_fresh(api, block_uuid), Expect(hash=expect_hash))
         target = f"block '{block_uuid}'"
         result = {"id": block_uuid, "property": key, "status": "removed"}
     else:
@@ -463,7 +472,8 @@ def _remove_page_property(api, ref, blocks, key, dry_run, as_json):
         click.echo(f"'{key}' is not set on page '{page}'; nothing was removed")
 
 
-@cli.command("set-block-property", cls=WriteCommand, epilog="""\b
+@cli.command("set-block-property", cls=WriteCommand, owes=lambda params: Owed(("--expect-hash",)),
+             epilog="""\b
 Example:
   logseq-cli --token TOKEN set-block-property --id UUID --key "status" --value "done"
 Note:
@@ -475,11 +485,12 @@ Note:
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
 @click.option("--value", required=True, help="Property value")
+@click.option("--expect-hash", "expect_hash", default=None, help=EXPECT_HASH_HELP)
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show the property change, without writing")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def set_block_property(ctx, block_id, key, value, dry_run, as_json):
+def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json):
     """Set or update a property on a specific block."""
     api = ctx.obj["api"]
 
@@ -502,6 +513,8 @@ def set_block_property(ctx, block_id, key, value, dry_run, as_json):
     if not block:
         fail(f"Block not found: {block_id}", as_json=as_json,
              reason="block_not_found", id=block_id)
+    if expect_hash is not None:
+        check_precondition(read_fresh(api, block_id), Expect(hash=expect_hash))
 
     if dry_run:
         # The preview also shows the old value: one more read, for the
