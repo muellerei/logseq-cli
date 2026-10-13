@@ -47,6 +47,7 @@ from logseq_cli.output import (
     follow_page,
     follow_page_to_write,
     handle_connection_error,
+    on_failure,
     output,
     uuid_fields,
     would_go_before_fields,
@@ -932,6 +933,8 @@ Note:
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
   --expect-hash goes with --remove only: a plain copy changes no block.
+  A failure after the copy's root landed names it (copied_id, "The copy
+  is <uuid>."): the copy stays, and running the command again copies again.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
@@ -1017,6 +1020,9 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run
                 lambda: [api.append_block_in_page(to_page, content)["uuid"]],
                 keep_last=keep_on, page_name=to_page)
             new_uuid = root[0]
+            # Proven from here on: whatever fails next leaves this copy in
+            # place, and a retry would make another.
+            on_failure(f"The copy is {new_uuid}.", copied_id=new_uuid)
         copied = 1
         for child in block.get("children", []):
             copied += _copy_tree(child, new_uuid)

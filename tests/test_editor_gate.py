@@ -452,6 +452,9 @@ def test_copy_block_remove_open_source_reports_landed_copies(double):
     assert error["block"] == parent
     assert error["writes_landed"] == 2
     assert "2 earlier write(s) in this call landed and remain" in error["error"]
+    copy = next(p for p in double.pages if p["name"] == "Other Page")["blocks"][-1]["uuid"]
+    assert error["copied_id"] == copy
+    assert f"The copy is {copy}." in error["error"]
     assert double.sent("removeBlock") == []
     assert double.tree("Other Page")[-1] == ("parent block", [("kid block", [])])
     assert ("parent block", [("kid block", [])]) in double.tree("Probe Page")

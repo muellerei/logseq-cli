@@ -12,6 +12,14 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `copy-block` names its copy when it fails after the copy's root landed:
+  `copied_id` in the error object and "The copy is <uuid>." in the message,
+  for a refused removal (`open_in_editor`), a block of the copy not verified
+  (`write_not_verified`) and a connection failure, at the removal too. The copy
+  stays, as before (no rollback), but a caller had only `writes_landed` and no
+  way to find it, and a retry made a second copy. A root that did not land
+  names nothing.
+
 - A write can say which state of a block it was decided on, and is refused when
   the block is another by then. `get-block --json` gives a block a `hash` (and
   `tree_hash` for the block with everything under it); `get-page`,
