@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from logseq_cli.blocktext import tree_hash
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
@@ -154,7 +155,8 @@ class TestCopyBlockRemoveIsGuarded:
             r = CliRunner().invoke(cli, [
                 "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(SRC, expect_tree=None)
+        api.remove_block.assert_called_once_with(
+            SRC, expect_tree=tree_hash({"uuid": SRC, "content": "Head", "children": []}))
 
 
 class _Graph:

@@ -239,5 +239,5 @@ class TestCopyBlockRemove:
         r = _run(api, "copy-block", "--id", ROOT, "--to-page", "Elsewhere",
                  "--remove", "--ignore-refs", "--json")
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(ROOT, expect_tree=None)
+        api.remove_block.assert_called_once_with(ROOT, expect_tree=_tree_as_read(api))
         assert json.loads(r.output)["refs_broken"] == 3

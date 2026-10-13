@@ -67,3 +67,68 @@ def test_a_root_that_did_not_land_names_no_copy(double):
     assert error["reason"] == "write_not_verified"
     assert "copied_id" not in error
     assert "The copy is" not in error["error"]
+
+
+# --- The source is removed only as it was copied ----------------------------
+
+def _after_child_insert(double, n, then):
+    """Run ``then`` once the copy's ``n``-th child insert has landed. The
+    root goes through appendBlockInPage, the children through insertBlock."""
+    insert = double._handlers["logseq.Editor.insertBlock"]
+    calls = []
+
+    def hooked(args):
+        answer = insert(args)
+        calls.append(1)
+        if len(calls) == n:
+            then()
+        return answer
+    double._handlers["logseq.Editor.insertBlock"] = hooked
+
+
+def test_a_child_added_during_the_copy_is_not_removed(double):
+    source = double.uuid_of("source block")
+    _after_child_insert(double, 2, lambda: double.add_child(source, "added during the copy"))
+    r = _move(double)
+    assert r.exit_code == 1
+    error = json.loads(r.stderr)
+    assert error["reason"] == "block_changed"
+    assert error["copied_id"] == _copy_root(double)
+    assert "repeat" not in error["error"].lower()
+    assert f"The copy is {_copy_root(double)}." in error["error"]
+    assert double.sent("removeBlock") == []
+    assert double.tree("Source Page") == [("source block", [
+        ("first kid", []), ("second kid", []), ("third kid", []),
+        ("added during the copy", [])])]
+    assert double.tree("Target Page")[-1] == ("source block", [
+        ("first kid", []), ("second kid", []), ("third kid", [])])
+
+
+def test_a_source_deleted_during_the_copy_is_a_move_done(double):
+    source = double.uuid_of("source block")
+    _after_child_insert(double, 1, lambda: double.delete_block(source))
+    r = _move(double)
+    assert r.exit_code == 0, r.stderr
+    result = json.loads(r.stdout)
+    assert result["action"] == "moved"
+    assert result["source_gone"] is True
+    assert double.sent("removeBlock") == []
+    assert double.tree("Target Page")[-1] == ("source block", [
+        ("first kid", []), ("second kid", []), ("third kid", [])])
+
+
+def test_a_source_deleted_during_the_copy_says_so_in_text(double):
+    source = double.uuid_of("source block")
+    _after_child_insert(double, 1, lambda: double.delete_block(source))
+    r = split_runner().invoke(cli, ["--token", "t", "copy-block", "--id", source,
+                                    "--to-page", "Target Page", "--remove"])
+    assert r.exit_code == 0, r.stderr
+    assert "The source was already gone." in r.stdout
+
+
+def test_an_unchanged_source_is_moved_as_before(double):
+    r = _move(double)
+    assert r.exit_code == 0, r.stderr
+    result = json.loads(r.stdout)
+    assert (result["action"], result["blocks"], result["source_gone"]) == ("moved", 4, False)
+    assert double.tree("Source Page") == []

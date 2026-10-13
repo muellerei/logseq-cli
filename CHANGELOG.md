@@ -292,6 +292,26 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `copy-block --remove` deleted a block it had not copied. It reads the source
+  once, copies it block by block and then removes it, and the removal takes
+  everything under the source with it: a child added in Logseq while the copy
+  ran was deleted, missing from the copy, and the command reported success.
+  The window grows with the tree. Found by an adversarial pass over the
+  precondition work and reproduced against the test double (a fourth child
+  added after the second copied block: exit 0, `"blocks": 4`, the fourth child
+  gone); the gap was already on `main`. The removal now goes through the check
+  every removal has (see Changed): the source is read again with everything
+  under it right before the delete and compared with the state that was
+  copied, and a difference refuses with `block_changed`, nothing removed and
+  the copy named in `copied_id`. The message no longer asks to repeat the
+  command, which would make a second copy. A source deleted elsewhere during
+  the copy used to be reported as moved without a word; it is still a success,
+  the move is done, and the result says `"source_gone": true`. Moving the
+  source with `moveBlock` instead would close the window, but it places a block
+  only before another or as a first child, so the end of a page would need a
+  stand-in with its own removal, and `copy-block --remove` would become
+  `move-block`, which exists.
+
 - A change made to a block while a command was changing it was written over
   without a word. `set-todo-status`, `replace-text`, `set-property` and
   `remove-property` read the block, build the new text from it and send the

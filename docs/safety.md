@@ -134,7 +134,8 @@ protection holds only for calls that pass a hash; a call that passes none is
 written as before.
 
 A precondition and `block_changed` guard different things. `block_changed` is
-the command's own re-read: between its read and its write, did the block change?
+the command's own re-read: between its read and its write (or its removal),
+did the block change?
 A precondition is the caller's: is the block still what I read, minutes ago,
 when I decided what to write? A precondition that fails is `precondition_failed`;
 after it, read the block again and decide again. Repeating the same change with
@@ -149,11 +150,24 @@ way.
   caught by the precondition. `update-block` narrows that gap with its own
   re-read (`block_changed`); nothing closes it, because the API has no
   conditional write.
-- **It does not cover the copy in `copy-block --remove`.** The command copies
-  the subtree block by block and deletes the source at the end, so a child
-  added under the source while the copy runs is deleted with it. The window
-  grows with the size of the tree, and `--expect-hash` checks the state before
-  the copy starts, not during it.
+- **A removal is checked, not made atomic.** `copy-block --remove` copies the
+  subtree block by block and deletes the source at the end; `--expect-hash`
+  checks the state before the copy starts, not during it. Before the delete
+  the command reads the source with everything under it again and refuses
+  with `block_changed` if that is no longer what it copied, so a child added
+  while the copy runs stays. `remove-block` and the page's property block that
+  `remove-property` removes do the same. What stays open is the few requests
+  between that read and the delete: the editor check, with a block open also
+  its read of the subtree, which takes longer the larger the tree is.
+- **A copy that breaks off stays.** There is no rollback: when the removal is
+  refused, or a block of the copy or the connection fails after the copy's
+  root landed, the copy (or the part of it that landed) remains, and the
+  error names it in `copied_id`. A root placed before the empty blocks at the
+  end of a page (`keep_empty_blocks_last`) that lands while the step after it
+  fails is not named; `writes_landed` says that something did.
+- **A ref set during a copy is not seen.** `copy-block --remove` looks for
+  `((block-refs))` into the source before it copies; one added while the copy
+  runs points at nothing after the move. Nothing is lost, but the ref dangles.
 - **The hash sees content, not position.** `move-block --expect-hash` does not
   notice that the block was moved since it was read; it notices that its text
   or properties changed. `remove-block` takes the hash of the block and
