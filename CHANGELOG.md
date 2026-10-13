@@ -10,6 +10,8 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-13
+
 ### Added
 
 - `copy-block` names its copy when it fails after the copy's root landed:
