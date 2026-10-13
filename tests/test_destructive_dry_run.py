@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from click.testing import CliRunner
 
+from logseq_cli.blocktext import tree_hash
 from logseq_cli.cli import cli
 from tests.conftest import answer_property_pulls, split_runner
 
@@ -97,7 +98,8 @@ class TestRemoveBlockDryRun:
         api.get_block.return_value = {"uuid": "root", "content": "Parent"}
         result = CliRunner().invoke(cli, ["remove-block", "--id", "root"])
         assert result.exit_code == 0
-        api.remove_block.assert_called_once_with("root")
+        api.remove_block.assert_called_once_with(
+            "root", expect_tree=tree_hash({"uuid": "root", "content": "Parent"}))
 
 
 class TestCopyBlockDryRun:

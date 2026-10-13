@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
+from logseq_cli.blocktext import tree_hash
 from logseq_cli.cli import cli
 from logseq_cli.lookup import incoming_block_refs
 
@@ -131,6 +132,11 @@ class TestIncomingBlockRefs:
             {"target": CHILD, "block": REF_OUT, "page": "Notes"}]
 
 
+def _tree_as_read(api):
+    """The tree hash of the root as the command read it."""
+    return tree_hash(api.get_block(ROOT, include_children=True))
+
+
 class TestRemoveBlock:
     def test_refuses_with_incoming_refs(self):
         api = _api(_graph())
@@ -144,14 +150,14 @@ class TestRemoveBlock:
         api = _api(_graph())
         r = _run(api, "remove-block", "--id", ROOT, "--ignore-refs")
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(ROOT)
+        api.remove_block.assert_called_once_with(ROOT, expect_tree=_tree_as_read(api))
         assert "2 incoming block ref(s)" in r.output
 
     def test_no_refs_removes_as_before(self):
         api = _api(_graph(refs_from_outside=False, refs_from_inside=False))
         r = _run(api, "remove-block", "--id", ROOT)
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(ROOT)
+        api.remove_block.assert_called_once_with(ROOT, expect_tree=_tree_as_read(api))
 
     def test_dry_run_predicts_the_refusal(self):
         api = _api(_graph())
@@ -233,5 +239,5 @@ class TestCopyBlockRemove:
         r = _run(api, "copy-block", "--id", ROOT, "--to-page", "Elsewhere",
                  "--remove", "--ignore-refs", "--json")
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(ROOT)
+        api.remove_block.assert_called_once_with(ROOT, expect_tree=_tree_as_read(api))
         assert json.loads(r.output)["refs_broken"] == 3

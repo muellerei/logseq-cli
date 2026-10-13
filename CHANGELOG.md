@@ -12,6 +12,14 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `copy-block` names its copy when it fails after the copy's root landed:
+  `copied_id` in the error object and "The copy is <uuid>." in the message,
+  for a refused removal (`open_in_editor`), a block of the copy not verified
+  (`write_not_verified`) and a connection failure, at the removal too. The copy
+  stays, as before (no rollback), but a caller had only `writes_landed` and no
+  way to find it, and a retry made a second copy. A root that did not land
+  names nothing.
+
 - A write can say which state of a block it was decided on, and is refused when
   the block is another by then. `get-block --json` gives a block a `hash` (and
   `tree_hash` for the block with everything under it); `get-page`,
@@ -146,6 +154,15 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `remove-block` (and its alias `delete-block`) reads the block with its
+  children again just before the delete and refuses with `block_changed`,
+  removing nothing, when anything under it changed since the command read it.
+  It used to delete whatever stood there by then, a child added in between
+  included, while the count it reported was the one it had read. A block gone
+  by then is reported as `block_not_found`, exit 1, where the command used to
+  report it removed. The same check guards the page's property block that
+  `remove-property` removes with its last key. One read more per removal.
+
 - `analyze-journal-patterns` counts tasks from the database, one count per
   journal day. `tasks` holds `open`, `done`, `cancelled` and `done_rate`, and
   the `tasks` of each entry holds `open`, `done` and `cancelled`. A task is a
@@ -274,6 +291,26 @@ file carries most of the reasoning behind the tool.
   `tasks_complete` and `tasks_incomplete` per entry (#92).
 
 ### Fixed
+
+- `copy-block --remove` deleted a block it had not copied. It reads the source
+  once, copies it block by block and then removes it, and the removal takes
+  everything under the source with it: a child added in Logseq while the copy
+  ran was deleted, missing from the copy, and the command reported success.
+  The window grows with the tree. Found by an adversarial pass over the
+  precondition work and reproduced against the test double (a fourth child
+  added after the second copied block: exit 0, `"blocks": 4`, the fourth child
+  gone); the gap was already on `main`. The removal now goes through the check
+  every removal has (see Changed): the source is read again with everything
+  under it right before the delete and compared with the state that was
+  copied, and a difference refuses with `block_changed`, nothing removed and
+  the copy named in `copied_id`. The message no longer asks to repeat the
+  command, which would make a second copy. A source deleted elsewhere during
+  the copy used to be reported as moved without a word; it is still a success,
+  the move is done, and the result says `"source_gone": true`. Moving the
+  source with `moveBlock` instead would close the window, but it places a block
+  only before another or as a first child, so the end of a page would need a
+  stand-in with its own removal, and `copy-block --remove` would become
+  `move-block`, which exists.
 
 - A change made to a block while a command was changing it was written over
   without a word. `set-todo-status`, `replace-text`, `set-property` and

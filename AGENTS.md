@@ -465,13 +465,13 @@ rollback), and the message ends with how many, or "Nothing was written.".
 
 | `reason` | Meaning | Fields |
 |----------|---------|--------|
-| `open_in_editor` | The write would change the block open in Logseq's editor, where someone is typing | `block`, `page` |
+| `open_in_editor` | The write would change the block open in Logseq's editor, where someone is typing | `block`, `page`; `copied_id` from `copy-block` |
 | `editor_state_unknown` | Logseq's answer to which block is open was not understood. The write was not sent; asked after a multi-block write, its blocks landed and count in `writes_landed` | `answer` |
 | `logseq_error` | Logseq threw on the write and answered with an error object | `method`, `logseq_message` |
 | `page_exists` | `create-page` on a page that exists, whose properties Logseq would drop | `page` |
 | `rename_refused` | `rename-page` onto a name another page has (Logseq would merge the two) or an empty one | `old`, `new`, `why` (`exists` or `empty`) |
-| `block_changed` | `set-todo-status`, `update-block --expect-hash`, `add-journal-block --upsert-heading --expect-hash`, `replace-text`, `set-property` and `remove-property` (every write that replaces a block's text) read the block again right before writing, and it no longer holds the text they read: someone changed it in between, and the write would have replaced that change. Nothing was written | `block` |
-| `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got` |
+| `block_changed` | `set-todo-status`, `update-block --expect-hash`, `add-journal-block --upsert-heading --expect-hash`, `replace-text`, `set-property` and `remove-property` (every write that replaces a block's text) read the block again right before writing, and it no longer holds the text they read: someone changed it in between, and the write would have replaced that change. Nothing was written to the block. `copy-block --remove`, `remove-block` and `remove-property` (removing the page's property block) read the block with everything under it again right before the delete, and something under it changed: nothing was removed. For `copy-block` the copy is already written and stays | `block`; `copied_id` from `copy-block` |
+| `write_not_verified` | The write does not show in Logseq: not written, or not all of it | `method`, `target`, `expected`, `got`; `copied_id` from `copy-block` |
 | `read_only` | Writes are switched off by `[safety] read_only`, `LOGSEQ_CLI_READ_ONLY` or `--read-only`; every command that writes refuses, `--dry-run` included, before its first request | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found) |
 | `precondition_required` | A precondition is required and the call gave none: `[safety] require_preconditions`, `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` or `--require-preconditions` is on, and the command got none of the options it takes: `--expect-hash` (`update-block` takes it too; `set-todo-status` also takes `--expect-marker`; `add-journal-block --upsert-heading` owes it only when it matches a block, otherwise it creates one and owes nothing), or `--expect-tree-hash` for `remove-block` / `delete-block`. Refused before the first request, nothing was written | `source` (list of `config`, `env`, `flag`), `config_path` (`null` when no config file was found), `options` |
 | `config_error` | The config file cannot be used: it does not parse, `LOGSEQ_CLI_CONFIG` names a file that is not there, or `[safety]` does not check out: a key it does not know, a `[safety]` key outside `[safety]`, a value that is not a boolean, or a `[graph] keep_empty_blocks_last` that is not. A command that writes refuses rather than run without the limits the file may hold. Nothing was sent | none |
@@ -493,6 +493,22 @@ failed between a write and its proof, `unproven_write` names that write: it
 may have landed or not. Read the target before retrying; a retry of the whole
 command writes again what landed.
 
+`copy-block --remove` whose source was deleted elsewhere during the copy
+succeeds (exit 0, `"action": "moved"`) with `"source_gone": true` (`false`
+otherwise): the copy is there and the source is gone, which is the move. Do
+not remove the copy to clean up: it may be the only version left. If another
+call moved the same block at the same time, its copy is there too; check the
+target page before removing anything.
+
+`copy-block` adds `copied_id` to every failure after the root of its copy
+landed, whatever its `reason`: a refusal, a write not verified, an error
+Logseq threw, a connection failure, at the removal too. The message says "The copy is <uuid>.". The copy stays (no rollback), so
+repeating `copy-block` makes a second one: read the copy first. When the root
+itself failed, there is no `copied_id`, and neither when the root went before
+the empty blocks at the end of the page (`keep_empty_blocks_last`) and the
+step that proves its place failed: then `writes_landed` says that it landed,
+so read the target page before retrying.
+
 On `read_only`: the user switched writes off. Do not retry, do not edit the
 config file, unset `LOGSEQ_CLI_READ_ONLY`, change `HOME` or `LOGSEQ_CLI_CONFIG`,
 write the Markdown files, or call the HTTP API yourself; each of those goes
@@ -504,7 +520,9 @@ call. [docs/safety.md](docs/safety.md) describes the switch.
 
 On `open_in_editor`: the refused write did not happen; earlier writes of the
 same call may have (the message says how many). Ask the user to leave the
-block, check, then retry. Do not retry in a loop.
+block, check, then retry. Do not retry in a loop. After `copy-block --remove`
+the copy stands (`copied_id`): once the source is free, remove it with
+`remove-block` instead of repeating the move.
 
 What counts as changing the open block: a write to it, a removal or a move of
 it or of a block above it, a page deletion or a rename of its page, and a
@@ -536,6 +554,13 @@ On `block_changed`: nothing was written to that block, and the change made
 elsewhere stands. Read the block again and repeat the command if it still
 makes sense. The check narrows the time between reading and writing to one
 request; it does not close it.
+
+Not after `copy-block --remove`: there the copy is already written and
+stays (`copied_id`), only the source was not removed, because something under
+it changed during the copy. Repeating the command makes a second copy. Read
+the copy and the source, then either keep the copy and remove the source with
+`remove-block`, or remove the copy and move again. After `remove-block` the
+block was not removed; read it again and decide.
 
 `replace-text` writes the other blocks when one is refused, and names each
 refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.

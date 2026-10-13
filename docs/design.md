@@ -51,6 +51,16 @@ adds it when a ref to the block is written earlier in the same call. This
 shrinks the window to the requests between that read and the write; it does
 not close it, as no read can.
 
+A removal has the same gap, and a wider loss: `removeBlock` takes everything
+under the block with it, so a child added after the command read the block
+would be deleted unseen. Every caller of the API's removal says which state it
+read, as a tree hash, or says explicitly that it read none (a stand-in the
+same call wrote a moment before). The API reads the block with its children
+again, past the cache, just before the delete and refuses with `block_changed`
+when the tree is another, or `block_not_found` when the block is gone. The
+parameter has no default, so a new caller cannot leave the check out by
+forgetting it.
+
 The second half of the sentence answers a loss no read-back can catch.
 Measured on Logseq 0.10.15: a write to the block being edited replaced the
 editor content at once and dropped what had not been saved; Logseq answered

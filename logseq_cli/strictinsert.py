@@ -417,7 +417,7 @@ def insert_tree_keeping_ids(api, tree: list, where: str, target: str) -> list:
         raise
     if stand_in:
         # The batch landed: a stand-in left behind is an error of its own.
-        api.remove_block(stand_in, written_here=True)
+        api.remove_block(stand_in, expect_tree=None, written_here=True)
 
     expected = count_blocks(tree)
     after_tree = api.get_page_blocks_tree(page_name) or []
@@ -467,7 +467,7 @@ def _remove_stand_in(api, stand_in: str, failed: Exception) -> None:
     which would hide why the batch failed. Any WriteRefused: the removal can
     meet an error object, an open editor, or a removal that did not show."""
     try:
-        api.remove_block(stand_in, written_here=True)
+        api.remove_block(stand_in, expect_tree=None, written_here=True)
     except WriteRefused as refused:
         note = (f"The empty stand-in block {stand_in[:8]}... written for the batch "
                 f"stayed too: {refused}")

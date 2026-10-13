@@ -10,6 +10,7 @@ from logseq_cli.blocktext import (
     refuse_split_block,
     refuse_split_heading,
     refuse_split_tree,
+    tree_hash,
     unwrap_block_id,
     without_block_ids,
 )
@@ -46,6 +47,7 @@ from logseq_cli.output import (
     follow_page,
     follow_page_to_write,
     handle_connection_error,
+    on_failure,
     output,
     uuid_fields,
     would_go_before_fields,
@@ -70,7 +72,7 @@ from logseq_cli.strictinsert import (
     insert_tree_at_page_end,
     move_block_verified,
 )
-from logseq_cli.writerefused import WriteRefused, partial_state
+from logseq_cli.writerefused import BlockNotFound, WriteRefused, partial_state
 
 
 @cli.command("update-block", cls=WriteCommand, owes=lambda params: Owed(("--expect-hash",)), epilog="""\b
@@ -259,7 +261,7 @@ def remove_block_cmd(ctx, block_id, ignore_refs, expect_tree_hash, dry_run, as_j
                 click.echo(f"  incoming block refs that would dangle: {len(refs)}")
         return
 
-    api.remove_block(clean_id)
+    api.remove_block(clean_id, expect_tree=tree_hash(block))
 
     if as_json:
         output({"id": clean_id, "removed": True, "content": content,
@@ -931,6 +933,11 @@ Note:
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
   --expect-hash goes with --remove only: a plain copy changes no block.
+  --remove removes the source only as it was copied: something added or
+  changed under it during the copy refuses with block_changed and removes
+  nothing. A source deleted elsewhere meanwhile is a move done (source_gone).
+  A failure after the copy's root landed names it (copied_id, "The copy
+  is <uuid>."): the copy stays, and running the command again copies again.
 """)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
@@ -1016,6 +1023,9 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run
                 lambda: [api.append_block_in_page(to_page, content)["uuid"]],
                 keep_last=keep_on, page_name=to_page)
             new_uuid = root[0]
+            # Proven from here on: whatever fails next leaves this copy in
+            # place, and a retry would make another.
+            on_failure(f"The copy is {new_uuid}.", copied_id=new_uuid)
         copied = 1
         for child in block.get("children", []):
             copied += _copy_tree(child, new_uuid)
@@ -1025,22 +1035,34 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run
     create_missing_page(api, target)
     count = _copy_tree(source)
 
+    source_gone = False
     if remove:
         # Only reached when every insert above was proven, so the source is
         # removed against a copy that is known to exist, never a claimed one.
-        api.remove_block(block_id)
+        # And only as it was copied: a child added under it since the read
+        # would go with it, and the copy does not have it (block_changed).
+        try:
+            api.remove_block(block_id, expect_tree=tree_hash(source))
+        except BlockNotFound:
+            # Deleted elsewhere during the copy: copy there, source gone, which
+            # is the move asked for. A failure would invite cleaning up, and
+            # that would hit the only version left.
+            source_gone = True
 
     action = "Moved" if remove else "Copied"
     result_data = {"action": action.lower(), "blocks": count, **names, "source_id": block_id}
     result_data.update(before_empty_fields(ahead_of.get("uuid")))
     if remove:
         result_data["refs_broken"] = len(refs)
+        result_data["source_gone"] = source_gone
 
     if as_json:
         output(result_data, True)
     else:
         click.echo(f"{action} {count} block(s) to '{to_page}'"
                    f"{BEFORE_EMPTY_SUFFIX if ahead_of.get('uuid') else ''}.")
+        if source_gone:
+            click.echo("  The source was already gone.")
         if refs:
             click.echo(f"  {len(refs)} block ref(s) into the source now point at nothing")
 

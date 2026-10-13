@@ -23,6 +23,7 @@ from logseq_cli.blocktext import (
     refuse_split_property,
     refuse_split_tree,
     stored_property_key,
+    tree_hash,
     tree_texts,
     without_block_ids,
 )
@@ -34,6 +35,7 @@ from logseq_cli.safety import guard_write
 # strictinsert and output need not import the HTTP client for them.
 from logseq_cli.writerefused import (  # noqa: F401  re-exported
     BlockChanged,
+    BlockNotFound,
     EditorOpen,
     EditorStateUnknown,
     LogseqWriteError,
@@ -1342,9 +1344,20 @@ class LogseqAPI:
         return self._write("logseq.Editor.setBlocksId", [block_uuids], target=block_uuids,
                            editing=editing, count=len(block_uuids))
 
-    def remove_block(self, block_uuid: str, *, written_here: bool = False):
+    def remove_block(self, block_uuid: str, *, expect_tree: str | None,
+                     written_here: bool = False):
         """Remove a block with its children; raises WriteNotVerified unless
         getBlock then finds none (``_prove_no_block``).
+
+        ``expect_tree``: the ``tree_hash`` of the block as the caller read it,
+        or ``None`` for a block nobody read a subtree of (strictinsert's
+        stand-in). The removal cascades, so a child made since the read would
+        go too: the block is read again, past the cache, just before the
+        delete, and BlockChanged is raised when its subtree is another one,
+        BlockNotFound when it is gone. Required, with no default, so that no
+        caller leaves the check out by forgetting it. What stays open is the
+        requests between that read and the delete; the API has no
+        compare-and-swap.
 
         ``written_here``: the block is one this call wrote a moment before
         and counted (strictinsert's stand-in). Once it is gone, neither write
@@ -1352,6 +1365,15 @@ class LogseqAPI:
         that are gone: the removal takes the insert's count back instead of
         adding its own. A removal that fails raises before, and the block,
         which stays, counts."""
+        if expect_tree is not None:
+            current = self.get_block(block_uuid, include_children=True, cached=False)
+            if not current:
+                raise BlockNotFound(f"Block {block_uuid[:8]}.. is gone; nothing was removed.",
+                                    id=block_uuid)
+            if tree_hash(current) != expect_tree:
+                raise BlockChanged(
+                    f"Block {block_uuid[:8]}.. or a block under it changed since it was "
+                    "read; nothing was removed.", block=block_uuid)
         return self._write("logseq.Editor.removeBlock", [block_uuid], target=block_uuid,
                            count=-1 if written_here else 1)
 

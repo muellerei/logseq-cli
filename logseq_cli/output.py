@@ -21,6 +21,26 @@ from logseq_cli.pagenames import AliasError, AmbiguousAliasError, resolve_page, 
 from logseq_cli.writerefused import WriteRefused, partial_state
 
 
+def on_failure(sentence: str, **fields) -> None:
+    """Say ``sentence`` and add ``fields`` to every failure of the rest of
+    the call, refused or cut off: what only the command knows about what its
+    landed writes left behind (copy-block: where the copy is). One call; a
+    later one replaces it. Both ways a failure is reported read it, so the
+    command needs no ``try`` of its own per kind of failure."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and isinstance(ctx.obj, dict):
+        ctx.obj["on_failure"] = (sentence, fields)
+
+
+def _with_on_failure(message: str, fields: dict) -> tuple:
+    """``message`` and ``fields`` with what the command left with
+    :func:`on_failure` added, the sentence last."""
+    ctx = click.get_current_context(silent=True)
+    obj = ctx.obj if ctx is not None and isinstance(ctx.obj, dict) else {}
+    sentence, own = obj.get("on_failure") or ("", {})
+    return (f"{message} {sentence}" if sentence else message), {**fields, **own}
+
+
 def _after_writes(message: str) -> tuple:
     """``message`` and the fields for a failure of the connection, which can
     come after writes of the same call landed, and between a write and its
@@ -43,7 +63,7 @@ def _after_writes(message: str) -> tuple:
         message = f"{message} No earlier write of this call landed."
     if landed or unproven:
         fields["writes_landed"] = landed
-    return message, fields
+    return _with_on_failure(message, fields)
 
 
 def handle_connection_error(func):
@@ -151,13 +171,9 @@ def handle_connection_error(func):
             # with its source open) must say so, and one raised outside the
             # central write says it too. Exit 1 for all of them.
             landed = click.get_current_context().obj["api"].writes_landed
-            fail(
-                f"{e} {partial_state(landed)}",
-                as_json=as_json,
-                reason=e.reason,
-                writes_landed=landed,
-                **e.fields,
-            )
+            message, fields = _with_on_failure(f"{e} {partial_state(landed)}",
+                                               {**e.fields, "writes_landed": landed})
+            fail(message, as_json=as_json, reason=e.reason, **fields)
         except IdLineError as e:
             # Refused before the write, like a line that splits the block: the
             # text would give the block another uuid (#56).

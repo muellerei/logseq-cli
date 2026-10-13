@@ -700,7 +700,7 @@ class PageGraph:
         page["blocks"].append(block)
         return self._out(block, page, None)
 
-    def remove_block(self, uuid, *, written_here=False):
+    def remove_block(self, uuid, *, expect_tree, written_here=False):
         # Single writes are not counted here (only batches are), so
         # ``written_here`` has nothing to take back.
         found = self.locate(uuid)

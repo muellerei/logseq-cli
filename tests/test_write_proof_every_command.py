@@ -476,7 +476,7 @@ def test_set_property_the_page_does_not_show_is_not_verified(monkeypatch):
 # --- removeBlock, deletePage, renamePage, createPage, setBlocksId -----------
 
 @pytest.mark.parametrize("write,landed", [
-    (lambda api, d: api.remove_block(d.uuid_of("alpha block")), 1),
+    (lambda api, d: api.remove_block(d.uuid_of("alpha block"), expect_tree=None), 1),
     (lambda api, d: api.delete_page("Other Page"), 1),
     (lambda api, d: api.rename_page("Other Page", "Renamed Page"), 1),
     (lambda api, d: api.create_page("Fresh Page"), 1),

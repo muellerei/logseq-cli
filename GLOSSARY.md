@@ -126,7 +126,12 @@ _Avoid_: version, etag, checksum
 **Tree Hash**:
 The Hash of a Block together with everything under it, content and order
 (`tree_hash` of `get-block --json`). The Precondition of `remove-block`, since
-the hash of the block alone would not see a child added after the read.
+the hash of the block alone would not see a child added after the read. Also
+the check before every removal of a block a command read: a removal cascades,
+so the block is read again just before the delete and refused with
+`block_changed` when its Tree Hash is another (`copy-block --remove`, which
+compares with the state it copied, `remove-block`, and the page's property
+block that `remove-property` removes with its last key).
 _Avoid_: subtree hash, deep hash
 
 **Dry Run**:
