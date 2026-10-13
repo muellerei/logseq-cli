@@ -57,12 +57,8 @@ def cached_api(double):
 def _open_new_child(double, parent, content="typed here"):
     """Someone presses Enter under ``parent`` and types in the new child;
     returns its uuid."""
-    _, siblings, i, _ = double._locate(parent)
-    node = double._build(content)
-    siblings[i]["children"].append(node)
-    double._index(node)
-    double.editing = node["uuid"]
-    return node["uuid"]
+    double.editing = double.add_child(parent, content)
+    return double.editing
 
 
 def _uuid(double, content):
@@ -177,12 +173,12 @@ def test_gate_refuses_set_blocks_id(double, api):
 
 def test_gate_refuses_remove_block_target(double, api):
     x = _uuid(double, "target block")
-    _assert_refused(double, lambda: api.remove_block(x), x)
+    _assert_refused(double, lambda: api.remove_block(x, expect_tree=None), x)
 
 
 def test_gate_refuses_remove_block_subtree(double, api):
     parent, kid = _uuid(double, "parent block"), _uuid(double, "kid block")
-    _assert_refused(double, lambda: api.remove_block(parent), kid)
+    _assert_refused(double, lambda: api.remove_block(parent, expect_tree=None), kid)
 
 
 # The subtree and the open block are read when the gate asks, not taken from
@@ -195,7 +191,7 @@ def test_gate_remove_block_sees_a_child_made_after_the_first_read(double, cached
     kid = _open_new_child(double, parent)
     before = double.snapshot()
     with pytest.raises(EditorOpen) as refused:
-        cached_api.remove_block(parent)
+        cached_api.remove_block(parent, expect_tree=None)
     assert refused.value.fields["block"] == kid
     assert double.writes() == [] and double.snapshot() == before
 
@@ -225,7 +221,8 @@ def test_gate_rename_page_sees_a_link_saved_after_the_first_read(double, cached_
 
 def test_remove_block_command_sees_a_child_made_during_the_call(double):
     # Through the command, with its cache: the child appears while the call
-    # looks for refs into the block, after it read the block's subtree.
+    # looks for refs into the block, after it read the block's subtree. The
+    # read just before the delete sees it first, before the editor gate.
     parent = _uuid(double, "parent block")
     query = double._handlers["logseq.DB.datascriptQuery"]
 
@@ -233,6 +230,23 @@ def test_remove_block_command_sees_a_child_made_during_the_call(double):
         _open_new_child(double, parent)
         return query(args)
     double._handlers["logseq.DB.datascriptQuery"] = child_appears
+    r = split_runner().invoke(cli, ["--token", "t", "remove-block", "--id", parent, "--json"])
+    assert r.exit_code == 1
+    assert _error_object(r)["reason"] == "block_changed"
+    assert double.sent("removeBlock") == []
+
+
+def test_remove_block_command_sees_a_child_typed_after_the_last_read(double):
+    # The child appears only when the gate asks, after the read before the
+    # delete: the editor gate is what refuses it.
+    parent = _uuid(double, "parent block")
+    check = double._check_editing
+
+    def child_typed():
+        if double.editing is None:
+            _open_new_child(double, parent)
+        return check()
+    double._check_editing = child_typed
     r = split_runner().invoke(cli, ["--token", "t", "remove-block", "--id", parent, "--json"])
     assert r.exit_code == 1
     assert _error_object(r)["reason"] == "open_in_editor"
@@ -285,7 +299,7 @@ def test_gate_lets_unrelated_writes_through(double, api, write):
             _uuid(double, "body\nprio:: 1"), "prio"),
         "move_block_next_to_open": lambda: api.move_block(x, anchor, {"children": True}),
         "set_blocks_id": lambda: api.set_blocks_id([y]),
-        "remove_block": lambda: api.remove_block(x),
+        "remove_block": lambda: api.remove_block(x, expect_tree=None),
         "delete_page": lambda: api.delete_page("Props Page"),
         "rename_page": lambda: api.rename_page("Props Page", "Renamed Props"),
     }

@@ -39,14 +39,16 @@ class EditorOpen(WriteRefused):
 
 
 class BlockChanged(WriteRefused):
-    """The block no longer holds the text the caller read and meant to replace.
+    """The block no longer holds the text the caller read and meant to replace,
+    or, before a removal, it or a block under it changed since it was read.
     Field: block."""
     reason = "block_changed"
 
 
 class BlockNotFound(WriteRefused):
-    """The block the caller meant is gone, found out before anything was
-    written. Field: id (or content and page, for a block picked by its text)."""
+    """The block the caller meant is gone, found out before the write it
+    refuses (a call may have written other blocks before, as copy-block does).
+    Field: id (or content and page, for a block picked by its text)."""
     reason = "block_not_found"
 
 

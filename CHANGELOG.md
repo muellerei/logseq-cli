@@ -146,6 +146,15 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `remove-block` (and its alias `delete-block`) reads the block with its
+  children again just before the delete and refuses with `block_changed`,
+  removing nothing, when anything under it changed since the command read it.
+  It used to delete whatever stood there by then, a child added in between
+  included, while the count it reported was the one it had read. A block gone
+  by then is reported as `block_not_found`, exit 1, where the command used to
+  report it removed. The same check guards the page's property block that
+  `remove-property` removes with its last key. One read more per removal.
+
 - `analyze-journal-patterns` counts tasks from the database, one count per
   journal day. `tasks` holds `open`, `done`, `cancelled` and `done_rate`, and
   the `tasks` of each entry holds `open`, `done` and `cancelled`. A task is a

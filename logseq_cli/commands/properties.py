@@ -2,7 +2,12 @@ import re
 
 import click
 
-from logseq_cli.blocktext import refuse_split_property, unwrap_block_id, with_property_line
+from logseq_cli.blocktext import (
+    refuse_split_property,
+    tree_hash,
+    unwrap_block_id,
+    with_property_line,
+)
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.blockprops import (
@@ -215,7 +220,7 @@ def _write_property_block(api, blocks, block, content):
     else:
         uuid, old = block["uuid"], block.get("content") or ""
     if not content and block is not None and not block.get("children") and len(blocks) > 1:
-        api.remove_block(uuid)
+        api.remove_block(uuid, expect_tree=tree_hash(block))
         return
     if content == old and old:
         api.update_block(uuid, "", replacing=old)

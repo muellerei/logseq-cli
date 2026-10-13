@@ -154,7 +154,7 @@ class TestCopyBlockRemoveIsGuarded:
             r = CliRunner().invoke(cli, [
                 "copy-block", "--id", SRC, "--to-page", "Target", "--remove"])
         assert r.exit_code == 0, r.output
-        api.remove_block.assert_called_once_with(SRC)
+        api.remove_block.assert_called_once_with(SRC, expect_tree=None)
 
 
 class _Graph:

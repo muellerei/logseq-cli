@@ -393,6 +393,26 @@ class LogseqHttpDouble:
             raise LookupError(f"{len(found)} blocks hold {content!r}")
         return found[0]
 
+    # --- changes made in Logseq meanwhile -------------------------------------
+    def add_child(self, parent, content="added later"):
+        """Someone adds a child under ``parent`` in Logseq, last among its
+        children; returns its uuid."""
+        _, siblings, i, _ = self._locate(parent)
+        node = self._build(content)
+        siblings[i]["children"].append(node)
+        self._index(node)
+        return node["uuid"]
+
+    def set_content(self, uuid, content):
+        """Someone edits the block's text in Logseq."""
+        _, siblings, i, _ = self._locate(uuid)
+        siblings[i]["content"] = content
+
+    def delete_block(self, uuid):
+        """Someone deletes the block, with its children, in Logseq."""
+        _, siblings, i, _ = self._locate(uuid)
+        del siblings[i]
+
     def tree(self, name):
         """The page as first lines, nested: for assertions."""
         def walk(nodes):

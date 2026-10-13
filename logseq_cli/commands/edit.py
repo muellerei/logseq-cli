@@ -10,6 +10,7 @@ from logseq_cli.blocktext import (
     refuse_split_block,
     refuse_split_heading,
     refuse_split_tree,
+    tree_hash,
     unwrap_block_id,
     without_block_ids,
 )
@@ -259,7 +260,7 @@ def remove_block_cmd(ctx, block_id, ignore_refs, expect_tree_hash, dry_run, as_j
                 click.echo(f"  incoming block refs that would dangle: {len(refs)}")
         return
 
-    api.remove_block(clean_id)
+    api.remove_block(clean_id, expect_tree=tree_hash(block))
 
     if as_json:
         output({"id": clean_id, "removed": True, "content": content,
@@ -1028,7 +1029,7 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run
     if remove:
         # Only reached when every insert above was proven, so the source is
         # removed against a copy that is known to exist, never a claimed one.
-        api.remove_block(block_id)
+        api.remove_block(block_id, expect_tree=None)
 
     action = "Moved" if remove else "Copied"
     result_data = {"action": action.lower(), "blocks": count, **names, "source_id": block_id}
