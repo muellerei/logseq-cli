@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-label="logseq-cli: lets an AI agent write into a Logseq graph without breaking it">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef3fb"/></linearGradient>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#0d1117" opacity="0.07"/></pattern>
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+      .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+  <rect width="1280" height="320" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="320" rx="24" fill="url(#dots)"/>
+  <rect x="48" y="44" width="700" height="232" rx="16" fill="#ffffff" stroke="#c3ccd6" stroke-width="2"/>
+  <text x="78" y="92" class="mono" font-size="19" font-weight="700" fill="#59636e">## Log</text>
+  <line x1="78" y1="110" x2="728" y2="110" stroke="#e1e6ec" stroke-width="2"/>
+  <circle cx="82" cy="137" r="4.0" fill="#59636e"/>
+  <text x="102" y="142" class="mono" font-size="19" fill="#1f2328">Call with Alex about the contract</text>
+  <rect x="481" y="122" width="2.5" height="26" fill="#1f2328"/>
+  <text x="720" y="141" class="mono" font-size="17" font-weight="700" text-anchor="end" fill="#cf222e">✕ refused</text>
+  <circle cx="82" cy="187" r="4.0" fill="#0b7a75"/>
+  <text x="102" y="192" class="mono" font-size="19" fill="#1f2328"><tspan font-weight="700">14:31</tspan> Decided to ship on Friday</text>
+  <text x="720" y="191" class="mono" font-size="17" font-weight="700" text-anchor="end" fill="#0b7a75">✓ written</text>
+  <text x="102" y="241" class="mono" font-size="15" fill="#59636e">confirmed with Logseq · the block you type in stays yours</text>
+  <text x="800" y="160" class="mono" font-size="68" font-weight="700" fill="#1f2328" letter-spacing="-2">logseq<tspan fill="#0b7a75">-</tspan>cli</text>
+  <text x="804" y="204" class="sans" font-size="26" fill="#31363d">Your agent writes into Logseq</text>
+  <text x="804" y="240" class="sans" font-size="19" fill="#59636e">without breaking your graph</text>
+</svg>
