@@ -166,13 +166,17 @@ Notes:
   names the other pages it appears on. Following refs costs one extra query for
   the whole command, not one per task. --no-follow-refs restores the old reading.
   Plain-text output: "MARKER [Page] preview" — page name inline, no grouping needed.
-  --json: {"todos": [...], "count": N}, plus "repeating_excluded": N when a
-  due range left out repeaters it could not place. Each task has marker,
-  content (the task text without its marker, properties, SCHEDULED/DEADLINE
-  and LOGBOOK), page and uuid; journal_day when the page its block lives on is
-  a journal; scheduled, deadline, next_due (dates as YYYY-MM-DD), repeating,
-  references, references_withheld where they apply. A key that does not apply
-  is absent, not null.
+  --json: {"todos": [...], "count": N}: todos is a list of task objects, count
+  a number, plus "repeating_excluded" (a number) when a due range left out
+  repeaters it could not place. Each task has marker, content, page, uuid and
+  hash, all strings: content is the task text without its marker,
+  properties, SCHEDULED/DEADLINE and LOGBOOK; hash is computed from the stored
+  text, as in get-block. Where they apply: journal_day (when the page its
+  block lives on is a journal), scheduled, deadline, next_due (all four
+  strings, YYYY-MM-DD), repeating (true), references (a list of page names:
+  journals newest first, then other pages, which a date range withholds) and
+  references_withheld (a number). A key that does not apply is absent, not
+  null.
   --match is a Python regex over that content as stored: ((refs)) are not
   resolved, and ^/$ anchor the whole text unless the pattern starts with (?m).
 """)

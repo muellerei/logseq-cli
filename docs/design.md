@@ -266,7 +266,7 @@ reference at a time.
 So `get-todos` follows that relation by default rather than behind a flag: a
 default that answers incompletely is worse than one that costs a read, because
 the caller has no way to tell the two apart. The task stays one row — `page`
-and `uuid` keep naming the original block, `references` names the days it was
+and `uuid` keep naming the original block, `references` names the pages it was
 carried into. `--refs-limit` caps that list and `references_withheld` counts
 the rest, because a task carried 33 times must not decide the size of the
 output, and `--no-follow-refs` restores the older reading for callers who want
