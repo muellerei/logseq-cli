@@ -10,6 +10,15 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Fixed
+
+- `get-todos --help` names `hash`, which every task under `--json` has carried
+  since 0.17.0 while only the command reference listed it, and both the help
+  and the command reference now give each field its type. `references` is a
+  list of page names as strings: a caller that read it as a list of objects
+  failed on the first task carried forward. A test takes the keys from the
+  real output and fails when either text leaves one out.
+
 ## [0.17.0] - 2026-10-13
 
 ### Added
