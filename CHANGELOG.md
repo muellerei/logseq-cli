@@ -18,6 +18,16 @@ file carries most of the reasoning behind the tool.
   list of page names as strings: a caller that read it as a list of objects
   failed on the first task carried forward. A test takes the keys from the
   real output and fails when either text leaves one out.
+- `remove-property --key id` is refused before anything is read (#131). It
+  reported the property as removed and exited 0, but the block's `id::` line
+  stayed in column 0 of the file, outside the block, and the next property
+  write on that block dropped it from the file, again with exit 0. `((refs))`
+  to the block then rested on the database alone. Measured twice on a probe
+  page with Logseq 0.10.15: the key check that keeps `set-property` from
+  writing `id` let `remove-property` pass any refused key on verbatim, so that
+  keys stored before the check stay removable. `custom-id` and the other
+  refused keys still are; only `id`, in any letter case and with surrounding
+  whitespace, is refused, with `--dry-run` too.
 
 ## [0.17.0] - 2026-10-13
 

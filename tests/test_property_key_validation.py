@@ -233,6 +233,32 @@ class TestRemoveProperty:
         assert [c.args[1] for c in api.remove_block_property.call_args_list] == [key]
         assert "stored as" not in r.stderr
 
+    @pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["write", "dry-run"])
+    @pytest.mark.parametrize("target", [["--id", "blk"], ["--name", "Page A"]],
+                             ids=["block", "page"])
+    @pytest.mark.parametrize("key", ["id", "ID", "Id", " id"])
+    def test_the_id_key_is_refused_before_any_read(self, key, target, dry_run):
+        # Measured (Logseq 0.10.15): removeBlockProperty(uuid, "id") empties the
+        # database property but leaves the id:: line in column 0, and the next
+        # property write drops it from the file. Both calls exit 0.
+        api = _api()
+        r = _run(["remove-property", *target, "--key", key, *dry_run], api)
+        assert r.exit_code == 1, r.output
+        assert "id:: line" in r.stderr and "next property write" in r.stderr
+        assert api.method_calls == [], "a refused key must cost no API call"
+
+    def test_the_id_key_refusal_is_json_on_stderr(self):
+        r = _run(["remove-property", "--id", "blk", "--key", "id", "--json"], _api())
+        assert r.exit_code == 1
+        assert r.stdout == ""
+        error = json.loads(r.stderr)
+        assert "id:: line" in error["error"]
+        assert error["property"] == "id"
+
+    def test_help_names_the_id_key_as_refused(self):
+        r = split_runner().invoke(cli, ["remove-property", "--help"])
+        assert "except id" in r.stdout
+
 
 class TestEmptyValue:
     """An empty value is kept: measured, Logseq writes ``type::`` and reads it

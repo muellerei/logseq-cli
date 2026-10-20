@@ -113,6 +113,25 @@ def normalize_property_key(key: str) -> str:
     return canonical
 
 
+def refuse_removing_id_key(key: str) -> None:
+    """ValueError if removing ``key`` would take the block's id:: line.
+
+    Measured (0.10.15): removeBlockProperty(uuid, "id") empties the database
+    property but leaves the line in column 0, and the next property write
+    drops it from the file; ((refs)) then rest on the database alone. Only
+    "id" itself: custom-id and the other keys normalize_property_key refuses
+    stay removable as given, since versions before the key check wrote them.
+    The key is stripped because remove-property passes a refused key on
+    verbatim, and " id" is refused for its whitespace.
+    """
+    if stored_property_key(key.strip()) == "id":
+        raise ValueError(
+            f"Cannot remove property key {key!r}: it holds the block's uuid. "
+            "Removing it leaves the id:: line outside the block, and the next "
+            "property write drops it from the file; ((refs)) to the block "
+            "would then rest on the database alone.")
+
+
 def note_renamed_property_key(key: str, stored: str) -> None:
     """Say on stderr when the key written differs from the key given."""
     if key != stored:

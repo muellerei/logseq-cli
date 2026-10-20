@@ -14,6 +14,7 @@ from logseq_cli.blockprops import (
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
+    refuse_removing_id_key,
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
@@ -360,7 +361,8 @@ Note:
   goes with its last one).
   --id removes the property from that one block, wherever it sits.
   The key is addressed as set-property stores it ("Status" as "status");
-  a key set-property would refuse is passed through as given.
+  a key set-property would refuse is passed through as given, except id,
+  which holds the block's uuid and is refused before anything is read.
   --expect-hash goes with --id only: a page property has no block that was read.
 """)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
@@ -378,12 +380,17 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         fail("Specify exactly one of: --name, --id.", as_json=as_json)
     if page and expect_hash is not None:
         raise click.UsageError("--expect-hash goes with --id: a page property has no block that was read.")
+    try:
+        refuse_removing_id_key(key)
+    except ValueError as e:
+        fail(str(e), as_json=as_json, property=key)
 
     # Address the key under the name set-property stores it as, or "set
     # --key Status" followed by "remove --key Status" removes nothing and still
     # reports success. A key set-property would refuse is passed through as
     # given instead: versions before the check stored such keys verbatim, and
-    # until the next re-index the database may still hold one.
+    # until the next re-index the database may still hold one. "id" is the
+    # exception, refused above by refuse_removing_id_key.
     try:
         stored, verbatim = normalize_property_key(key), False
     except ValueError:
