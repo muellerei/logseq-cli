@@ -62,6 +62,15 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- A write that `[graph] keep_empty_blocks_last` puts before the empty blocks
+  at the end of a section no longer reports that place unchecked (#138). After the
+  write, the section is read again to see that the blocks stand directly
+  before the empty one; when that read failed, or found the section gone, the
+  check was skipped and the call exited 0 as placed. It now fails, naming the
+  writes that landed, as a write does whose proof cannot be read. The read
+  before the write still goes on without an answer, writing at the end as
+  before. Found in a review of the broad `except` clauses; tests make the
+  read fail, for a page and for a section, and answer it with no section.
 - `AGENTS.md` said `jq -er` exits 4 when a write's output has no `hash`; it
   exits 1 (measured with jq 1.8.2) and now reads "non-zero", as no document
   gives an exit number a meaning. It also ruled `jq -er` out where the

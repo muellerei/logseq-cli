@@ -11,6 +11,7 @@ end, which stay last as the place the user clicks to type.
 import json
 
 import pytest
+import requests
 
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
@@ -613,3 +614,56 @@ class TestTheAnchorChangedOnTheWay:
         error = json.loads(r.stderr)
         assert error["reason"] == "write_not_verified", error
         assert error["writes_landed"] == 1, error
+
+
+class TestWhenTheReadAfterTheWriteFails:
+    """The write went before the empty block; whether it is still directly
+    before it is read after. A read that fails there is no answer, and the
+    call does not say "before the empty block" on it."""
+
+    @staticmethod
+    def fail_reads_after_insert(monkeypatch, double, method, target=None):
+        post = double.post
+
+        def failing(url, json=None, **kwargs):
+            if (json and json.get("method") == method and double.writes()
+                    and target in (None, (json.get("args") or [None])[0])):
+                raise requests.ConnectionError("refused")
+            return post(url, json=json, **kwargs)
+
+        monkeypatch.setattr(double, "post", failing)
+        double.install(monkeypatch)
+
+    def test_at_the_end_of_a_page(self, monkeypatch, on):
+        double = graph(monkeypatch, ["TODO a", ""])
+        self.fail_reads_after_insert(monkeypatch, double, "logseq.Editor.getPageBlocksTree")
+        r = invoke(double, "insert-block", "--page", PAGE, "--content", "TODO b")
+        assert r.exit_code != 0, r.stdout
+        assert json.loads(r.stderr)["writes_landed"] == 1, r.stderr
+
+    def test_at_the_end_of_a_section(self, monkeypatch, on):
+        double = graph(monkeypatch, tasks("TODO a", ""))
+        heading = double.uuid_of("## Tasks")
+        # The section's read only: the write's own proof reads the new block.
+        self.fail_reads_after_insert(monkeypatch, double, "logseq.Editor.getBlock", heading)
+        r = invoke(double, "insert-block", "--child-of", heading, "--content", "TODO b")
+        assert r.exit_code != 0, r.stdout
+        assert json.loads(r.stderr)["writes_landed"] == 1, r.stderr
+
+    def test_a_section_gone_by_then_is_not_taken_as_checked(self, monkeypatch, on):
+        double = graph(monkeypatch, tasks("TODO a", ""))
+        heading = double.uuid_of("## Tasks")
+        post = double.post
+
+        def gone(url, json=None, **kwargs):
+            if (json and json.get("method") == "logseq.Editor.getBlock"
+                    and (json.get("args") or [None])[0] == heading
+                    and double.writes()):
+                return double._answer(None)
+            return post(url, json=json, **kwargs)
+
+        monkeypatch.setattr(double, "post", gone)
+        double.install(monkeypatch)
+        r = invoke(double, "insert-block", "--child-of", heading, "--content", "TODO b")
+        assert r.exit_code != 0, r.stdout
+        assert json.loads(r.stderr)["writes_landed"] == 1, r.stderr
