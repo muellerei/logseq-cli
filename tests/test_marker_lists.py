@@ -64,8 +64,17 @@ def sites(tree):
             if _is_fail(node) and node.args:
                 skip.update(id(n) for n in ast.walk(node.args[0]))
             for kw in node.keywords:
-                if kw.arg in ("help", "epilog") and _literal_text(kw.value) is not None:
-                    enumerations.add(id(kw.value))
+                if kw.arg not in ("help", "epilog"):
+                    continue
+                # A shared note may be appended ("..." + NOTE): each literal
+                # part is help text all the same.
+                todo = [kw.value]
+                while todo:
+                    part = todo.pop()
+                    if isinstance(part, ast.BinOp):
+                        todo += [part.left, part.right]
+                    elif _literal_text(part) is not None:
+                        enumerations.add(id(part))
         elif isinstance(node, ast.JoinedStr):
             # Its constant parts count with it, once, not again one by one.
             covered.update(id(v) for v in node.values)
@@ -158,6 +167,10 @@ class TestTheScanFindsWhatItShould:
         ('@click.option(help="TODO, " "DOING")\ndef f(): pass', 1),
         ('@click.option(help=f"{x} TODO, DOING")\ndef f(): pass', 1),
         ('@cli.command(epilog="get-todos --status TODO --status DOING")\ndef f(): pass', 0),
+        # An epilog with a shared note appended is still help text.
+        ('@cli.command(epilog="from TODO to DONE" + NOTE)\ndef f(): pass', 0),
+        ('@cli.command(epilog="TODO, DONE" + NOTE)\ndef f(): pass', 1),
+        ('@cli.command(epilog="from TODO" + " to DONE" + NOTE)\ndef f(): pass', 0),
     ])
     def test_scan(self, source, expected):
         assert _count(source) == expected

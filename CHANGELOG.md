@@ -10,6 +10,26 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Changed
+
+- The refusal of `id` and `custom-id` as a property key gives a reason that
+  holds for every call and, where there is one, the way that works (#131). It
+  said a write "would replace the uuid that ((refs)) to the block point at",
+  which is false when the value is the block's own uuid, the case an agent
+  hit when it tried to pin a block's `id::` before referencing it.
+  `set-block-property` now says that any write holding a `((uuid))` of the
+  block stores its `id::` first; `insert-block --property` and
+  `add-note-content --property` point to an `id::` line in the content with
+  `--keep-ids`; `set-property` gives the reason only, since a page's property
+  block gets no `id::` line.
+- The `--help` of every command whose write can carry a `((uuid))` says, under
+  `Block refs:`, that the block it points at gets an `id::` line first if it
+  has none, and that a page's property block does not (#131). That had been
+  the case since 0.17.0 (#95), but only `AGENTS.md` and the command reference
+  said so. The text has one source, and a test takes the write commands from
+  the registry, so a new one fails it until it carries the note or names why
+  it writes no ref.
+
 ### Fixed
 
 - `get-todos --help` names `hash`, which every task under `--json` has carried

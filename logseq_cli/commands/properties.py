@@ -11,6 +11,8 @@ from logseq_cli.blocktext import (
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.blockprops import (
+    ID_HINT_EXISTING_BLOCK,
+    REF_TARGET_ID_NOTE,
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
@@ -272,7 +274,7 @@ Note:
   uuid.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
 @click.option("--value", required=True, help="Property value")
@@ -364,7 +366,7 @@ Note:
   a key set-property would refuse is passed through as given, except id,
   which holds the block's uuid and is refused before anything is read.
   --expect-hash goes with --id only: a page property has no block that was read.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
 @click.option("--key", required=True, help="Property key to remove")
@@ -493,7 +495,7 @@ Note:
   '-', and refused if Logseq would not read them back as a property.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
 @click.option("--value", required=True, help="Property value")
@@ -507,7 +509,7 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
     api = ctx.obj["api"]
 
     try:
-        stored = normalize_property_key(key)
+        stored = normalize_property_key(key, id_hint=ID_HINT_EXISTING_BLOCK)
     except ValueError as e:
         fail(str(e), as_json=as_json, block=block_id, property=key)
     note_renamed_property_key(key, stored)

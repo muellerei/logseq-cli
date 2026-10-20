@@ -81,14 +81,36 @@ def coerce_property_value(value: str):
 _PROPERTY_KEY_FORBIDDEN = re.compile(rf'[/{PROPERTY_KEY_STOP}]')
 _PROPERTY_KEYS_READ_AS_ID = {"id", "custom-id"}
 
+# What a caller adds to that refusal, by its situation; normalize_property_key
+# sees only the key. refuse() ends the message with the full stop.
+#
+# The behaviour this names is LogseqAPI._ref_targets_needing_id, pinned by
+# tests/test_ref_target_id_line.py; change the text with it.
+ID_HINT_EXISTING_BLOCK = ("Its id:: needs no write: any command that writes a "
+                          "((uuid)) of this block stores the id:: first, unless "
+                          "it is a page's property block")
+ID_HINT_NEW_BLOCK = ("To give the new block a chosen uuid, put an id:: line "
+                     "in its content and pass --keep-ids")
 
-def normalize_property_key(key: str) -> str:
+# For the --help of every command whose write can carry a ((uuid)): appended
+# to its epilog, so the text has one source. Only what is measured (#95);
+# whether a re-index keeps the line was not.
+REF_TARGET_ID_NOTE = """Block refs:
+  A block a written ((uuid)) points at gets an id:: line first, if it has
+  none, as Logseq's editor gives it when a ref is copied. A page's property
+  block is left without one.
+"""
+
+
+def normalize_property_key(key: str, *, id_hint: str | None = None) -> str:
     """The key Logseq will read back, or ValueError if it reads back none.
 
     Lower-cases and turns ``_`` into ``-``, as Logseq's parser does. Refuses
     what the parser drops (whitespace, a leading ``#``, the characters in
     :data:`_PROPERTY_KEY_FORBIDDEN`), what it reads as the block's id, and
-    bytes that were not valid UTF-8.
+    bytes that were not valid UTF-8. ``id_hint`` is added to the refusal of a
+    key read as the block's id: the way that works, which only the caller
+    knows.
     """
     def refuse(reason, consequence="Logseq would not read it back as a property"):
         return ValueError(f"Invalid property key {key!r}: {reason}. {consequence}.")
@@ -108,8 +130,8 @@ def normalize_property_key(key: str) -> str:
         raise refuse("contains bytes that are not valid UTF-8")
     canonical = stored_property_key(key)
     if canonical in _PROPERTY_KEYS_READ_AS_ID:
-        raise refuse("Logseq reads it as the block's id",
-                     "Writing it would replace the uuid that ((refs)) to the block point at")
+        raise refuse("Logseq reads it as the block's uuid",
+                     "It is not a property" + (f". {id_hint}" if id_hint else ""))
     return canonical
 
 
@@ -162,7 +184,9 @@ def parse_property_pairs(pairs) -> list:
     out = []
     for raw in pairs:
         key, value = _split_property_pair(raw)
-        out.append((normalize_property_key(key), coerce_property_value(value)))
+        # Both callers write new blocks, so the way for a new block applies.
+        out.append((normalize_property_key(key, id_hint=ID_HINT_NEW_BLOCK),
+                    coerce_property_value(value)))
     return out
 
 
