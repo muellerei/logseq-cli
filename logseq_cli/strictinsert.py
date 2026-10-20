@@ -149,7 +149,7 @@ def _only_property_lines(content: str) -> bool:
     return bool(lines) and all(PROPERTY_LINE_RE.match(line) for line in lines)
 
 
-def _children_of(api, parent_uuid, page_name):
+def _children_of(api, parent_uuid, page_name, *, after_write=False):
     """The direct children of a block, or the blocks of a page, read fresh, or
     ``None`` when they cannot be read.
 
@@ -158,6 +158,10 @@ def _children_of(api, parent_uuid, page_name):
     RuntimeError is the API's BadResponseError, OSError the HTTP client's errors;
     neither is imported, to keep the HTTP client out of this module (see the note
     above the writerefused import in api.py).
+
+    ``after_write`` lets a failed read through: after the write it is no
+    reason to go on, but the end of a check, and the error handler names the
+    writes that landed, as for any write whose proof could not be read.
     """
     try:
         if parent_uuid:
@@ -166,6 +170,8 @@ def _children_of(api, parent_uuid, page_name):
         else:
             children = api.get_page_blocks_tree(page_name, cached=False)
     except (RuntimeError, OSError):
+        if after_write:
+            raise
         return None
     return children if isinstance(children, list) else None
 
@@ -230,8 +236,9 @@ def before_first_empty(api, tree: list, *, parent_uuid: str = None, page_name: s
     # moved, indented or filled it since, and an insert before a block lands
     # wherever that block is now. The write is proven where it landed: directly
     # before the anchor, in the section it was meant for.
-    children = _children_of(api, parent_uuid, page_name)
-    if children is not None and not _directly_before(children, written, anchor):
+    # A section that is gone or no list holds nothing it could stand in.
+    children = _children_of(api, parent_uuid, page_name, after_write=True)
+    if not _directly_before(children or [], written, anchor):
         raise WriteNotVerified(
             f"{len(written)} block(s) were written, but not directly before the empty "
             f"block {anchor[:8]}... of the section any more: it changed while the write "
