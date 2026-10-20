@@ -14,11 +14,14 @@ from logseq_cli.blocktext import block_hash, tree_hash
 from logseq_cli.tasks import ORDER
 from logseq_cli.writerefused import BlockNotFound, PreconditionFailed
 
+# Where a hash for --expect-hash comes from, in every --expect-hash help.
+HASH_SOURCES = "the hash field of get-block --json or of a write's --json output"
+
 # The --expect-hash help the commands that change a read block share, so a
 # change to what the check promises is made once.
 EXPECT_HASH_HELP = (
     "Refuse, without writing, unless the block is still the one this hash was read "
-    "from (the hash field of get-block --json or of a write's --json output). Checked "
+    f"from ({HASH_SOURCES}). Checked "
     "on a read past the cache, before --dry-run and before the first write.")
 
 # Epilog lines of the commands whose --json output carries the hash a write

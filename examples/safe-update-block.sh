@@ -50,7 +50,11 @@ refused() {
 }
 
 # --no-children: the hash of the block alone is what update-block checks.
-HASH=$(logseq-cli get-block --id "${ID}" --no-children --json | jq -er '.hash')
+read_hash() {
+    logseq-cli get-block --id "${ID}" --no-children --json | jq -er '.hash'
+}
+
+HASH=$(read_hash)
 
 if ! logseq-cli update-block --id "${ID}" --content "${NEW}" \
     --expect-hash "${HASH}" --json >"${OUT}" 2>"${ERR}"; then
@@ -65,7 +69,7 @@ fi
 # under set -e; with none, read the block as above.
 HASH=$(jq -r '.hash // empty' "${OUT}")
 if [[ -z "${HASH}" ]]; then
-    HASH=$(logseq-cli get-block --id "${ID}" --no-children --json | jq -er '.hash')
+    HASH=$(read_hash)
 fi
 
 if ! logseq-cli set-block-property --id "${ID}" --key prio --value "${PRIO}" \

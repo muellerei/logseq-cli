@@ -36,30 +36,19 @@ def api(double):
     return api
 
 
-def stored(double, uuid):
-    return next(n["content"] for p in double.pages for n in double._walk(p["blocks"])
-                if n["uuid"] == uuid)
-
-
 @pytest.mark.parametrize("proof", sorted(WRITES))
 def test_write_returns_the_hash_of_the_block_as_stored(double, api, proof):
     uuid = double.uuid_of(TEXT + "\nprio:: low")
     got = WRITES[proof](api, uuid)
-    assert got == block_hash(stored(double, uuid))
+    assert got == block_hash(double.content_of(uuid))
 
 
 @pytest.mark.parametrize("proof", ["_prove_property", "_prove_no_property"])
-def test_no_content_in_the_proof_read_returns_no_hash(double, api, monkeypatch, proof):
+def test_no_content_in_the_proof_read_returns_no_hash(double, api, proof):
     """block_hash counts a missing content as "": without the explicit check
     the hash of the empty text would pass for the block's."""
     uuid = double.uuid_of(TEXT + "\nprio:: low")
-    out = double._block_out
-
-    def without_content(*args, **kwargs):
-        block = out(*args, **kwargs)
-        block.pop("content", None)
-        return block
-    monkeypatch.setattr(double, "_block_out", without_content)
+    double.blocks_without_content = True
     assert WRITES[proof](api, uuid) is None
 
 

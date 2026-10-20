@@ -52,7 +52,7 @@ from logseq_cli.output import (
     uuid_fields,
     would_go_before_fields,
 )
-from logseq_cli.preconditions import Expect, check_precondition, read_fresh
+from logseq_cli.preconditions import HASH_SOURCES, Expect, check_precondition, read_fresh
 from logseq_cli.safety import Owed, WriteCommand, require_precondition
 from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
@@ -505,7 +505,8 @@ Notes:
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--upsert-heading", default=None, help="Find child block matching this heading under --under-heading and update it; insert as new block if not found.")
 @click.option("--expect-hash", "expect_hash", default=None,
-              help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read from (the hash field of get-block --json or of a write's --json output). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
+              help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read "
+                   f"from ({HASH_SOURCES}). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")

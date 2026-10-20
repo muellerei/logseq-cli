@@ -16,7 +16,7 @@ from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
 from logseq_cli.preconditions import (
-    WRITTEN_HASH_NOTE, Expect, check_precondition, parse_marker, read_fresh)
+    HASH_SOURCES, WRITTEN_HASH_NOTE, Expect, check_precondition, parse_marker, read_fresh)
 from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.tasks import (FRONTEND_MARKERS, ORDER, STATES, marker_before_newline, marker_of,
                               markers_in, marker_clause,
@@ -542,7 +542,7 @@ Notes:
                    "through every such block, and update the block at the end instead.")
 @click.option("--expect-hash", "expect_hash", default=None,
               help="Refuse, without writing, unless the block is still the one this hash was read "
-                   "from (the hash field of get-block --json or of a write's --json output). "
+                   f"from ({HASH_SOURCES}). "
                    "With --follow-refs the block at "
                    "the end of the refs counts. Checked before --dry-run and before a no-change answer.")
 @click.option("--expect-marker", "expect_marker", default=None, callback=_marker_option,

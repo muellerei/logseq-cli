@@ -61,15 +61,10 @@ def hash_now(uuid):
     return json.loads(result.stdout)["hash"]
 
 
-def stored(double, uuid):
-    return next(n["content"] for p in double.pages for n in double._walk(p["blocks"])
-                if n["uuid"] == uuid)
-
-
 @pytest.mark.parametrize("name", CARRYING)
 def test_the_output_carries_the_hash_get_block_reports_after(monkeypatch, name):
     double, out = write(monkeypatch, name)
-    assert out["hash"] == block_hash(stored(double, TASK))
+    assert out["hash"] == block_hash(double.content_of(TASK))
     assert out["hash"] == hash_now(TASK)
 
 
@@ -106,7 +101,7 @@ def test_set_todo_status_follow_refs_carries_the_hash_of_the_task_it_changed(mon
     double, out = write(monkeypatch, "set-todo-status", pages=pages,
                         args=["--id", OTHER, "--status", "DONE", "--follow-refs"])
     assert out["uuid"] == TASK
-    assert out["hash"] == block_hash(stored(double, TASK)) == hash_now(TASK)
+    assert out["hash"] == block_hash(double.content_of(TASK)) == hash_now(TASK)
 
 
 # --- remove-property --------------------------------------------------------------
@@ -143,7 +138,7 @@ def test_upsert_with_children_and_further_roots_carries_the_replaced_blocks_hash
     double, out = write(monkeypatch, "add-journal-block", args=args)
     assert out["position"].endswith("(updated)") and out["blocks"] == 3
     assert out["uuid"] == TASK
-    assert out["hash"] == block_hash(stored(double, TASK)) == hash_now(TASK)
+    assert out["hash"] == block_hash(double.content_of(TASK)) == hash_now(TASK)
 
 
 def test_upsert_that_creates_the_block_carries_no_hash(monkeypatch):
@@ -164,13 +159,7 @@ def test_property_write_without_content_in_the_proof_read_succeeds_without_hash(
     hold anyway, since they check the properties, not the text."""
     pages, change, _, _ = RECIPES[name]
     double = LogseqHttpDouble.installed(monkeypatch, pages)
-    out_block = double._block_out
-
-    def without_content(*args, **kwargs):
-        block = out_block(*args, **kwargs)
-        block.pop("content", None)
-        return block
-    monkeypatch.setattr(double, "_block_out", without_content)
+    double.blocks_without_content = True
     result = invoke(name, *change, "--json")
     assert result.exit_code == 0, result.stderr
     assert double.writes()
@@ -235,7 +224,7 @@ def test_the_next_write_passes_on_the_hash_without_a_read(monkeypatch, name):
                     "--expect-hash", out["hash"], "--json")
     assert result.exit_code == 0, result.stderr
     # update-block keeps the block's properties (the one set-block-property wrote).
-    assert stored(double, TASK).split("\n")[0] == "TODO ship the parser, next"
+    assert double.content_of(TASK).split("\n")[0] == "TODO ship the parser, next"
 
 
 @pytest.mark.parametrize("name", CARRYING)
@@ -248,7 +237,7 @@ def test_a_change_in_between_refuses_the_next_write(monkeypatch, name):
     assert result.exit_code != 0 and result.stdout == ""
     assert json.loads(result.stderr)["reason"] == "precondition_failed"
     assert len(double.writes()) == before
-    assert stored(double, TASK) == "TODO ship the parser, theirs"
+    assert double.content_of(TASK) == "TODO ship the parser, theirs"
 
 
 # --- no extra request ---------------------------------------------------------------
@@ -269,7 +258,7 @@ REQUESTS = {
 def test_the_hash_costs_no_request(monkeypatch, name, expect):
     pages, change, _, _ = RECIPES[name]
     double = LogseqHttpDouble.installed(monkeypatch, pages)
-    extra = ["--expect-hash", block_hash(stored(double, TASK))] if expect else []
+    extra = ["--expect-hash", block_hash(double.content_of(TASK))] if expect else []
     result = invoke(name, *change, *extra, "--json")
     assert result.exit_code == 0, result.stderr
     assert "hash" in json.loads(result.stdout)
