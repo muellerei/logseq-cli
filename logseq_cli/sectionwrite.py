@@ -124,8 +124,13 @@ def _choose_upsert_target(api, page, heading, upsert):
     return heading_uuid, (matches[0] if matches else None)
 
 
+# The text names where the tree hash comes from: an upsert's own --dry-run
+# refuses the same way, and a caller upserting by heading has no uuid (#146).
+# Here, not in require_precondition: remove-block owes the same option.
 _OWED_FOR_CHILDREN = Owed(("--expect-tree-hash",), always=(
-    "replacing the children of the matched block (--expect-hash covers the block alone)"))
+    "replacing the children of the matched block (--expect-hash covers the block alone; "
+    "its tree_hash is in get-block --id UUID --json, its uuid in get-journal-range "
+    "--heading with the --under-heading)"))
 
 
 # Said by a replacement cut off between its writes (see _apply_upsert).
@@ -191,11 +196,12 @@ def _plan_upsert(api, target, roots, upsert, heading) -> UpsertPlan:
     nothing), then what a replacement owes. All of it before --dry-run and
     before the page or heading are created.
 
-    Content with children replaces the block's children; content without
-    keeps them, so a placeholder refreshed with flat text keeps the notes
-    written under it. Replacing children deletes blocks, which no upsert did
-    before: it owes --expect-tree-hash whatever require_preconditions says,
-    and is refused while a ((ref)) from elsewhere points into them."""
+    The children of the content's first root replace the block's children;
+    a first root without any keeps them, so a placeholder refreshed with
+    flat text keeps the notes written under it. Replacing children deletes
+    blocks, which no upsert did before: it owes --expect-tree-hash whatever
+    require_preconditions says, and is refused while a ((ref)) from
+    elsewhere points into them."""
     if not target:
         given = [o for o, v in (("--expect-hash", upsert.expect.hash),
                                 ("--expect-tree-hash", upsert.expect.tree_hash)) if v is not None]

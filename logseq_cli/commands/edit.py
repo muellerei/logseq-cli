@@ -39,8 +39,10 @@ from logseq_cli.ids import (
 from logseq_cli.lookup import incoming_block_refs, refs_refusal, resolve_single_block
 from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
+    TREE_CONTENT_RULE,
     contains_hierarchical_content,
     count_blocks,
+    note_indent,
     note_quote_breaks,
     outline_text,
     parse_hierarchical_content,
@@ -459,7 +461,10 @@ Notes:
   --content (or --content-file), --tree and --tree-file are mutually exclusive.
   --tree-file reads the same tab-indented text (or JSON) from a file, so
   apostrophes/quotes/umlauts need no shell quoting.
-  --child-of UUID also accepts hierarchical --content (same tab-indent format).
+""" + TREE_CONTENT_RULE + """\
+  This holds for every target, and for --content-file. Indented lines
+  without "- " in a value that is not a tree get a Note on stderr; for a
+  tree from them, use --tree or --tree-file.
   --first puts the block at the HEAD of the child list instead of appending it
   last; it only applies together with --child-of.
   id:: lines (in --tree or --content) are dropped unless --keep-ids is given,
@@ -469,7 +474,7 @@ Notes:
   before writing anything, an id a block or page still has (the copy case:
   drop --keep-ids) and a second id:: line in one block.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
-  Text written as ONE block (--content without indentation, a --tree node)
+  Text written as ONE block (--content not read as a tree, a --tree node)
   is refused if Logseq would read a line of it as a block of its own: a "- "
   or "# " line after the first, or a code fence nothing closes. In a closed
   code block such lines are fine.
@@ -670,6 +675,10 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         content = outline_text(tree) if hierarchical else tree[0]["content"]
 
     note_quote_breaks(tree)
+    # --content-file is the same text from a file, read by the same rule:
+    # only --tree reads indented lines without "- " as children.
+    if not hierarchical:
+        note_indent([content], "--tree")
     # [graph] keep_empty_blocks_last acts on the writes that end a section: the end
     # of a page and a last child.
     keep_on = keep_empty_blocks_last(load_config())

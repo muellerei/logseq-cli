@@ -32,9 +32,12 @@ from logseq_cli.ids import (
 from logseq_cli.lookup import get_page_content
 from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
+    TREE_CONTENT_EXAMPLE,
+    TREE_CONTENT_RULE,
     contains_hierarchical_content,
     has_mixed_indentation,
     normalize_indentation,
+    note_indent,
     note_quote_breaks,
     outline_text,
     parse_hierarchical_content,
@@ -354,8 +357,8 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
              reason="partial_read", days=unread)
 
 @cli.command("add-journal-entry", cls=WriteCommand, epilog="""\b
-DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
---under-heading / --upsert-heading.
+DEPRECATED. Use add-journal-block instead: it reads --content as a tree by the
+same rule (see its --help) and supports --under-heading / --upsert-heading.
 An id:: line in --content is dropped with a Note, as in add-journal-block.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--content", required=True, help="Content to add")
@@ -438,6 +441,10 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
     else:
         click.echo(f"Added {blocks_added} block(s) to journal: {page_name}")
 
+# TREE_CONTENT_EXAMPLE as the shell writes it in the --help example.
+_SHOWN_EXAMPLE = TREE_CONTENT_EXAMPLE.replace("\n", "\\n").replace("\t", "\\t")
+
+
 # The precondition belongs to the block --upsert-heading replaces, which is
 # unknown until the command has chosen it: so nothing is owed up front, and the
 # plan asks for it after the choice (see sectionwrite.plan_section_write).
@@ -448,6 +455,7 @@ Examples:
   logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" --content "..."
   logseq-cli --token TOKEN add-journal-block --content "TODO A" --content "TODO B"   # batch
   logseq-cli --token TOKEN add-journal-block --content-file entry.md                 # tree from file
+  logseq-cli --token TOKEN add-journal-block --content $'""" + _SHOWN_EXAMPLE + """'          # Parent with child
   logseq-cli --token TOKEN add-journal-block --under-heading "## Meeting" \\
                                               --upsert-heading "### [[Carol]]" --content "..."
 Notes:
@@ -459,27 +467,35 @@ Notes:
   --expect-hash H (with --upsert-heading) refuses, without writing, unless the
   block it would replace is still the one H was read from. With no match there
   is no block: the hash has no object and the block is created.
-  Content with children replaces the matched block's children, and owes
-  --expect-tree-hash T (the tree_hash of get-block --json, or of the last
-  upsert's --json) whatever require_preconditions says: that write deletes
-  blocks. Refused while a ((ref)) from elsewhere points into them. Content
-  without children keeps them. A run that would leave the block as it is
-  writes nothing: status unchanged. Further --content-file roots are added
-  after the block on every run.
+  When the first block of the content has children (read as a tree, see
+  below), they replace the matched block's children, and the write owes
+  --expect-tree-hash T (the tree_hash of get-block --id UUID --json, the
+  uuid from get-journal-range --from D --to D --heading U --json with U the
+  --under-heading; or of the last upsert's --json) whatever
+  require_preconditions says: that write deletes blocks. Refused while a
+  ((ref)) from elsewhere points into them. Content whose first block has
+  none keeps them, flat content with indented lines without "- " included.
+  A run that would leave the block as it is writes nothing: status
+  unchanged. Every further block of the content (from --content-file, or
+  from --content read as a tree) is added after the block on every run.
   With --upsert-heading that replaced a block, --json carries hash, the
   replaced block's hash as this write left it, and tree_hash: pass them as
   --expect-hash / --expect-tree-hash to the next write to the block, with no
   read in between. No hash under
   --dry-run, for a block it created, or when it could not be read after the
   write.
-  Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
-  --content-file reads the whole file as ONE tree: flush "- " lines become
-  sibling roots, tab-indented lines their children. No shell quoting, so
-  apostrophes/quotes/umlauts are safe. Mutually exclusive with --content.
-  --content without indentation is ONE block, and is refused if Logseq would
-  read a line of it as a block of its own: a "- " or "# " line after the
-  first, or a code fence nothing closes. In a closed code block such lines are
-  fine. Indent sub-bullets for children, pass --content again for siblings.
+""" + TREE_CONTENT_RULE + """\
+  Indented lines without "- " in a value that is not a tree get a Note on
+  stderr; for a tree from them, use --content-file. With --no-preserve no
+  value is a tree.
+  --content-file reads the whole file as ONE tree (with --preserve-formatting,
+  the default): flush "- " lines become sibling roots, tab-indented lines
+  their children. No shell quoting, so apostrophes/quotes/umlauts are safe.
+  Mutually exclusive with --content.
+  --content that is not read as a tree is ONE block, and is refused if Logseq
+  would read a line of it as a block of its own: a "- " or "# " line after
+  the first, or a code fence nothing closes. In a closed code block such
+  lines are fine. Pass --content again for siblings.
   id:: lines are dropped unless --keep-ids is given, and the command says so;
   text that is nothing but id:: lines is refused.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.
@@ -498,14 +514,19 @@ Notes:
 @click.option("--content-file", "content_file", default=None, help="Read block content from a file and insert it as a tree (multiple flush '- ' roots allowed). Mutually exclusive with --content.")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
-@click.option("--upsert-heading", default=None, help="Find child block matching this heading under --under-heading and update it; insert as new block if not found.")
+@click.option("--upsert-heading", default=None,
+              help="Find the child block under --under-heading that matches this heading and replace it; create it if none matches. "
+                   "Two matches are refused (ambiguous). When the content's first block has children, they replace the block's "
+                   "children (see below).")
 @click.option("--expect-hash", "expect_hash", default=None,
               help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read "
                    f"from ({HASH_SOURCES}). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
 @click.option("--expect-tree-hash", "expect_tree_hash", default=None,
               help="With --upsert-heading: refuse, without writing, unless the block it replaces and everything under it are still "
-                   "what this hash was read from (the tree_hash of this command's --dry-run --json or --json output). Required when "
-                   "content with children would replace the block's children; checked like --expect-hash")
+                   "what this hash was read from (the tree_hash of get-block --id UUID --json, UUID from get-journal-range --from D "
+                   "--to D --heading U --json with U the --under-heading, or from would_replace of a flat --dry-run --json; after a "
+                   "replacement, of this command's --json output). Required when the content's first block has children, which "
+                   "replace the block's children; checked like --expect-hash")
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
@@ -657,6 +678,10 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # id:: lines are gone from it.
     note_quote_breaks([node for c, t in zip(contents, trees)
                        for node in (t if t is not None else [{"content": c}])])
+    # Without --preserve-formatting no value is a tree, --content-file
+    # included, so the way the note names would not help there.
+    if preserve_formatting:
+        note_indent([c for c, t in zip(contents, trees) if t is None], "--content-file")
 
     # Each value as it is written: a tree, or one block. A batch value with
     # mixed indentation is normalized, as the batch path always did.
@@ -765,8 +790,10 @@ Example:
   logseq-cli --token TOKEN add-journal-content \\
     --content "- ## Log\\n\\t- 14:30 Meeting [[Bob]]" --date $(date +%Y-%m-%d)
 Note:
-  Same heading logic as add-journal-block. Prefer add-journal-block for most cases —
-  it now auto-detects hierarchy.
+  Same heading logic as add-journal-block. Prefer add-journal-block for most
+  cases. add-journal-content always reads its content as a tree;
+  add-journal-block does so only when an indented line starts with "- " (see
+  its --help).
   id:: lines are dropped unless --keep-ids is given, and the command says so;
   text that is nothing but id:: lines is refused.
   An id:: line inside a code block (``` or ~~~) is code and is written as is.

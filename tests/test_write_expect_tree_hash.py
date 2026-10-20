@@ -99,4 +99,8 @@ def test_the_switch_owes_the_tree_hash(double, name):
     error = json.loads(result.stderr)
     assert error["reason"] == "precondition_required"
     assert error["options"] == ["--expect-tree-hash"]
+    # Word for word: the source of an upsert's tree hash goes into the text
+    # of that refusal, not into the gate both share (#146).
+    assert error["error"] == ("A precondition is required: --require-preconditions was "
+                              "passed. Pass --expect-tree-hash. Nothing was written.")
     assert double.writes() == []

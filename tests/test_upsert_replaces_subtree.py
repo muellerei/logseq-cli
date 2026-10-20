@@ -110,6 +110,24 @@ def test_flat_content_keeps_the_children(monkeypatch):
     assert under_carol(double) == [("note by hand", [])]
 
 
+def test_indented_lines_without_a_marker_keep_the_children(monkeypatch):
+    # Not read as a tree, so the content has no children: nothing is owed.
+    double = LogseqHttpDouble.installed(monkeypatch, carol("note by hand"))
+    p = ok(run("--content", "### Carol\n\tfresh"))
+    assert (p["status"], p["children_removed"]) == ("updated", 0)
+    assert under_carol(double) == [("note by hand", [])]
+
+
+def test_further_blocks_of_a_tree_are_added_on_every_run(monkeypatch):
+    # Only the first block's children replace the match's children; "Status"
+    # is a second block, added after the match each time (#146).
+    double = LogseqHttpDouble.installed(monkeypatch, carol("old a"))
+    for _ in range(2):
+        ok(run("--content", "### Carol\nStatus\n\t- d"))
+    assert double.tree(JOURNAL)[0][1] == [
+        ("### Carol", [("old a", [])]), ("Status", [("d", [])]), ("Status", [("d", [])])]
+
+
 def test_children_on_a_block_without_any_are_added(monkeypatch):
     double = LogseqHttpDouble.installed(monkeypatch, carol())
     p = ok(run("--content", KIDS))
@@ -142,6 +160,10 @@ def test_removing_children_owes_the_tree_hash(monkeypatch, dry_run, given):
     assert error["reason"] == "precondition_required"
     assert error["options"] == ["--expect-tree-hash"]
     assert "--expect-hash covers the block alone" in error["error"]
+    # A caller upserting by heading has no uuid: the refusal names where the
+    # tree_hash and the uuid come from (#146).
+    assert "get-block --id UUID --json" in error["error"]
+    assert "get-journal-range" in error["error"]
     assert written(double) == []
     assert under_carol(double) == [("old a", [])]
 

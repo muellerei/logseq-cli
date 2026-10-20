@@ -277,9 +277,10 @@ logseq-cli add-journal-content \
 
 Each line is a block, with four exceptions that stay with the block they belong
 to, as in Logseq's own files. A `key:: value` line without a bullet goes on the
-block above. So does a `SCHEDULED: <…>` or `DEADLINE: <…>` line, indented or
-not: `TODO x` with `SCHEDULED: <2026-09-25 Fri>` under it is one block, a task
-with a date. So does a `:LOGBOOK:` drawer, every line from `:LOGBOOK:` to
+block above, and so does a `- key:: value` line indented deeper than that
+block. So does a `SCHEDULED: <…>` or `DEADLINE: <…>` line, indented or not:
+`TODO x` with `SCHEDULED: <2026-09-25 Fri>` under it is one block, a task with
+a date. So does a `:LOGBOOK:` drawer, every line from `:LOGBOOK:` to
 `:END:`. A `:LOGBOOK:` that no `:END:` closes before the next bullet line is no
 drawer but text, as a code fence nothing closes is, and the lines after it are
 read as usual. So does a
@@ -308,9 +309,12 @@ unclosed fence swallows the blocks after it. So every such write is refused
 before anything is written, with the line and the way to write it: flat
 `--content`, a JSON `--tree` node, `update-block`, `create-page --content`,
 also `copy-block`, `replace-text` and the heading of `--under-heading`. Inside
-a closed code block these lines are fine. Indent sub-bullets to write children,
-or pass `--content` several times (`add-journal-block`) for blocks side by
-side. `--json` gives `{"reason": "splits_into_blocks", "line": N, "kind": ...}`
+a closed code block these lines are fine. Write children as indented lines
+that start with `- `; then the value is read as a tree, like `--content-file`
+above, so every flush line is a block of its own with the four exceptions
+(indented lines without `- ` in a value that is not a tree stay text in one
+block). Or pass `--content` several times (`add-journal-block`) for blocks
+side by side. `--json` gives `{"reason": "splits_into_blocks", "line": N, "kind": ...}`
 and a non-zero exit.
 
 A property value (`set-property`, `set-block-property`, `--property`) is one
@@ -494,6 +498,10 @@ failed between a write and its proof, `unproven_write` names that write: it
 may have landed or not. Read the target before retrying; a retry of the whole
 command writes again what landed.
 
+An upsert cut off between its writes, after new children landed, names them
+in `written_uuids`; a run on a fresh `tree_hash` replaces both the old
+children and the new.
+
 `copy-block --remove` whose source was deleted elsewhere during the copy
 succeeds (exit 0, `"action": "moved"`) with `"source_gone": true` (`false`
 otherwise): the copy is there and the source is gone, which is the move. Do
@@ -534,7 +542,10 @@ write into X). A `--keep-ids` write is refused while any block is open.
 
 On `precondition_required`: read the block with `get-block --json` and pass
 its `hash` as `--expect-hash` (or the marker you decided on as
-`--expect-marker`). Do not switch the requirement off to get past it; the user
+`--expect-marker`). An upsert whose content's first block has children owes
+`--expect-tree-hash` too: the `tree_hash` of `get-block --id UUID --json`, the
+uuid from `get-journal-range --from D --to D --heading U --json` with U the
+`--under-heading`. Do not switch the requirement off to get past it; the user
 set it. `read_only` is checked first: if both apply, you get `read_only`.
 
 On `precondition_failed`: the block changed after you read it. Read it again
@@ -561,10 +572,11 @@ between their read and their write is part of the hash they return.
 
 `add-journal-block --upsert-heading` also carries `tree_hash` when it replaced
 the block or left it unchanged: the block with everything under it, read after
-the write. Content with children replaces the block's children and owes
-`--expect-tree-hash`, so a script that refreshes the same block passes the
-`tree_hash` of one run to the next. The first one comes from `get-block --json`
-of the matched block. A run that changes nothing reports `status: unchanged`
+the write. When the content's first block has children, they replace the
+block's children and the write owes `--expect-tree-hash`, so a script that
+refreshes the same block passes the `tree_hash` of one run to the next. The
+first one comes from `get-block --id UUID --json` of the matched block, its
+uuid from `get-journal-range --heading` with the `--under-heading`. A run that changes nothing reports `status: unchanged`
 and writes nothing.
 
 `write_not_verified` can be a false alarm when someone else wrote the block

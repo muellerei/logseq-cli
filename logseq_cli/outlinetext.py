@@ -13,7 +13,13 @@ is tested without a mock; the layering tests keep it that way (ADR 0003).
 
 import re
 
-from logseq_cli.blocktext import PROPERTY_LINE_RE, attached_line_mask, code_block_lines, is_fence
+from logseq_cli.blocktext import (
+    PROPERTY_LINE_RE,
+    attached_line_mask,
+    code_block_lines,
+    is_fence,
+    property_line_mask,
+)
 from logseq_cli.notes import print_note
 
 
@@ -111,6 +117,26 @@ def contains_hierarchical_content(content: str) -> bool:
     Used by add-journal-block to auto-delegate to hierarchical insertion.
     """
     return bool(re.search(r'\n[\t ]+- ', content))
+
+
+# For the --help of every command whose --content goes through
+# contains_hierarchical_content: one source for the rule, so no epilog
+# promises a form it does not detect (#146). Wrapped by hand with the
+# epilog's indent, as Click sets a \b paragraph line by line. No advice on
+# where to go instead: that differs per command and follows it there.
+TREE_CONTENT_RULE = """\
+  --content is read as a tree when a line after the first is indented and
+  starts with "- ", even inside a code block. Then every line starts a
+  block of its own: a flush line at the top, an indented line as a child of
+  the nearest line above with less indentation (a tab or two spaces per
+  level). Without "- " of its own, a property, SCHEDULED or DEADLINE line,
+  a LOGBOOK drawer and a closed code block stay with the block above,
+  indented or not, and so does a "- key:: value" line indented deeper than
+  that block. Otherwise --content is one block, indented lines included.
+"""
+# The example add-journal-block's --help shows; tests write it and expect
+# the tree, so the example cannot drift from the detection.
+TREE_CONTENT_EXAMPLE = "Parent\n\t- Child"
 
 
 def has_mixed_indentation(content: str) -> bool:
@@ -423,5 +449,38 @@ def quote_break_note(tree: list) -> str | None:
 def note_quote_breaks(tree: list) -> None:
     """Print :func:`quote_break_note` for ``tree`` on stderr, if there is one."""
     note = quote_break_note(tree)
+    if note:
+        print_note(note)
+
+
+def indent_note(contents, way: str) -> str | None:
+    """A ``Note:`` when a flat value has indented lines after its first.
+
+    ``contents`` are the values written as one block each: without an
+    indented "- " line, contains_hierarchical_content reads none of them as
+    a tree, and an indented line stays text in the block (#146). Not text,
+    so not named: a line in a closed code block or org block, a fence line,
+    and a property, SCHEDULED, DEADLINE or LOGBOOK line, which Logseq reads
+    as part of the block indented or not. ``way`` is the option that reads
+    such lines as children, which differs per command.
+    The note says how the text is read, not that it was written: it comes
+    before --dry-run and before the refusals of the plan.
+    """
+    for content in contents:
+        lines = content.split("\n")
+        inside, _ = code_block_lines(lines)
+        not_text = [any(marks) for marks in zip(
+            inside, _org_block_lines(lines, inside), attached_line_mask(lines),
+            property_line_mask(lines), map(is_fence, lines))]
+        if any(line[:1] in "\t " and line.strip() and not skip
+               for line, skip in zip(lines[1:], not_text[1:])):
+            return ('Note: indented lines without "- " are text in one block, not '
+                    f'children; for children, start them with "- " or use {way}.')
+    return None
+
+
+def note_indent(contents, way: str) -> None:
+    """Print :func:`indent_note` for ``contents`` on stderr, if there is one."""
+    note = indent_note(contents, way)
     if note:
         print_note(note)

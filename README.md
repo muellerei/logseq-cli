@@ -60,8 +60,10 @@ files would not.
 - **Keep a work log.** *"Log: we decided to ship on Friday."* It lands on
   today's page, under your journal heading once you have set one, as
   `**14:30** Decided to ship on Friday`, proven written, while you keep
-  typing. Dictated text with several lines goes in as one block, indented
-  `- ` lines as its children, and any other page works the same way.
+  typing. Dictated text with several lines goes in as one block. Once a
+  line is indented and starts with `- `, the text is read as a tree: each
+  flush line becomes a block, indented lines its children. Any other page
+  works the same way.
   `logseq-cli add-journal-block --content "**14:30** Decided to ship on Friday"`
 - **Find your tasks, wherever they stand.** *"What is still open from
   yesterday and today?"* One call instead of reading every journal, and a
