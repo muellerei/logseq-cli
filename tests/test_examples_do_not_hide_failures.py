@@ -6,6 +6,7 @@ empty file and the backup was reported done; export-all-pages.sh counted such
 empty files as exported; two others piped the CLI into jq without
 ``pipefail``, so a failure looked like an empty result (#93).
 """
+import json
 import os
 import pathlib
 import re
@@ -123,21 +124,54 @@ esac
 """
 
 
-def _run_safe_update(tmp_path, update_body):
+# With PRIO: get-block, update-block and set-block-property each log their call.
+SAFE_UPDATE_PRIO_STUB = """echo "$@" >> "$CALLS"
+case "$1" in
+  get-block) echo '{"uuid": "%s", "content": "TODO ship the parser", "hash": "0123456789ab"}';;
+  update-block) %s;;
+  set-block-property) echo '{"status": "updated", "hash": "cdef01234567"}';;
+esac
+"""
+
+
+def _run_safe_update(tmp_path, update_body, *prio, stub=SAFE_UPDATE_STUB):
     calls = tmp_path / "calls"
-    env = _stub(tmp_path, SAFE_UPDATE_STUB % (BLOCK, update_body))
+    env = _stub(tmp_path, stub % (BLOCK, update_body))
     env["CALLS"] = str(calls)
-    result = subprocess.run(["bash", str(SAFE_UPDATE), BLOCK, "TODO ship the parser, fixed"],
-                            capture_output=True, text=True, env=env, timeout=30)
+    result = subprocess.run(
+        ["bash", str(SAFE_UPDATE), BLOCK, "TODO ship the parser, fixed", *prio],
+        capture_output=True, text=True, env=env, timeout=30)
     return result, calls.read_text().splitlines() if calls.exists() else []
 
 
 @pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
                     reason="needs bash and jq")
 def test_safe_update_passes_the_hash_it_read(tmp_path):
-    result, calls = _run_safe_update(tmp_path, "exit 0")
+    result, calls = _run_safe_update(tmp_path, """echo '{"hash": "89abcdef0123"}'""")
     assert result.returncode == 0, result.stderr
     assert len(calls) == 1 and "--expect-hash 0123456789ab" in calls[0]
+    assert json.loads(result.stdout) == {"hash": "89abcdef0123"}
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_chains_prio_on_the_hash_the_update_returned(tmp_path):
+    result, calls = _run_safe_update(tmp_path, """echo '{"hash": "89abcdef0123"}'""",
+                                     "high", stub=SAFE_UPDATE_PRIO_STUB)
+    assert result.returncode == 0, result.stderr
+    assert [c.split()[0] for c in calls] == ["get-block", "update-block", "set-block-property"]
+    assert "--expect-hash 89abcdef0123" in calls[2]
+    assert json.loads(result.stdout) == {"status": "updated", "hash": "cdef01234567"}
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_reads_again_when_the_update_returned_no_hash(tmp_path):
+    result, calls = _run_safe_update(tmp_path, "echo '{}'", "high", stub=SAFE_UPDATE_PRIO_STUB)
+    assert result.returncode == 0, result.stderr
+    assert [c.split()[0] for c in calls] == [
+        "get-block", "update-block", "get-block", "set-block-property"]
+    assert "--expect-hash 0123456789ab" in calls[3]
 
 
 @pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),

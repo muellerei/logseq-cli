@@ -20,6 +20,7 @@
 # Usage: ./safe-update-block.sh BLOCK_UUID "new text" [PRIO]
 #        ./safe-update-block.sh 6650a1b2-0000-4000-8000-000000000001 "TODO ship the parser, fixed" high
 # Requires: LOGSEQ_TOKEN or --token, and jq
+# Prints the --json output of the last write.
 # Exit:  0 written; 3 the block changed since it was read (nothing written by
 #        the refused call; with PRIO, the text may already be written);
 #        anything else: the call failed for another reason (see stderr)
@@ -52,7 +53,10 @@ if ! logseq-cli update-block --id "${ID}" --content "${NEW}" \
     --expect-hash "${HASH}" --json >"${OUT}" 2>"${ERR}"; then
     refused
 fi
-[[ -n "${PRIO}" ]] || exit 0
+if [[ -z "${PRIO}" ]]; then
+    cat "${OUT}"
+    exit 0
+fi
 
 # The hash the write left. Not `jq -e`: a missing field would end the script
 # under set -e; with none, read the block as above.
@@ -65,4 +69,4 @@ if ! logseq-cli set-block-property --id "${ID}" --key prio --value "${PRIO}" \
     --expect-hash "${HASH}" --json >"${OUT}" 2>"${ERR}"; then
     refused
 fi
-exit 0
+cat "${OUT}"

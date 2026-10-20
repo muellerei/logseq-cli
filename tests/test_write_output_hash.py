@@ -289,6 +289,9 @@ def test_help_names_the_hash_field_and_when_it_is_absent(name):
     text = _help(name)
     assert "--json carries hash" in text
     assert "No hash under --dry-run" in text
+    assert "could not be read after the write" in text
+    if name == "set-todo-status":
+        assert "(unchanged)" in text
 
 
 @pytest.mark.parametrize("name", _commands_with_a_precondition())
