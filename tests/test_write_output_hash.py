@@ -19,7 +19,7 @@ from logseq_cli.blocktext import block_hash
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
 from tests.logseq_http_double import LogseqHttpDouble
-from tests.test_precondition_coverage import OTHER, RECIPES, TASK
+from tests.test_precondition_coverage import OTHER, RECIPES, TASK, _expecting_commands
 
 # The commands whose write output carries the hash.
 CARRYING = ["update-block", "set-todo-status", "set-block-property", "remove-property",
@@ -189,3 +189,88 @@ def test_text_write_with_no_hash_returned_succeeds_without_hash(monkeypatch, nam
     double, out = write(monkeypatch, name)
     assert double.writes()
     assert "hash" not in out
+
+
+# --- every command with a precondition ------------------------------------------------
+
+# Commands that take a precondition but whose output carries no hash, and why.
+WAIVED = {
+    "move-block": "a move keeps the content, so the hash of the last read still holds",
+    "remove-block": "after the write there is no block, so no hash and no next write",
+    "copy-block": "the copy has the source's hash, but the output does not name the copy",
+}
+
+
+def _commands_with_a_precondition():
+    """Each command once: `delete-block` is the same command as `remove-block`."""
+    names = {}
+    for name in _expecting_commands():
+        names.setdefault(id(cli.commands[name]), name)
+    return sorted(names.values())
+
+
+def test_waived_commands_exist():
+    assert all(name in cli.commands for name in WAIVED)
+
+
+@pytest.mark.parametrize("name", _commands_with_a_precondition())
+def test_every_command_with_a_precondition_carries_the_hash_or_says_why(monkeypatch, name):
+    """A new command that takes --expect-* fails here until its output
+    carries the hash or it is waived above with a reason. One call per
+    command, its recipe's: a new write path in a command needs its own."""
+    if name in WAIVED:
+        assert name not in CARRYING
+        return
+    assert name in CARRYING, f"{name} takes a precondition: carry the hash or waive it"
+    _, out = write(monkeypatch, name)
+    assert isinstance(out.get("hash"), str)
+
+
+# --- a chain of writes, and a change in between --------------------------------------
+
+@pytest.mark.parametrize("name", CARRYING)
+def test_the_next_write_passes_on_the_hash_without_a_read(monkeypatch, name):
+    double, out = write(monkeypatch, name)
+    result = invoke("update-block", "--id", TASK, "--content", "TODO ship the parser, next",
+                    "--expect-hash", out["hash"], "--json")
+    assert result.exit_code == 0, result.stderr
+    # update-block keeps the block's properties (the one set-block-property wrote).
+    assert stored(double, TASK).split("\n")[0] == "TODO ship the parser, next"
+
+
+@pytest.mark.parametrize("name", CARRYING)
+def test_a_change_in_between_refuses_the_next_write(monkeypatch, name):
+    double, out = write(monkeypatch, name)
+    double.set_content(TASK, "TODO ship the parser, theirs")
+    before = len(double.writes())
+    result = invoke("update-block", "--id", TASK, "--content", "TODO ship the parser, mine",
+                    "--expect-hash", out["hash"], "--json")
+    assert result.exit_code != 0 and result.stdout == ""
+    assert json.loads(result.stderr)["reason"] == "precondition_failed"
+    assert len(double.writes()) == before
+    assert stored(double, TASK) == "TODO ship the parser, theirs"
+
+
+# --- no extra request ---------------------------------------------------------------
+
+# Requests of one recipe call, measured before #133 (the last getBlock is
+# the proof read the hash comes from): without and with --expect-hash.
+REQUESTS = {
+    "update-block": (5, 7),
+    "set-todo-status": (5, 6),
+    "set-block-property": (5, 6),
+    "remove-property": (5, 6),
+    "add-journal-block": (8, 10),
+}
+
+
+@pytest.mark.parametrize("name", CARRYING)
+@pytest.mark.parametrize("expect", [False, True], ids=["plain", "expect-hash"])
+def test_the_hash_costs_no_request(monkeypatch, name, expect):
+    pages, change, _, _ = RECIPES[name]
+    double = LogseqHttpDouble.installed(monkeypatch, pages)
+    extra = ["--expect-hash", block_hash(stored(double, TASK))] if expect else []
+    result = invoke(name, *change, *extra, "--json")
+    assert result.exit_code == 0, result.stderr
+    assert "hash" in json.loads(result.stdout)
+    assert len(double.requests) == REQUESTS[name][expect]
