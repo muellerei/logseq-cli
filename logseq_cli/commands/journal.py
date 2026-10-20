@@ -472,12 +472,12 @@ Notes:
   --expect-tree-hash T (the tree_hash of get-block --id UUID --json, the
   uuid from get-journal-range --from D --to D --heading U --json with U the
   --under-heading; or of the last upsert's --json) whatever
-  require_preconditions says: that write deletes blocks. Refused while a ((ref)) from elsewhere points into them. Content
-  whose first block has none keeps them, flat content with indented lines
-  without "- " included. A run that would leave the block as it is writes
-  nothing: status unchanged. Every further block of the content (from
-  --content-file, or from --content read as a tree) is added after the
-  block on every run.
+  require_preconditions says: that write deletes blocks. Refused while a
+  ((ref)) from elsewhere points into them. Content whose first block has
+  none keeps them, flat content with indented lines without "- " included.
+  A run that would leave the block as it is writes nothing: status
+  unchanged. Every further block of the content (from --content-file, or
+  from --content read as a tree) is added after the block on every run.
   With --upsert-heading that replaced a block, --json carries hash, the
   replaced block's hash as this write left it, and tree_hash: pass them as
   --expect-hash / --expect-tree-hash to the next write to the block, with no

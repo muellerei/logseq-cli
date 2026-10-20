@@ -196,9 +196,9 @@ def _plan_upsert(api, target, roots, upsert, heading) -> UpsertPlan:
     nothing), then what a replacement owes. All of it before --dry-run and
     before the page or heading are created.
 
-    Content with children replaces the block's children; content without
-    keeps them, so a placeholder refreshed with flat text keeps the notes
-    written under it. Replacing children deletes blocks, which no upsert did
+    The children of the content's first root replace the block's children;
+    a first root without any keeps them, so a placeholder refreshed with
+    flat text keeps the notes written under it. Replacing children deletes blocks, which no upsert did
     before: it owes --expect-tree-hash whatever require_preconditions says,
     and is refused while a ((ref)) from elsewhere points into them."""
     if not target:

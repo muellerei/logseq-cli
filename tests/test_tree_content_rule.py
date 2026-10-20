@@ -145,13 +145,21 @@ def test_a_refusal_under_json_carries_the_note_in_its_error(monkeypatch):
 @pytest.mark.parametrize("args", [
     ["--content", TREE_CONTENT_EXAMPLE],
     ["--content", "Notes\n```\n\tcode\n```\nDone."],
+    ["--content", "Notes\n\t```\n\tcode\n\t```"],
     ["--content", "Parent\nChild"],
     ["--no-preserve", "--content", FLAT],
     ["--no-preserve", "--content", FLAT, "--content", "Other\n\tline"],
-], ids=["tree", "code-block", "flush", "no-preserve", "no-preserve-batch"])
+], ids=["tree", "code-block", "indented-fences", "flush", "no-preserve", "no-preserve-batch"])
 def test_no_note(monkeypatch, args):
     LogseqHttpDouble.installed(monkeypatch, {JOURNAL: ["logged"]})
     assert notes(ok(journal_block(*args))) == []
+
+
+def test_one_note_for_a_batch(monkeypatch):
+    double = LogseqHttpDouble.installed(monkeypatch, {JOURNAL: ["logged"]})
+    r = ok(journal_block("--content", "Plain", "--content", FLAT))
+    assert len(notes(r)) == 1
+    assert double.tree(JOURNAL) == [("logged", []), ("Plain", []), ("Parent", [])]
 
 
 def test_no_note_from_add_journal_content(monkeypatch):
