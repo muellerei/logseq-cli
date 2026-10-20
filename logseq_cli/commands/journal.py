@@ -810,7 +810,9 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             text = tree[0]["content"] if tree else content
             # The matched block keeps its properties, as with update-block (#67).
             _, kept = kept_properties(api, found_uuid, text)
-            api.update_block(found_uuid, text, properties=kept or None, **held)
+            # The replaced block's hash, as its proof read it: the inserts
+            # below go through proofs of their own and leave it as it is.
+            written = api.update_block(found_uuid, text, properties=kept or None, **held)
             # n counts the UUIDs the inserts returned, plus 1 for the
             # update. The API proves each insert and raises on one that did
             # not land, so this is what the graph took, not the size asked
@@ -824,6 +826,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                     n += len(insert_block_tree_as_siblings(api, tree[1:], found_uuid))
             status = "updated"
         else:
+            written = None
             # A new block as the last child of the heading: the write
             # [graph] keep_empty_blocks_last is about. A found block is replaced
             # where it stands, which is no end position.
@@ -837,8 +840,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks": n, **uuid_fields([u for u in [root_uuid] if u]),
-                    **before_empty_fields(ahead_of)}, True)
+            result = {"page": page_name, "date": str(d), "position": position, "blocks": n,
+                      **uuid_fields([u for u in [root_uuid] if u]), **before_empty_fields(ahead_of)}
+            if status == "updated" and isinstance(written, str):
+                result["hash"] = written
+            output(result, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})"
                        f"{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")

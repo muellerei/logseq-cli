@@ -654,11 +654,15 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, expect_ha
         return
 
     # Only the marker changes; lines the block already had are not ours to refuse.
-    api.update_block(block_id, new_content, replacing=old_content)
+    written = api.update_block(block_id, new_content, replacing=old_content)
 
     if as_json:
-        output({"uuid": block_id, "old": old_content, "new": new_content, "status": status,
-                **chain}, True)
+        result = {"uuid": block_id, "old": old_content, "new": new_content, "status": status,
+                  **chain}
+        # The hash the proof read, of the block written (the end of a chain).
+        if isinstance(written, str):
+            result["hash"] = written
+        output(result, True)
     else:
         click.echo(f"Updated: {old_content[:60]}{'...' if len(old_content) > 60 else ''}")
         click.echo(f"      → {new_content[:60]}{'...' if len(new_content) > 60 else ''}")

@@ -194,11 +194,16 @@ def update_block(ctx, block_id, where_content, page, use_regex, content, content
 
     # Held to the text the precondition was checked on; without one, as before.
     held = {"expect": old_content} if expect else {}
-    api.update_block(clean_id, content, properties=kept_texts or None, **held)
+    written = api.update_block(clean_id, content, properties=kept_texts or None, **held)
 
     if as_json:
-        output({"id": clean_id, "old_content": old_content, "new_content": content,
-                "properties": kept_values}, True)
+        result = {"id": clean_id, "old_content": old_content, "new_content": content,
+                  "properties": kept_values}
+        # The hash the proof read, for the next write's --expect-hash. Checked
+        # by type: a MagicMock api in the tests returns a truthy mock.
+        if isinstance(written, str):
+            result["hash"] = written
+        output(result, True)
     else:
         click.echo(f"Updated block {clean_id}")
         if old_content:

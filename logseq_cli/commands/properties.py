@@ -430,9 +430,13 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         _preview_removal(result, target, key, existing.get(key), key in existing, as_json)
         return
 
-    api.remove_block_property(str(block_uuid), key)
+    written = api.remove_block_property(str(block_uuid), key)
 
     if as_json:
+        # --id only: with --page the block written is the page's property
+        # block, which the caller did not name and cannot chain on.
+        if block_id and isinstance(written, str):
+            result["hash"] = written
         output(result, True)
     else:
         click.echo(f"Removed '{key}' from {target}")
@@ -545,9 +549,12 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
             click.echo(f"  now: {value}")
         return
 
-    api.upsert_block_property(block_id, key, value)
+    written = api.upsert_block_property(block_id, key, value)
 
     result = {"block": block_id, "property": key, "value": value, "status": "updated"}
+    # The hash the proof read, for the next write's --expect-hash.
+    if isinstance(written, str):
+        result["hash"] = written
     if as_json:
         output(result, True)
     else:
