@@ -159,10 +159,11 @@ def test_a_refusal_under_json_carries_the_note_in_its_error(monkeypatch):
     ["--content", "Parent\n\tstatus:: done"],
     ["--content", "TODO Parent\n\tSCHEDULED: <2099-01-05 Mon>"],
     ["--content", "Notes\n#+BEGIN_QUOTE\n\tquoted\n#+END_QUOTE"],
+    ["--content", "Notes\n\t:LOGBOOK:\n\tCLOCK: [2099-01-05 Mon 10:00]\n\t:END:"],
     ["--content", "Parent\nChild"],
     ["--no-preserve", "--content", FLAT],
     ["--no-preserve", "--content", FLAT, "--content", "Other\n\tline"],
-], ids=["tree", "code-block", "indented-fences", "property", "planning", "org-block", "flush", "no-preserve", "no-preserve-batch"])
+], ids=["tree", "code-block", "indented-fences", "property", "planning", "org-block", "logbook", "flush", "no-preserve", "no-preserve-batch"])
 def test_no_note(monkeypatch, args):
     LogseqHttpDouble.installed(monkeypatch, {JOURNAL: ["logged"]})
     assert notes(ok(journal_block(*args))) == []

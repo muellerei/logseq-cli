@@ -55,6 +55,8 @@ def test_the_rule_says_which_lines_stay_with_the_block_above():
     # indented line a child sends "- owner:: bob" into the wrong place.
     rule = flat(TREE_CONTENT_RULE)
     assert "indented or not" in rule
+    # With a "- " of its own a code block or SCHEDULED line is a block.
+    assert 'Without "- " of its own' in rule
     assert '"- key:: value" line indented deeper' in rule
 
 

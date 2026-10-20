@@ -129,10 +129,10 @@ TREE_CONTENT_RULE = """\
   starts with "- ", even inside a code block. Then every line starts a
   block of its own: a flush line at the top, an indented line as a child of
   the nearest line above with less indentation (a tab or two spaces per
-  level). Property, SCHEDULED and DEADLINE lines, a LOGBOOK drawer and a
-  closed code block stay with the block above, indented or not, and so does
-  a "- key:: value" line indented deeper than that block. Otherwise
-  --content is one block, indented lines included.
+  level). Without "- " of its own, a property, SCHEDULED or DEADLINE line,
+  a LOGBOOK drawer and a closed code block stay with the block above,
+  indented or not, and so does a "- key:: value" line indented deeper than
+  that block. Otherwise --content is one block, indented lines included.
 """
 # The example add-journal-block's --help shows; tests write it and expect
 # the tree, so the example cannot drift from the detection.
