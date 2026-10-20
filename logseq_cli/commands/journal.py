@@ -52,7 +52,7 @@ from logseq_cli.output import (
     uuid_fields,
     would_go_before_fields,
 )
-from logseq_cli.preconditions import Expect, check_precondition, read_fresh
+from logseq_cli.preconditions import HASH_SOURCES, Expect, check_precondition, read_fresh
 from logseq_cli.safety import Owed, WriteCommand, require_precondition
 from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
@@ -472,6 +472,11 @@ Notes:
   --expect-hash H (with --upsert-heading) refuses, without writing, unless the
   block it would replace is still the one H was read from. With no match there
   is no block: the hash has no object and the block is created.
+  With --upsert-heading that replaced a block, --json carries hash, the
+  replaced block's hash as this write left it: pass it as --expect-hash to
+  the next write to the block, with no read in between. No hash under
+  --dry-run, for a block it created, or when it could not be read after the
+  write.
   Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
   --content-file reads the whole file as ONE tree: flush "- " lines become
   sibling roots, tab-indented lines their children. No shell quoting, so
@@ -500,7 +505,8 @@ Notes:
 @click.option("--under-heading", default=None, help="Insert as child of this heading (e.g. '## Log'). Creates heading if missing. Default from LOGSEQ_JOURNAL_HEADING env var, or top-level if unset.")
 @click.option("--upsert-heading", default=None, help="Find child block matching this heading under --under-heading and update it; insert as new block if not found.")
 @click.option("--expect-hash", "expect_hash", default=None,
-              help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read from (the hash field of get-block --json). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
+              help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read "
+                   f"from ({HASH_SOURCES}). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
@@ -810,7 +816,9 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
             text = tree[0]["content"] if tree else content
             # The matched block keeps its properties, as with update-block (#67).
             _, kept = kept_properties(api, found_uuid, text)
-            api.update_block(found_uuid, text, properties=kept or None, **held)
+            # The replaced block's hash, as its proof read it: the inserts
+            # below go through proofs of their own and leave it as it is.
+            written = api.update_block(found_uuid, text, properties=kept or None, **held)
             # n counts the UUIDs the inserts returned, plus 1 for the
             # update. The API proves each insert and raises on one that did
             # not land, so this is what the graph took, not the size asked
@@ -824,6 +832,7 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                     n += len(insert_block_tree_as_siblings(api, tree[1:], found_uuid))
             status = "updated"
         else:
+            written = None
             # A new block as the last child of the heading: the write
             # [graph] keep_empty_blocks_last is about. A found block is replaced
             # where it stands, which is no end position.
@@ -837,8 +846,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
 
         position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks": n, **uuid_fields([u for u in [root_uuid] if u]),
-                    **before_empty_fields(ahead_of)}, True)
+            result = {"page": page_name, "date": str(d), "position": position, "blocks": n,
+                      **uuid_fields([u for u in [root_uuid] if u]), **before_empty_fields(ahead_of)}
+            if status == "updated" and isinstance(written, str):
+                result["hash"] = written
+            output(result, True)
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position})"
                        f"{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")

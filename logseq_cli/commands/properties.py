@@ -20,7 +20,8 @@ from logseq_cli.blockprops import (
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
-from logseq_cli.preconditions import EXPECT_HASH_HELP, Expect, check_precondition, read_fresh
+from logseq_cli.preconditions import (
+    EXPECT_HASH_HELP, WRITTEN_HASH_NOTE, Expect, check_precondition, read_fresh)
 from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.render import is_properties_block
 
@@ -366,6 +367,9 @@ Note:
   a key set-property would refuse is passed through as given, except id,
   which holds the block's uuid and is refused before anything is read.
   --expect-hash goes with --id only: a page property has no block that was read.
+""" + WRITTEN_HASH_NOTE + """\
+  With --id only. No hash under --dry-run, or when it could not be read
+  after the write.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
@@ -430,9 +434,13 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         _preview_removal(result, target, key, existing.get(key), key in existing, as_json)
         return
 
-    api.remove_block_property(str(block_uuid), key)
+    written = api.remove_block_property(str(block_uuid), key)
 
     if as_json:
+        # --id only: with --page the block written is the page's property
+        # block, which the caller did not name and cannot chain on.
+        if block_id and isinstance(written, str):
+            result["hash"] = written
         output(result, True)
     else:
         click.echo(f"Removed '{key}' from {target}")
@@ -495,6 +503,8 @@ Note:
   '-', and refused if Logseq would not read them back as a property.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
+""" + WRITTEN_HASH_NOTE + """\
+  No hash under --dry-run, or when it could not be read after the write.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
@@ -545,9 +555,12 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
             click.echo(f"  now: {value}")
         return
 
-    api.upsert_block_property(block_id, key, value)
+    written = api.upsert_block_property(block_id, key, value)
 
     result = {"block": block_id, "property": key, "value": value, "status": "updated"}
+    # The hash the proof read, for the next write's --expect-hash.
+    if isinstance(written, str):
+        result["hash"] = written
     if as_json:
         output(result, True)
     else:

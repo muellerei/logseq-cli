@@ -20,6 +20,8 @@ Switches, all on the instance:
   catch, ``insertBlock`` and ``createPage`` included. ``error`` answers an
   error object. With ``from_call`` the first k-1 calls still execute.
 * ``editing``: the uuid of the block open in the editor, or ``None``.
+* ``blocks_without_content``: block answers leave ``content`` out. Not a
+  form Logseq was seen to answer; it stands for a hash that cannot be taken.
 * ``check_editing_form``: how ``checkEditing`` answers (``raw`` as measured;
   ``json``, ``empty``, ``error``, ``ok1``, ``timeout`` for the gate's
   fail-closed cases).
@@ -311,6 +313,7 @@ class LogseqHttpDouble:
         self.editing = None
         self.check_editing_form = "raw"
         self.time_tracking = False
+        self.blocks_without_content = False
         self._visible = set()       # page ids on screen
         self.batch_opens_after_checks = 0
         self._opening = None        # [uuid, checks left] of a batch's block
@@ -407,6 +410,11 @@ class LogseqHttpDouble:
         """Someone edits the block's text in Logseq."""
         _, siblings, i, _ = self._locate(uuid)
         siblings[i]["content"] = content
+
+    def content_of(self, uuid):
+        """The block's text as stored."""
+        _, siblings, i, _ = self._locate(uuid)
+        return siblings[i]["content"]
 
     def delete_block(self, uuid):
         """Someone deletes the block, with its children, in Logseq."""
@@ -585,6 +593,8 @@ class LogseqHttpDouble:
                "refs": self._refs(node)}
         if node.get("marker"):
             out["marker"] = node["marker"]
+        if self.blocks_without_content:
+            del out["content"]
         out["children"] = ([self._block_out(page, c, node, True) for c in node["children"]]
                            if children else [["uuid", c["uuid"]] for c in node["children"]])
         return out

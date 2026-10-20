@@ -15,7 +15,8 @@ from logseq_cli.group import cli
 from logseq_cli.lookup import find_blocks_by_content
 from logseq_cli.notes import print_note
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
-from logseq_cli.preconditions import Expect, check_precondition, parse_marker, read_fresh
+from logseq_cli.preconditions import (
+    HASH_SOURCES, WRITTEN_HASH_NOTE, Expect, check_precondition, parse_marker, read_fresh)
 from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.tasks import (FRONTEND_MARKERS, ORDER, STATES, marker_before_newline, marker_of,
                               markers_in, marker_clause,
@@ -524,6 +525,10 @@ Notes:
   too, and the message names --follow-refs.
   --content that matches blocks but none with a marker is refused too (without
   --follow-refs).
+""" + WRITTEN_HASH_NOTE + """\
+  No hash under --dry-run, when the marker was already set (unchanged), or
+  when it could not be read after the write. With --follow-refs it is the
+  hash of the block at the end.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
@@ -537,7 +542,8 @@ Notes:
                    "through every such block, and update the block at the end instead.")
 @click.option("--expect-hash", "expect_hash", default=None,
               help="Refuse, without writing, unless the block is still the one this hash was read "
-                   "from (the hash field of get-block --json). With --follow-refs the block at "
+                   f"from ({HASH_SOURCES}). "
+                   "With --follow-refs the block at "
                    "the end of the refs counts. Checked before --dry-run and before a no-change answer.")
 @click.option("--expect-marker", "expect_marker", default=None, callback=_marker_option,
               metavar="MARKER",
@@ -654,11 +660,15 @@ def set_todo_status(ctx, block_id, content, page, status, follow_refs, expect_ha
         return
 
     # Only the marker changes; lines the block already had are not ours to refuse.
-    api.update_block(block_id, new_content, replacing=old_content)
+    written = api.update_block(block_id, new_content, replacing=old_content)
 
     if as_json:
-        output({"uuid": block_id, "old": old_content, "new": new_content, "status": status,
-                **chain}, True)
+        result = {"uuid": block_id, "old": old_content, "new": new_content, "status": status,
+                  **chain}
+        # The hash the proof read, of the block written (the end of a chain).
+        if isinstance(written, str):
+            result["hash"] = written
+        output(result, True)
     else:
         click.echo(f"Updated: {old_content[:60]}{'...' if len(old_content) > 60 else ''}")
         click.echo(f"      → {new_content[:60]}{'...' if len(new_content) > 60 else ''}")

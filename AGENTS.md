@@ -544,8 +544,19 @@ itself between its own read and its write.
 
 What a precondition does not catch: a change between the check and the write
 (reading and writing are two requests), and a move (the hash sees content, not
-position). A write's output carries no new hash yet, so read the block again
-before changing it a second time.
+position).
+
+To change the same block twice, take the `hash` from the first write's
+`--json` output (`update-block`, `set-todo-status`, `set-block-property`,
+`remove-property --id`, `add-journal-block --upsert-heading` when it replaced
+a block) and pass it as `--expect-hash` to the second; no read in between. It
+says what your write left, not that you know the content: read before you
+decide on it. It is absent under `--dry-run`, for `set-todo-status`
+`unchanged` and when it could not be read; take it with `jq -r '.hash // empty'`
+and read with `get-block` when that is empty (not `jq -er`: it exits 4 on a
+missing field, and `set -e` stops the script there). After
+`set-block-property` and `remove-property --id`, an edit to the block's text
+between their read and their write is part of the hash they return.
 
 `write_not_verified` can be a false alarm when someone else wrote the block
 between the write and the read-back; read the block before retrying.
@@ -568,7 +579,8 @@ refused block's reason in `failed_reasons` (`{id: reason}`) beside `failed`.
 ### 9. Changing a Block You Read Earlier
 
 Under `--json`, the blocks of `get-block`, `get-page`, `get-journal-range`,
-`find-block` and `get-todos` carry a `hash`; `get-block` also carries a
+`find-block` and `get-todos` carry a `hash`, and so do the outputs of the
+writes that can chain on it (section 8); `get-block` also carries a
 `tree_hash` (not with `--no-children`). The text output shows neither.
 
 When you read a block, decide, and change it later, pass what you read. The
