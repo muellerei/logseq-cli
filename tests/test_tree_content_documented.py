@@ -50,12 +50,22 @@ def test_the_help_states_the_rule(command):
     assert flat(TREE_CONTENT_RULE) in help_of(command)
 
 
+def test_the_rule_says_which_lines_stay_with_the_block_above():
+    # The parser attaches them indented or not: a rule that calls every
+    # indented line a child sends "- owner:: bob" into the wrong place.
+    rule = flat(TREE_CONTENT_RULE)
+    assert "indented or not" in rule
+    assert '"- key:: value" line indented deeper' in rule
+
+
 def test_add_journal_block_shows_the_example_and_its_own_way_out():
     text = help_of("add-journal-block")
     shown = TREE_CONTENT_EXAMPLE.replace("\n", "\\n").replace("\t", "\\t")
     assert f"--content $'{shown}'" in text
     assert "use --content-file" in text
     assert "use --tree" not in text
+    # --no-preserve reads no value as a tree, the rule's trigger included.
+    assert "With --no-preserve no value is a tree" in text
 
 
 def test_insert_block_names_tree_not_content_file():

@@ -277,9 +277,10 @@ logseq-cli add-journal-content \
 
 Each line is a block, with four exceptions that stay with the block they belong
 to, as in Logseq's own files. A `key:: value` line without a bullet goes on the
-block above. So does a `SCHEDULED: <…>` or `DEADLINE: <…>` line, indented or
-not: `TODO x` with `SCHEDULED: <2026-09-25 Fri>` under it is one block, a task
-with a date. So does a `:LOGBOOK:` drawer, every line from `:LOGBOOK:` to
+block above, and so does a `- key:: value` line indented deeper than that
+block. So does a `SCHEDULED: <…>` or `DEADLINE: <…>` line, indented or not:
+`TODO x` with `SCHEDULED: <2026-09-25 Fri>` under it is one block, a task with
+a date. So does a `:LOGBOOK:` drawer, every line from `:LOGBOOK:` to
 `:END:`. A `:LOGBOOK:` that no `:END:` closes before the next bullet line is no
 drawer but text, as a code fence nothing closes is, and the lines after it are
 read as usual. So does a

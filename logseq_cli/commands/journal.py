@@ -486,7 +486,8 @@ Notes:
   write.
 """ + TREE_CONTENT_RULE + """\
   Indented lines without "- " in a value that is not a tree get a Note on
-  stderr; for a tree from them, use --content-file.
+  stderr; for a tree from them, use --content-file. With --no-preserve no
+  value is a tree.
   --content-file reads the whole file as ONE tree (with --preserve-formatting,
   the default): flush "- " lines become sibling roots, tab-indented lines
   their children. No shell quoting, so apostrophes/quotes/umlauts are safe.

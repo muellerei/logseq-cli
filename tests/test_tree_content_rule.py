@@ -70,6 +70,16 @@ def test_every_flush_line_of_a_tree_is_a_block(monkeypatch):
     assert double.tree(JOURNAL) == [("logged", []), ("A", []), ("B", [("c", [])])]
 
 
+def test_a_property_line_stays_with_the_block_above_indented_or_not(monkeypatch):
+    # A "- key:: value" deeper than its block is that block's property, the
+    # shape agents write for one; so is an indented SCHEDULED line.
+    double = LogseqHttpDouble.installed(monkeypatch, {JOURNAL: ["logged"]})
+    ok(journal_block("--content", "TODO Parent\n\t- owner:: bob\n\tSCHEDULED: <2099-01-05 Mon>\n\t- Child"))
+    assert double.tree(JOURNAL) == [("logged", []), ("TODO Parent", [("Child", [])])]
+    parent = double.uuid_of("TODO Parent\nowner:: bob\nSCHEDULED: <2099-01-05 Mon>")
+    assert double.content_of(parent).splitlines()[1:] == ["owner:: bob", "SCHEDULED: <2099-01-05 Mon>"]
+
+
 @pytest.mark.parametrize("target", ["--page", "--after"])
 def test_insert_block_reads_the_tree_for_every_target(monkeypatch, target):
     double = LogseqHttpDouble.installed(monkeypatch, {"Probe Page": ["alpha block"]})
@@ -146,10 +156,13 @@ def test_a_refusal_under_json_carries_the_note_in_its_error(monkeypatch):
     ["--content", TREE_CONTENT_EXAMPLE],
     ["--content", "Notes\n```\n\tcode\n```\nDone."],
     ["--content", "Notes\n\t```\n\tcode\n\t```"],
+    ["--content", "Parent\n\tstatus:: done"],
+    ["--content", "TODO Parent\n\tSCHEDULED: <2099-01-05 Mon>"],
+    ["--content", "Notes\n#+BEGIN_QUOTE\n\tquoted\n#+END_QUOTE"],
     ["--content", "Parent\nChild"],
     ["--no-preserve", "--content", FLAT],
     ["--no-preserve", "--content", FLAT, "--content", "Other\n\tline"],
-], ids=["tree", "code-block", "indented-fences", "flush", "no-preserve", "no-preserve-batch"])
+], ids=["tree", "code-block", "indented-fences", "property", "planning", "org-block", "flush", "no-preserve", "no-preserve-batch"])
 def test_no_note(monkeypatch, args):
     LogseqHttpDouble.installed(monkeypatch, {JOURNAL: ["logged"]})
     assert notes(ok(journal_block(*args))) == []

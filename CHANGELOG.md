@@ -61,7 +61,9 @@ file carries most of the reasoning behind the tool.
   children (`--content-file`, `--tree`). It comes under `--dry-run` and
   `--upsert-heading` too, where nothing said so before; the written blocks,
   stdout and the exit code are unchanged. No note for indentation inside a
-  closed code block, or under `--no-preserve`, where no value is a tree.
+  closed code block or org block, for property, `SCHEDULED`, `DEADLINE` and
+  `:LOGBOOK:` lines, which Logseq reads as part of the block, or under
+  `--no-preserve`, where no value is a tree.
 
 - `insert-block --tree --page P` writes to the end of P without
   `--top-level`, as `--content --page P` does (#144); before, it was refused
