@@ -618,7 +618,8 @@ class LogseqAPI:
            if one of them is the open block (setBlocksId writes into it);
         5. the write;
         6. prove it, through ``_prove_<proof>``, which answers the result the
-           method returns; ``proof_args`` are what it compares with beyond
+           method returns (the proofs that read the target block answer its
+           hash instead, ``_written_hash``); ``proof_args`` are what it compares with beyond
            the target (a batch: what it sent, and its place as read before).
            From the write until the proof holds or refuses, the write is
            ``write_unproven``, unless an earlier write of the call still is;
