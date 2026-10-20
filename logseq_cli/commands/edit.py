@@ -846,12 +846,10 @@ def add_block_ref(ctx, source_id, journal_date, page, under_heading, dry_run, as
     else:
         d = parse_date_keyword(journal_date)
         name = journal_page_name(api, d)
-        # Ensure journal page exists
-        try:
-            existing = api.get_page(name)
-        except Exception:
-            existing = None
-        target = PageToWrite(name, name, existing)
+        # getPage answers None for a missing page. An error is a read that
+        # failed, not a missing journal: caught here, it became one, previewed
+        # and created as such.
+        target = PageToWrite(name, name, api.get_page(name))
     page = target.name
 
     # Creating the page is itself a write, so under --dry-run it is only
