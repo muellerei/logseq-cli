@@ -299,12 +299,15 @@ def test_create_page_preview_reports_an_ambiguous_alias():
 
 
 def test_insert_block_with_an_anchor_does_not_resolve_page():
-    # --page is not the target next to --after; it names nothing written to.
-    result, _, graph = _run(["insert-block", "--after", TODO, "--page", ALIAS,
-                             "--tree", "new", "--json"])
-    assert result.exit_code == 0, result.output
-    assert "alias_of" not in json.loads(result.stdout)
-    assert graph.tree(TARGET)[-1] == ("new", [])
+    # --page next to --after is a second target: refused before any request,
+    # so the page is not resolved into an alias_of. The tree mode once took
+    # the anchor and dropped --page, with exit 0.
+    result, api, _ = _run(["insert-block", "--after", TODO, "--page", ALIAS,
+                           "--tree", "new", "--json"])
+    assert result.exit_code != 0
+    assert "Specify only one of" in result.stderr
+    assert "alias_of" not in result.stderr
+    assert api.mock_calls == []
 
 
 def test_create_page_on_an_alias_names_its_page():
