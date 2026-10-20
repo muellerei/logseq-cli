@@ -22,8 +22,8 @@ import pytest
 from logseq_cli.blockprops import normalize_property_key
 from logseq_cli.cli import cli
 
-# Commands whose --key is a key they write. remove-property takes any key, so
-# that one stored before the rule existed can still be removed, and
+# Commands whose --key is a key they write. remove-property takes any key but
+# id, so that one stored before the rule existed can still be removed, and
 # query-pages-by-property reads.
 KEY_WRITERS = {"set-property", "set-block-property"}
 

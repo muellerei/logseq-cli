@@ -16,9 +16,10 @@ from unittest.mock import patch
 
 import pytest
 
-from logseq_cli.blockprops import normalize_property_key, parse_property_pairs
+from logseq_cli.blockprops import REF_TARGET_ID_NOTE, normalize_property_key, parse_property_pairs
 from logseq_cli.blocktext import PROPERTY_LINE_RE
 from logseq_cli.cli import cli
+from logseq_cli.safety import WriteCommand
 from tests.conftest import PageGraph, page_graph_api, split_runner
 
 # Keys the parser drops entirely: the line is no property at all on re-read.
@@ -76,8 +77,11 @@ class TestNormalizePropertyKey:
 
     @pytest.mark.parametrize("key", BECOMES_ID)
     def test_key_logseq_reads_as_the_block_id_is_refused(self, key):
-        with pytest.raises(ValueError, match="block's id"):
+        with pytest.raises(ValueError, match="block's uuid") as refused:
             normalize_property_key(key)
+        # The reason holds in every situation; the way depends on the caller.
+        assert "((uuid))" not in str(refused.value)
+        assert "--keep-ids" not in str(refused.value)
 
     @pytest.mark.parametrize("key", UNDECODABLE)
     def test_key_with_undecodable_bytes_is_refused(self, key):
@@ -204,6 +208,39 @@ class TestEveryWritePath:
         assert "Set 'mixed:: x'" in r.stdout
 
 
+class TestTheIdKeyRefusalNamesTheWay:
+    """Each caller of the key check knows its situation, the check does not.
+    The refusal said "would replace the uuid", which is false when the value
+    is the block's own uuid, and named no way at all."""
+
+    def test_set_block_property_names_the_ref(self):
+        api = _api()
+        r = _run(_set_block_property("id", "blk"), api)
+        assert r.exit_code == 1, r.output
+        assert "((uuid))" in r.stderr and "replace" not in r.stderr
+        # Refused before the block is read, so the hint names the one block
+        # that gets no id:: (setBlocksId skips a page's property block).
+        assert "property block" in r.stderr
+        assert api.method_calls == []
+
+    @pytest.mark.parametrize("path", [_add_note_content, _insert_block],
+                             ids=lambda p: p.__name__.strip("_"))
+    def test_a_new_block_names_keep_ids(self, path):
+        api = _api()
+        r = _run(path("id"), api)
+        assert r.exit_code == 1, r.output
+        assert "--keep-ids" in r.stderr and "replace" not in r.stderr
+        assert api.method_calls == []
+
+    def test_set_property_names_no_way(self):
+        # A page's property block gets no id:: line: setBlocksId skips it.
+        api = _api()
+        r = _run(_set_property("id"), api)
+        assert r.exit_code == 1, r.output
+        assert "block's uuid" in r.stderr
+        assert "((uuid))" not in r.stderr and "--keep-ids" not in r.stderr
+
+
 class TestRemoveProperty:
     """remove-property has to address the key set-property stored. Without the
     same rename, "set --key Status" stored "status" and "remove --key Status"
@@ -232,6 +269,32 @@ class TestRemoveProperty:
         assert r.exit_code == 0, r.stderr
         assert [c.args[1] for c in api.remove_block_property.call_args_list] == [key]
         assert "stored as" not in r.stderr
+
+    @pytest.mark.parametrize("dry_run", [[], ["--dry-run"]], ids=["write", "dry-run"])
+    @pytest.mark.parametrize("target", [["--id", "blk"], ["--name", "Page A"]],
+                             ids=["block", "page"])
+    @pytest.mark.parametrize("key", ["id", "ID", "Id", " id"])
+    def test_the_id_key_is_refused_before_any_read(self, key, target, dry_run):
+        # Measured (Logseq 0.10.15): removeBlockProperty(uuid, "id") empties the
+        # database property but leaves the id:: line in column 0, and the next
+        # property write drops it from the file. Both calls exit 0.
+        api = _api()
+        r = _run(["remove-property", *target, "--key", key, *dry_run], api)
+        assert r.exit_code == 1, r.output
+        assert "id:: line" in r.stderr and "next property write" in r.stderr
+        assert api.method_calls == [], "a refused key must cost no API call"
+
+    def test_the_id_key_refusal_is_json_on_stderr(self):
+        r = _run(["remove-property", "--id", "blk", "--key", "id", "--json"], _api())
+        assert r.exit_code == 1
+        assert r.stdout == ""
+        error = json.loads(r.stderr)
+        assert "id:: line" in error["error"]
+        assert error["property"] == "id"
+
+    def test_help_names_the_id_key_as_refused(self):
+        r = split_runner().invoke(cli, ["remove-property", "--help"])
+        assert "except id" in r.stdout
 
 
 class TestEmptyValue:
@@ -280,3 +343,35 @@ class TestAKeyKeptAsGivenIsProvenGone:
             error = json.loads(r.stderr)
             assert (error["reason"], error["method"]) == \
                 ("write_not_verified", "removeBlockProperty")
+
+
+# Write commands whose write carries no text a ((uuid)) could be in. Every other
+# WriteCommand can write a ref, and its --help says what happens to the target.
+# remove-property is one of them: --name writes back what is left of the
+# property block, and a ((uuid)) in a remaining value goes through the same
+# step that gives the target its id:: line.
+NO_REF_TEXT = {
+    "delete-block": "removes a block, writes no text",
+    "delete-page": "removes a page, writes no text",
+    "move-block": "moves a block as it is",
+    "remove-block": "removes a block, writes no text",
+    "rename-page": "writes a page name, not block text",
+}
+
+
+class TestEveryRefWriterSaysWhatHappensToTheTarget:
+    """A write holding a ((uuid)) gives the block it points at an id:: line
+    first (#95). No --help said so, and an agent that wanted to pin a block's
+    id before referencing it took two detours."""
+
+    def test_the_help_of_each_ref_writer_carries_the_note(self):
+        writers = {name for name, cmd in cli.commands.items() if isinstance(cmd, WriteCommand)}
+        assert set(NO_REF_TEXT) <= writers, "an excluded command is no write command"
+        note = " ".join(REF_TARGET_ID_NOTE.split())
+        missing = [name for name in sorted(writers - set(NO_REF_TEXT))
+                   if note not in " ".join(split_runner().invoke(cli, [name, "--help"]).stdout.split())]
+        assert not missing, f"--help without REF_TARGET_ID_NOTE: {missing}"
+
+    def test_the_note_says_nothing_unmeasured(self):
+        # Whether a re-index keeps the id:: line was not measured (#95).
+        assert "re-index" not in REF_TARGET_ID_NOTE.lower()

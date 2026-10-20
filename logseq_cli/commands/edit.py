@@ -3,7 +3,12 @@ import sys
 
 import click
 
-from logseq_cli.blockprops import apply_block_properties, check_property_pairs, kept_properties
+from logseq_cli.blockprops import (
+    REF_TARGET_ID_NOTE,
+    apply_block_properties,
+    check_property_pairs,
+    kept_properties,
+)
 from logseq_cli.blocktext import (
     property_line_mask,
     refuse_id_lines,
@@ -102,7 +107,7 @@ Note:
   it this block's uuid and every ((ref)) to the block would dangle.
   --expect-hash H (the hash field of get-block --json) refuses, without
   writing, unless the block is still the one H was read from.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
 @click.option("--page", "--name", "page", default=None, help="With --where-content: restrict the search to this page")
@@ -289,7 +294,7 @@ Note:
   block's uuid.
   --replace is inserted as written. With --regex it is a template: \\1 or
   \\g<name> for a group, a backslash doubled to write one.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", required=True, help="Page name to search in")
 @click.option("--find", "find_text", required=True, help="Text to find")
 @click.option("--replace", "replace_text", required=True, help="Replacement text, literal unless --regex")
@@ -446,7 +451,7 @@ Notes:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", default=None, help="Page name (append to end of page)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
 @click.option("--before", default=None, help="UUID of block to insert before (as sibling)")
@@ -780,7 +785,7 @@ Note:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--source-id", required=True, help="UUID of the block to reference")
 @click.option("--journal-date", default=None, help="Target journal date (YYYY-MM-DD), defaults to today")
 @click.option("--page", "--name", default=None, help="Target page name (alternative to --journal-date)")
@@ -938,7 +943,7 @@ Note:
   nothing. A source deleted elsewhere meanwhile is a move done (source_gone).
   A failure after the copy's root landed names it (copied_id, "The copy
   is <uuid>."): the copy stays, and running the command again copies again.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Source block UUID")
 @click.option("--to-page", required=True, help="Target page name")
 @click.option("--remove", is_flag=True, help="Remove source block after copying (move)")

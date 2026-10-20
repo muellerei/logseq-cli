@@ -6,6 +6,7 @@ import requests
 
 from logseq_cli.api import rename_refused
 from logseq_cli.blockprops import (
+    REF_TARGET_ID_NOTE,
     apply_block_properties,
     check_property_pairs,
     parse_property_pairs,
@@ -535,7 +536,7 @@ Note:
   to keep the paragraph in the quote.
   An id:: line in --content is dropped with a Note: Logseq would make it the
   block's uuid. insert-block --keep-ids writes a block under a given uuid.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Initial content for the page")
 @click.option("--dry-run", is_flag=True, help="Report whether the page exists and what would be created, without writing")
@@ -652,7 +653,7 @@ Note:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--content", default=None, help="Content to add; this or --content-file is required")
 @click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")

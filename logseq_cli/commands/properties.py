@@ -11,9 +11,12 @@ from logseq_cli.blocktext import (
 from logseq_cli.group import cli
 from logseq_cli.datalog import edn_keyword, edn_string
 from logseq_cli.blockprops import (
+    ID_HINT_EXISTING_BLOCK,
+    REF_TARGET_ID_NOTE,
     coerce_property_value,
     normalize_property_key,
     note_renamed_property_key,
+    refuse_removing_id_key,
     stored_properties,
 )
 from logseq_cli.output import fail, follow_page, handle_connection_error, output
@@ -271,7 +274,7 @@ Note:
   uuid.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", required=True, help="Page name")
 @click.option("--key", required=True, help="Property key (e.g. 'type', 'team', 'role')")
 @click.option("--value", required=True, help="Property value")
@@ -360,9 +363,10 @@ Note:
   goes with its last one).
   --id removes the property from that one block, wherever it sits.
   The key is addressed as set-property stores it ("Status" as "status");
-  a key set-property would refuse is passed through as given.
+  a key set-property would refuse is passed through as given, except id,
+  which holds the block's uuid and is refused before anything is read.
   --expect-hash goes with --id only: a page property has no block that was read.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
 @click.option("--key", required=True, help="Property key to remove")
@@ -378,12 +382,17 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         fail("Specify exactly one of: --name, --id.", as_json=as_json)
     if page and expect_hash is not None:
         raise click.UsageError("--expect-hash goes with --id: a page property has no block that was read.")
+    try:
+        refuse_removing_id_key(key)
+    except ValueError as e:
+        fail(str(e), as_json=as_json, property=key)
 
     # Address the key under the name set-property stores it as, or "set
     # --key Status" followed by "remove --key Status" removes nothing and still
     # reports success. A key set-property would refuse is passed through as
     # given instead: versions before the check stored such keys verbatim, and
-    # until the next re-index the database may still hold one.
+    # until the next re-index the database may still hold one. "id" is the
+    # exception, refused above by refuse_removing_id_key.
     try:
         stored, verbatim = normalize_property_key(key), False
     except ValueError:
@@ -486,7 +495,7 @@ Note:
   '-', and refused if Logseq would not read them back as a property.
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
 @click.option("--value", required=True, help="Property value")
@@ -500,7 +509,7 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
     api = ctx.obj["api"]
 
     try:
-        stored = normalize_property_key(key)
+        stored = normalize_property_key(key, id_hint=ID_HINT_EXISTING_BLOCK)
     except ValueError as e:
         fail(str(e), as_json=as_json, block=block_id, property=key)
     note_renamed_property_key(key, stored)

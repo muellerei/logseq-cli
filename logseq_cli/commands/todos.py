@@ -3,6 +3,7 @@ import re
 
 import click
 
+from logseq_cli.blockprops import REF_TARGET_ID_NOTE
 from logseq_cli.blocktext import block_hash, pointer_target
 from logseq_cli.dates import (
     journal_day_to_date,
@@ -523,7 +524,7 @@ Notes:
   too, and the message names --follow-refs.
   --content that matches blocks but none with a marker is refused too (without
   --follow-refs).
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", default=None, help="Block UUID (find by UUID)")
 @click.option("--content", default=None, help="Content substring to find the block (used with --page)")
 @click.option("--page", "--name", default=None, help="Page to search in (used with --content)")

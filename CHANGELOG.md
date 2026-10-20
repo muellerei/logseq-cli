@@ -10,6 +10,26 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Changed
+
+- The refusal of `id` and `custom-id` as a property key gives a reason that
+  holds for every call and, where there is one, the way that works (#131). It
+  said a write "would replace the uuid that ((refs)) to the block point at",
+  which is false when the value is the block's own uuid, the case an agent
+  hit when it tried to pin a block's `id::` before referencing it.
+  `set-block-property` now says that any write holding a `((uuid))` of the
+  block stores its `id::` first; `insert-block --property` and
+  `add-note-content --property` point to an `id::` line in the content with
+  `--keep-ids`; `set-property` gives the reason only, since a page's property
+  block gets no `id::` line.
+- The `--help` of every command whose write can carry a `((uuid))` says, under
+  `Block refs:`, that the block it points at gets an `id::` line first if it
+  has none, and that a page's property block does not (#131). That had been
+  the case since 0.17.0 (#95), but only `AGENTS.md` and the command reference
+  said so. The text has one source, and a test takes the write commands from
+  the registry, so a new one fails it until it carries the note or names why
+  it writes no ref.
+
 ### Fixed
 
 - `get-todos --help` names `hash`, which every task under `--json` has carried
@@ -18,6 +38,16 @@ file carries most of the reasoning behind the tool.
   list of page names as strings: a caller that read it as a list of objects
   failed on the first task carried forward. A test takes the keys from the
   real output and fails when either text leaves one out.
+- `remove-property --key id` is refused before anything is read (#131). It
+  reported the property as removed and exited 0, but the block's `id::` line
+  stayed in column 0 of the file, outside the block, and the next property
+  write on that block dropped it from the file, again with exit 0. `((refs))`
+  to the block then rested on the database alone. Measured twice on a probe
+  page with Logseq 0.10.15: the key check that keeps `set-property` from
+  writing `id` let `remove-property` pass any refused key on verbatim, so that
+  keys stored before the check stay removable. `custom-id` and the other
+  refused keys still are; only `id`, in any letter case and with surrounding
+  whitespace, is refused, with `--dry-run` too.
 
 ## [0.17.0] - 2026-10-13
 

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
 
-from logseq_cli.blockprops import kept_properties
+from logseq_cli.blockprops import REF_TARGET_ID_NOTE, kept_properties
 from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, with_hashes_in, without_block_ids
 from logseq_cli.cliinput import content_or_file, read_content_file, require_content
 from logseq_cli.config import keep_empty_blocks_last, load_config, resolve_heading
@@ -370,7 +370,7 @@ def get_journal_range(ctx, from_date, to_date, resolve_refs, tail, limit, headin
 DEPRECATED. Use add-journal-block instead — it auto-detects hierarchy and supports
 --under-heading / --upsert-heading.
 An id:: line in --content is dropped with a Note, as in add-journal-block.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--content", required=True, help="Content to add")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
 @click.option("--as-block/--multi-block", default=True, help="Add as single block or split into multiple")
@@ -493,7 +493,7 @@ Notes:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--content", "contents", multiple=True, help="Block content (repeatable for batch: --content 'text1' --content 'text2')")
 @click.option("--content-file", "content_file", default=None, help="Read block content from a file and insert it as a tree (multiple flush '- ' roots allowed). Mutually exclusive with --content.")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
@@ -964,7 +964,7 @@ Note:
   [graph] keep_empty_blocks_last (or LOGSEQ_CLI_KEEP_EMPTY_BLOCKS_LAST): a write that ends
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
-""")
+""" + REF_TARGET_ID_NOTE)
 @click.option("--content", default=None, help="Hierarchical content to add; this or --content-file is required")
 @click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--date", default=None, help="Date (YYYY-MM-DD), defaults to today")
