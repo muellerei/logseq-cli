@@ -109,7 +109,7 @@ The obligation belongs to the call, not to the command: a form of a command
 that changes no block that was read is not asked for one. Today
 `set-todo-status` takes `--expect-hash` and `--expect-marker`, `update-block` `--expect-hash`, `remove-block` (and its alias `delete-block`) `--expect-tree-hash`;
 `set-block-property`, `remove-property --id`, `move-block` and
-`copy-block --remove` take `--expect-hash`. `add-journal-block --upsert-heading` owes `--expect-hash` once it has picked the block it replaces, and only when there is one: with no match it creates the block and owes nothing. `remove-property --page` and
+`copy-block --remove` take `--expect-hash`. `add-journal-block --upsert-heading` owes `--expect-hash` once it has picked the block it replaces, and only when there is one: with no match it creates the block and owes nothing. When its content has children and would replace the children of the block it picked, it owes `--expect-tree-hash` whatever the switch says, since that write deletes blocks and `--expect-hash` sees the block alone; a run that would leave the block as it is (`status: unchanged`) writes nothing and owes nothing. `remove-property --page` and
 `copy-block` without `--remove` change no block that was read: they owe
 nothing, and the option is a usage error there.
 
@@ -122,7 +122,9 @@ switch on, every write needs a hash: one read before each single write, unless
 the write before it changed the same block. The `--json` output of
 `update-block`, `set-todo-status`, `set-block-property`, `remove-property --id`
 and `add-journal-block --upsert-heading` carries the block's new `hash`, and
-the next write to that block can pass it on without reading. It is off by
+the next write to that block can pass it on without reading. The upsert also
+carries `tree_hash`, read after its write, for the next upsert's
+`--expect-tree-hash`. It is off by
 default, and it stays a choice.
 
 Turn it on when an agent writes and you also edit the graph yourself while it

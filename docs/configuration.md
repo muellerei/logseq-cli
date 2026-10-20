@@ -351,7 +351,7 @@ require_preconditions = true
 | | |
 |---|---|
 | Values | `true` or `false` (a TOML boolean); default `false` |
-| Effect | a command that changes a block it read refuses, before its first request, unless the call says what it read: `--expect-hash` (also `--expect-marker` for `set-todo-status`), `--expect-tree-hash` for `remove-block`. Refused with `reason: precondition_required`, and the message names where the switch was set. The rule is the call's, not the command's: a command that changes nothing in a given form stays free in it. Only the commands that take such an option ask for it. `add-journal-block --upsert-heading` asks only when a block matches; creating one stays free |
+| Effect | a command that changes a block it read refuses, before its first request, unless the call says what it read: `--expect-hash` (also `--expect-marker` for `set-todo-status`), `--expect-tree-hash` for `remove-block`. Refused with `reason: precondition_required`, and the message names where the switch was set. The rule is the call's, not the command's: a command that changes nothing in a given form stays free in it. Only the commands that take such an option ask for it. `add-journal-block --upsert-heading` asks only when a block matches; creating one stays free. An upsert whose content would replace the matched block's children owes `--expect-tree-hash` even with the switch off |
 | Also set by | `LOGSEQ_CLI_REQUIRE_PRECONDITIONS` and `--require-preconditions`; all three only tighten, like `read_only` |
 | Order | `read_only` comes first: with both on, a call without a precondition is refused as `read_only` |
 | Shown by | `logseq-cli doctor`, every run, in the same forms as `read_only` |

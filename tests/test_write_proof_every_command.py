@@ -161,8 +161,10 @@ DRY_RUN_READS = {
     "add-journal-block-keep-ids": 2,
     # Four: the upsert's preview chooses the block it would replace the way
     # the run does (the page's blocks, then the heading's children), whether
-    # or not [graph] keep_empty_blocks_last is on.
-    "add-journal-block-upsert": 4,
+    # or not [graph] keep_empty_blocks_last is on. A fifth reads the matched
+    # block with its children, past the cache: the preview reports its tree
+    # hash and whether the run would change or remove anything.
+    "add-journal-block-upsert": 5,
     "add-journal-block-new-journal": 2,
     "add-journal-content": 2,
     # One more: the heading lookup for would_create_heading, as above.

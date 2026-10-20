@@ -459,9 +459,17 @@ Notes:
   --expect-hash H (with --upsert-heading) refuses, without writing, unless the
   block it would replace is still the one H was read from. With no match there
   is no block: the hash has no object and the block is created.
+  Content with children replaces the matched block's children, and owes
+  --expect-tree-hash T (the tree_hash of get-block --json, or of the last
+  upsert's --json) whatever require_preconditions says: that write deletes
+  blocks. Refused while a ((ref)) from elsewhere points into them. Content
+  without children keeps them. A run that would leave the block as it is
+  writes nothing: status unchanged. Further --content-file roots are added
+  after the block on every run.
   With --upsert-heading that replaced a block, --json carries hash, the
-  replaced block's hash as this write left it: pass it as --expect-hash to
-  the next write to the block, with no read in between. No hash under
+  replaced block's hash as this write left it, and tree_hash: pass them as
+  --expect-hash / --expect-tree-hash to the next write to the block, with no
+  read in between. No hash under
   --dry-run, for a block it created, or when it could not be read after the
   write.
   Auto-detects tab-indented hierarchy in --content; no need to switch to add-journal-content.
@@ -494,6 +502,10 @@ Notes:
 @click.option("--expect-hash", "expect_hash", default=None,
               help="With --upsert-heading: refuse, without writing, unless the block it replaces is still the one this hash was read "
                    f"from ({HASH_SOURCES}). Checked on a read past the cache, before --dry-run and before the journal page is created. With no matching block there is nothing to check and the block is created")
+@click.option("--expect-tree-hash", "expect_tree_hash", default=None,
+              help="With --upsert-heading: refuse, without writing, unless the block it replaces and everything under it are still "
+                   "what this hash was read from (the tree_hash of this command's --dry-run --json or --json output). Required when "
+                   "content with children would replace the block's children; checked like --expect-hash")
 @click.option("--top-level", is_flag=True, help="Add as top-level block (ignore --under-heading and env var)")
 @click.option("--preserve-formatting/--no-preserve", default=True, help="Preserve content formatting")
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
@@ -501,7 +513,7 @@ Notes:
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
 @handle_connection_error
-def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, expect_hash, top_level, preserve_formatting, dry_run, keep_ids, as_json):
+def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_heading, expect_hash, expect_tree_hash, top_level, preserve_formatting, dry_run, keep_ids, as_json):
     """Add one or more blocks to a journal page.
 
     Pass --content multiple times for batch inserts under the same heading.
@@ -548,6 +560,9 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     if expect_hash is not None and not upsert_heading:
         raise click.UsageError("--expect-hash goes with --upsert-heading: it is the hash of "
                                "the block that option replaces.")
+    if expect_tree_hash is not None and not upsert_heading:
+        raise click.UsageError("--expect-tree-hash goes with --upsert-heading: it is the tree "
+                               "hash of the block that option replaces.")
     # Several values took the batch path, which never looked at the option:
     # the upsert was skipped and the old block stayed, with exit 0.
     if upsert_heading and len(contents) > 1:
@@ -658,7 +673,8 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     # Which block --upsert-heading replaces is chosen in the plan, before the
     # journal page and the heading are created, from reads that skip the
     # cache; its precondition is checked there too, before --dry-run.
-    upsert = Upsert(upsert_heading, Expect(hash=expect_hash)) if upsert_heading else None
+    upsert = (Upsert(upsert_heading, Expect(hash=expect_hash, tree_hash=expect_tree_hash))
+              if upsert_heading else None)
     # Creating the journal page is a write, so it waits for the plan to be
     # carried out: a preview that brings a page into existence is not one.
     plan = plan_section_write(api, page_name, under_heading, values,
@@ -701,14 +717,22 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
         root_uuid = uuids[0] if uuids else None
         if as_json:
             result = {"page": page_name, "date": str(d), "position": position, "blocks": n,
-                      **uuid_fields([u for u in [root_uuid] if u]), **before_empty_fields(ahead_of)}
+                      **uuid_fields([u for u in [root_uuid or plan.upsert.target] if u]),
+                      **before_empty_fields(ahead_of), "status": written.status,
+                      "children_removed": written.children_removed}
             if written.hash:
                 result["hash"] = written.hash
+            if written.tree_hash:
+                result["tree_hash"] = written.tree_hash
             output(result, True)
+        elif written.status == "unchanged":
+            click.echo(f"Unchanged, nothing written: {page_name} ({position})")
+            if root_uuid or plan.upsert.target:
+                click.echo(f"  uuid: {root_uuid or plan.upsert.target}")
         else:
             click.echo(f"Added {n} block(s) to journal: {page_name} ({position}){suffix}")
-            if root_uuid:
-                click.echo(f"  uuid: {root_uuid}")
+            if root_uuid or plan.upsert.target:
+                click.echo(f"  uuid: {root_uuid or plan.upsert.target}")
         return
 
     if plan.path == "flat":
