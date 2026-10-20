@@ -52,6 +52,12 @@ class AmbiguousTarget(WriteRefused):
     reason = "ambiguous"
 
 
+class BlockRefsInto(WriteRefused):
+    """((block-refs)) from elsewhere point into blocks the write would remove
+    (add-journal-block --upsert-heading replacing children). Field: refs."""
+    reason = "block_refs"
+
+
 class BlockNotFound(WriteRefused):
     """The block the caller meant is gone, found out before the write it
     refuses (a call may have written other blocks before, as copy-block does).

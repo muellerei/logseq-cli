@@ -64,7 +64,10 @@ RECIPES = {
             {"content": "### Carol\nTODO ship the parser", "marker": "TODO", "uuid": TASK}]}]},
         ["--date", "2099-01-05", "--under-heading", "## Log", "--upsert-heading", "### Carol",
          "--content", "### Carol\nTODO ship the parser, fixed"],
-        None,
+        # The block already holds this text: the run would be unchanged, and a
+        # wrong precondition is still refused before that is decided.
+        ["--date", "2099-01-05", "--under-heading", "## Log", "--upsert-heading", "### Carol",
+         "--content", "### Carol\nTODO ship the parser"],
         True),
     # The alias is a second name for the same command and must carry the same gate.
     "remove-block": (

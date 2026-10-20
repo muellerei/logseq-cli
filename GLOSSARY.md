@@ -119,15 +119,17 @@ _Avoid_: lock, guard, version check
 **Hash**:
 A short digest of one Block's content, shown as `hash` by the read commands
 with `--json`, and by the writes of five commands as the Block's hash after
-the write. It sees text, properties and the DONE lines of the logbook; it
+the write (`add-journal-block --upsert-heading` carries its Tree Hash too). It sees text, properties and the DONE lines of the logbook; it
 ignores collapsing, `id::` lines, clock lines and where the block stands, so
 moving a block does not change it. Compared by value, never ordered.
 _Avoid_: version, etag, checksum
 
 **Tree Hash**:
 The Hash of a Block together with everything under it, content and order
-(`tree_hash` of `get-block --json`). The Precondition of `remove-block`, since
-the hash of the block alone would not see a child added after the read. Also
+(`tree_hash` of `get-block --json`, and of `add-journal-block --upsert-heading`
+with `--json`). The Precondition of `remove-block`, and of an upsert that
+replaces a Block's children, since the hash of the block alone would not see a
+child added after the read. Also
 the check before every removal of a block a command read: a removal cascades,
 so the block is read again just before the delete and refused with
 `block_changed` when its Tree Hash is another (`copy-block --remove`, which

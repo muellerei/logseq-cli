@@ -249,7 +249,13 @@ REQUESTS = {
     "set-todo-status": (5, 6),
     "set-block-property": (5, 6),
     "remove-property": (5, 6),
-    "add-journal-block": (8, 10),
+    # Two more without --expect-hash, one more with it, both for the tree
+    # hash the upsert now carries: the matched block is read with its
+    # children before the write in every case (whether the write is needed
+    # at all, what it would remove), and once after it, since the tree hash
+    # comes from what Logseq made of the write. The hash itself still costs
+    # nothing.
+    "add-journal-block": (10, 11),
 }
 
 

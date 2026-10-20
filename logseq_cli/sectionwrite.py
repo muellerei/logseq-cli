@@ -21,11 +21,13 @@ three stay what they were, and this module knows no command.
 """
 from dataclasses import dataclass
 
-from logseq_cli.blockprops import kept_properties
+from logseq_cli.blockprops import kept_properties, stored_properties
+from logseq_cli.blocktext import BLOCK_REF_RE, PROPERTY_LINE_RE, block_hash, stored_property_key, tree_hash
 from logseq_cli.headings import find_heading, find_or_create_heading, find_upsert_target
 from logseq_cli.notes import print_note
-from logseq_cli.outlinetext import count_blocks
-from logseq_cli.output import would_go_before_fields
+from logseq_cli.lookup import incoming_block_refs, refs_refusal
+from logseq_cli.outlinetext import count_blocks, subtree_uuids
+from logseq_cli.output import on_failure, would_go_before_fields
 from logseq_cli.preconditions import Expect, check_precondition, read_fresh
 from logseq_cli.safety import Owed, require_precondition
 from logseq_cli.strictinsert import (
@@ -39,25 +41,31 @@ from logseq_cli.strictinsert import (
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
 )
-from logseq_cli.writerefused import AmbiguousTarget
+from logseq_cli.writerefused import AmbiguousTarget, BlockRefsInto
 
 
 @dataclass(frozen=True)
 class Upsert:
     """``--upsert-heading``: the block under the heading it replaces, and the
-    ``--expect-hash`` the call gave for it."""
+    ``--expect-hash`` and ``--expect-tree-hash`` the call gave for it."""
     heading: str
     expect: Expect = Expect()
 
 
 @dataclass(frozen=True)
 class UpsertPlan:
-    """The block an upsert replaces (``action == "replace"``), or that there is
-    none and the block is created (``"create"``). ``held`` is the text the
-    precondition was checked on, for ``update_block``."""
+    """The block an upsert replaces (``action == "replace"``), finds as the
+    write would leave it (``"unchanged"``), or that there is none and the
+    block is created (``"create"``). ``held`` is the text the precondition was
+    checked on, for ``update_block``. ``old_children`` are the children the
+    write replaces, as ``(uuid, tree_hash)`` from the read the plan checked;
+    ``hash`` and ``tree_hash`` are the matched block's, from that read."""
     action: str
     target: str | None
     held: dict
+    old_children: tuple = ()
+    hash: str | None = None
+    tree_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,8 +91,10 @@ class SectionWritten:
     anchor: str | None      # the empty block the write went before
     heading_uuid: str | None
     result: dict | None = None   # the flat path's block, as the insert answered it
-    status: str | None = None    # the upsert's: "updated" | "created"
+    status: str | None = None    # the upsert's: "updated" | "created" | "unchanged"
     hash: str | None = None      # the replaced block's hash, as its proof read it
+    tree_hash: str | None = None  # the replaced block's, read after the write
+    children_removed: int = 0
 
 
 def _roots(values) -> list:
@@ -114,6 +124,117 @@ def _choose_upsert_target(api, page, heading, upsert):
     return heading_uuid, (matches[0] if matches else None)
 
 
+_OWED_FOR_CHILDREN = Owed(("--expect-tree-hash",), always=(
+    "replacing the children of the matched block (--expect-hash covers the block alone)"))
+
+
+# Said by a replacement cut off between its writes (see _apply_upsert).
+_RERUN = ("Read the block again (its tree_hash in get-block --json) and run it again on "
+          "that: it replaces both the old children and the new.")
+
+
+def _without_property_lines(content: str) -> str:
+    """The text without its property lines: every line PROPERTY_LINE_RE takes,
+    one in a code block too, the rule kept_properties goes by (updateBlock
+    takes such a line out of a code block as a property)."""
+    return "\n".join(line for line in (content or "").split("\n") if not PROPERTY_LINE_RE.match(line))
+
+
+def _own_properties(content: str) -> dict:
+    """The properties ``content`` sets itself, keyed as Logseq stores them."""
+    own = {}
+    for line in content.split("\n"):
+        m = PROPERTY_LINE_RE.match(line)
+        if m:
+            own[stored_property_key(m.group(1))] = line[m.end():].strip()
+    return own
+
+
+def _unchanged(api, matched: dict, roots: list) -> bool:
+    """Whether ``matched`` already is what the write would leave: the same
+    text besides its property lines, every property the content sets itself
+    set to that value, and, for content with children, the same children.
+    The properties the block only keeps are no difference (kept_properties
+    passes them back). Further roots are appended on every run, so a write
+    with them is never unchanged."""
+    if len(roots) != 1:
+        return False
+    root = roots[0]
+    if (block_hash(_without_property_lines(root["content"]))
+            != block_hash(_without_property_lines(matched.get("content")))):
+        return False
+    own = _own_properties(root["content"])
+    if own:
+        _, texts = stored_properties(api, matched["uuid"])
+        if any(texts.get(key) != value for key, value in own.items()):
+            return False
+    kids = root.get("children") or []
+    if not kids:
+        return True
+    old = [c for c in matched.get("children") or [] if isinstance(c, dict)]
+    return len(old) == len(kids) and all(tree_hash(k) == tree_hash(c) for k, c in zip(kids, old))
+
+
+def _refs_in(nodes) -> list:
+    """The ((uuid)) refs in ``nodes`` and everything under them, in order."""
+    found = []
+    for node in nodes:
+        found += [m.lower() for m in BLOCK_REF_RE.findall(node["content"])]
+        found += _refs_in(node.get("children") or [])
+    return found
+
+
+def _plan_upsert(api, target, roots, upsert, heading) -> UpsertPlan:
+    """What the upsert does with ``target``, checked in this order: the
+    preconditions the call gave, then whether the block already is what the
+    write would leave (a run that writes nothing owes nothing and removes
+    nothing), then what a replacement owes. All of it before --dry-run and
+    before the page or heading are created.
+
+    Content with children replaces the block's children; content without
+    keeps them, so a placeholder refreshed with flat text keeps the notes
+    written under it. Replacing children deletes blocks, which no upsert did
+    before: it owes --expect-tree-hash whatever require_preconditions says,
+    and is refused while a ((ref)) from elsewhere points into them."""
+    if not target:
+        given = [o for o, v in (("--expect-hash", upsert.expect.hash),
+                                ("--expect-tree-hash", upsert.expect.tree_hash)) if v is not None]
+        if given:
+            print_note(f"Note: {' and '.join(given)} {'has' if len(given) == 1 else 'have'} no "
+                       f"object: no block matches '{upsert.heading}' under '{heading}', so one "
+                       "is created.")
+        return UpsertPlan("create", None, {})
+    # Past the cache and with the children: the tree hash needs them, and
+    # the answer decides what is overwritten and removed.
+    matched = read_fresh(api, target, include_children=True)
+    check_precondition(matched, upsert.expect)
+    old = tuple((c["uuid"], tree_hash(c)) for c in matched.get("children") or [] if isinstance(c, dict))
+    facts = {"hash": block_hash(matched.get("content")), "tree_hash": tree_hash(matched)}
+    if _unchanged(api, matched, roots):
+        return UpsertPlan("unchanged", target, {}, **facts)
+    replaced = old if roots[0].get("children") else ()
+    if replaced:
+        require_precondition(_OWED_FOR_CHILDREN, upsert.expect.tree_hash is not None)
+        going = {u for c in matched["children"] if isinstance(c, dict) for u in subtree_uuids(c)}
+        refs = incoming_block_refs(api, uuids=sorted(going))
+        # A ref the content itself carries into a child it removes would
+        # dangle too, once the write is done: a caller that read the tree and
+        # writes it back with refs to the old uuids. The graph holds none of
+        # them yet, so the query above cannot see them.
+        refs += [{"target": u, "block": "(the content)", "page": heading}
+                 for u in _refs_in(roots) if u in going]
+        if refs:
+            raise BlockRefsInto(refs_refusal(
+                refs, "the children the upsert would replace, from elsewhere",
+                rerun="Remove them first with remove-block --ignore-refs, or leave the "
+                      "children out of the content."), refs=refs)
+    else:
+        require_precondition(Owed(("--expect-hash",)), bool(upsert.expect))
+    # Held to the text the precondition was checked on, as update-block does.
+    held = {"expect": matched.get("content") or ""} if upsert.expect else {}
+    return UpsertPlan("replace", target, held, old_children=replaced, **facts)
+
+
 def plan_section_write(api, page: str, heading: str | None, values, *, page_exists: bool,
                        upsert: Upsert | None = None, keep_last: bool = False,
                        preview: bool = False) -> SectionPlan:
@@ -132,19 +253,7 @@ def plan_section_write(api, page: str, heading: str | None, values, *, page_exis
     anchor = None
     if path == "upsert":
         heading_uuid, target = _choose_upsert_target(api, page, heading, upsert)
-        held = {}
-        if target:
-            if upsert.expect:
-                matched = read_fresh(api, target)
-                check_precondition(matched, upsert.expect)
-                # Held to the text the hash was checked on, as update-block does.
-                held = {"expect": matched.get("content") or ""}
-            else:
-                require_precondition(Owed(("--expect-hash",)), False)
-        elif upsert.expect:
-            print_note("Note: --expect-hash has no object: no block matches "
-                       f"'{upsert.heading}' under '{heading}', so one is created.")
-        up = UpsertPlan("replace" if target else "create", target, held)
+        up = _plan_upsert(api, target, roots, upsert, heading)
         # A block to update is written in place; only one that is not there
         # yet goes at the end of the heading, before the empty blocks there.
         if preview and keep_last and heading_uuid and not target:
@@ -172,10 +281,12 @@ def plan_fields(plan: SectionPlan) -> dict:
     fields = {"would_create_page": plan.would_create_page,
               "would_create_heading": plan.would_create_heading,
               **would_go_before_fields(plan.anchor)}
-    if plan.upsert is not None:
-        fields["action"] = plan.upsert.action
-        if plan.upsert.action == "replace":
-            fields["would_replace"] = plan.upsert.target
+    up = plan.upsert
+    if up is not None:
+        fields["action"] = up.action
+        if up.target:
+            fields.update(would_replace=up.target, tree_hash=up.tree_hash,
+                          children_removed=len(up.old_children))
     return fields
 
 
@@ -186,9 +297,14 @@ def plan_lines(plan: SectionPlan) -> list:
         lines.append(f"  page: {plan.page} (would be created)")
     if plan.would_create_heading:
         lines.append(f"  heading: {plan.heading} (would be created)")
-    if plan.upsert is not None:
-        lines.append(f"  would replace the block {plan.upsert.target}"
-                     if plan.upsert.action == "replace" else "  would create the block")
+    up = plan.upsert
+    if up is not None:
+        lines.append({"replace": f"  would replace the block {up.target}",
+                      "unchanged": f"  the block {up.target} is unchanged: nothing would be written",
+                      "create": "  would create the block"}[up.action])
+        if up.old_children:
+            lines.append(f"  would remove its {len(up.old_children)} child block(s) "
+                         f"(tree_hash {up.tree_hash})")
     if plan.anchor:
         lines.append(f"  would go before the empty block {plan.anchor[:8]}...")
     return lines
@@ -246,11 +362,19 @@ def apply_section_plan(api, plan: SectionPlan, *, create_page, keep_ids: bool = 
 
 
 def _apply_upsert(api, plan: SectionPlan) -> SectionWritten:
+    up = plan.upsert
+    if up.action == "unchanged":
+        return SectionWritten([], None, plan.heading_uuid, status="unchanged",
+                              hash=up.hash, tree_hash=up.tree_hash)
     heading_uuid = plan.heading_uuid or find_or_create_heading(
         api, plan.page, plan.heading, keep_last=plan.keep_last)
     roots = list(plan.roots)
-    target = plan.upsert.target
+    target = up.target
     if target:
+        # Text first, then the new children, then the old ones removed one by
+        # one: cut off anywhere, old and new children stand side by side,
+        # doubled to see and nothing lost. A run on a fresh tree hash
+        # replaces both, since the children are not the content's.
         # The first root replaces the matched block; its children nest under
         # it. Any further roots are siblings after it: dropping them would
         # lose content while still reporting them as written.
@@ -259,17 +383,31 @@ def _apply_upsert(api, plan: SectionPlan) -> SectionWritten:
         _, kept = kept_properties(api, target, text)
         # The replaced block's hash, as its proof read it: the inserts below
         # go through proofs of their own and leave it as it is.
-        written = api.update_block(target, text, properties=kept or None, **plan.upsert.held)
+        written = api.update_block(target, text, properties=kept or None, **up.held)
+        if up.old_children:
+            on_failure(_RERUN, written_uuids=[])
         # The API proves each insert and raises on one that did not land, so
         # the uuids are what the graph took, not the size asked for.
         uuids = [target]
         kids = roots[0].get("children") or []
         if kids:
-            uuids += insert_block_tree_with_uuids(api, kids, target)
+            new = insert_block_tree_with_uuids(api, kids, target)
+            uuids += new
+            if up.old_children:
+                on_failure(_RERUN, written_uuids=new)
         if len(roots) > 1:
             uuids += insert_block_tree_as_siblings(api, roots[1:], target)
+        # Each one as the plan read it: a child that changed since is refused,
+        # not removed.
+        for uuid, read_as in up.old_children:
+            api.remove_block(uuid, expect_tree=read_as)
+        # From a read after the write, never from the text sent: what Logseq
+        # made of it is what the next --expect-tree-hash is checked on.
+        after = api.get_block(target, include_children=True, cached=False)
         return SectionWritten(uuids, None, heading_uuid, status="updated",
-                              hash=written if isinstance(written, str) else None)
+                              hash=written if isinstance(written, str) else None,
+                              tree_hash=tree_hash(after) if after else None,
+                              children_removed=len(up.old_children))
     # A new block as the last child of the heading: the write
     # [graph] keep_empty_blocks_last is about. A found block is replaced where
     # it stands, which is no end position.

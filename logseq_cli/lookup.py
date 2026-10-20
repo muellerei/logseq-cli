@@ -197,11 +197,13 @@ def incoming_block_refs(api, *, uuids=None, page=None, count_inside=False) -> li
     return sorted(refs, key=lambda r: (r["page"] or "", r["block"], r["target"]))
 
 
-def refs_refusal(refs: list, what: str, instead: str = "", limit: int = 10) -> str:
+def refs_refusal(refs: list, what: str, instead: str = "", limit: int = 10, *,
+                 rerun: str = "Re-run with --ignore-refs to delete anyway.") -> str:
     """The refusal for a delete that would leave ``refs`` dangling.
 
     Lists where each ref comes from, bounded like other listings, and names
-    the override. ``--force`` is not it: a caller that deletes routinely passes
+    the override (``rerun`` says another way, for a command that has none).
+    ``--force`` is not it: a caller that deletes routinely passes
     ``--force`` every time, so a check it overrides would never stop anything.
     """
     lines = [f"  {r['page']}  {r['block']}  -> (({r['target']}))" for r in refs[:limit]]
@@ -209,5 +211,4 @@ def refs_refusal(refs: list, what: str, instead: str = "", limit: int = 10) -> s
         lines.append(f"  ... and {len(refs) - limit} more")
     listing = "\n".join(lines)
     return (f"{len(refs)} block ref(s) point into {what}, and would "
-            f"dangle:\n{listing}\n{instead}Re-run with --ignore-refs to delete "
-            "anyway. Nothing was changed.")
+            f"dangle:\n{listing}\n{instead}{rerun} Nothing was changed.")

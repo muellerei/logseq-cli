@@ -12,6 +12,13 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- `add-journal-block` takes `--expect-tree-hash` with `--upsert-heading`
+  (#142), and its `--json` carries `status` (`updated`, `created`,
+  `unchanged`), `children_removed` and, for a block it replaced or left as it
+  was, `tree_hash`, read after the write: the next upsert passes it on with
+  no read in between. Its `--dry-run` carries `tree_hash` and
+  `children_removed` of the block it matched, and `action: unchanged`.
+
 - The `--dry-run` of `add-journal-block --upsert-heading` says what the run
   would do with the block (#140): `action` is `replace`, with the uuid of the
   block in `would_replace`, or `create` when no block under the heading
@@ -46,6 +53,27 @@ file carries most of the reasoning behind the tool.
   new hash no longer hold.
 
 ### Changed
+
+- `add-journal-block --upsert-heading` with content that has children
+  replaces the children of the block it matches (#142). Before, it replaced
+  the text and appended the children, so the same call run twice left the
+  block with its children twice (reproduced against the HTTP double). Content
+  without children keeps the children, so a placeholder refreshed with flat
+  text keeps what was written under it. Replacing children deletes blocks,
+  which no upsert did before, so such a call owes `--expect-tree-hash`
+  whatever `require_preconditions` says (`--expect-hash` sees the block
+  alone), and it is refused with `block_refs` while a `((ref))` points into
+  them, from elsewhere in the graph or from the content itself (a tree read
+  and written back with refs to the old uuids; found in review). The writes go in an order that loses nothing
+  when cut off: the text, the new children, then the old children one by one,
+  each checked on its tree hash; a run cut off leaves both, says which new
+  ones landed (`written_uuids`), and a run on a fresh tree hash replaces both.
+  A run that would leave the block as it is writes nothing and reports
+  `status: unchanged`: the text compared without its property lines, a
+  property the content sets itself compared by value, and the children by
+  their tree hashes. The matched block is now read with its children before
+  every upsert, and once more after a replacement for its tree hash: one or
+  two requests more per run.
 
 - `add-journal-block --upsert-heading` refuses, before anything is written
   and under `--dry-run` too, when more than one block under the heading
