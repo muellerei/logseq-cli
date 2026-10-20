@@ -553,8 +553,8 @@ a block) and pass it as `--expect-hash` to the second; no read in between. It
 says what your write left, not that you know the content: read before you
 decide on it. It is absent under `--dry-run`, for `set-todo-status`
 `unchanged` and when it could not be read; take it with `jq -r '.hash // empty'`
-and read with `get-block` when that is empty (not `jq -er`: it exits 4 on a
-missing field, and `set -e` stops the script there). After
+and read with `get-block` when that is empty. `jq -er .hash` stops instead: it
+exits non-zero on a missing field, and `set -e` ends the script there. After
 `set-block-property` and `remove-property --id`, an edit to the block's text
 between their read and their write is part of the hash they return.
 
