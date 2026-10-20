@@ -124,8 +124,13 @@ def _choose_upsert_target(api, page, heading, upsert):
     return heading_uuid, (matches[0] if matches else None)
 
 
+# The text names where the tree hash comes from: an upsert's own --dry-run
+# refuses the same way, and a caller upserting by heading has no uuid (#146).
+# Here, not in require_precondition: remove-block owes the same option.
 _OWED_FOR_CHILDREN = Owed(("--expect-tree-hash",), always=(
-    "replacing the children of the matched block (--expect-hash covers the block alone)"))
+    "replacing the children of the matched block (--expect-hash covers the block alone; "
+    "its tree_hash is in get-block --id UUID --json, its uuid in get-journal-range "
+    "--heading with the --under-heading)"))
 
 
 # Said by a replacement cut off between its writes (see _apply_upsert).

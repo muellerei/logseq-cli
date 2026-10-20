@@ -44,6 +44,10 @@ class TestContainsHierarchicalContent:
         content = "**17:38** Rollout plan drafted\n\t- Research: 9 documents\n\t- Template letter written"
         assert contains_hierarchical_content(content) is True
 
+    def test_tab_indented_line_without_a_marker_returns_false(self):
+        """Indentation alone is no tree: the line stays text in one block (#146)."""
+        assert contains_hierarchical_content("Parent\n\tChild") is False
+
     def test_literal_backslash_n_returns_false(self):
         """Literal \\n in string (not actual newline) should not match."""
         content = "text with \\n\\t- fake sub"
@@ -103,6 +107,14 @@ class TestParseHierarchicalContentIntegration:
         assert len(tree[0]["children"]) == 2
         assert tree[0]["children"][0]["content"] == "Sub point 1"
         assert tree[0]["children"][1]["content"] == "Sub point 2"
+
+    def test_one_marked_line_makes_the_whole_value_a_tree(self):
+        """Once a value is a tree, an indented line without "- " is a child too."""
+        content = "Parent\n\t- A\n\tB"
+        assert contains_hierarchical_content(content) is True
+        tree = parse_hierarchical_content(content)
+        assert [(n["content"], [c["content"] for c in n["children"]]) for n in tree] == [
+            ("Parent", ["A", "B"])]
 
     def test_non_detected_content_still_parseable(self):
         """Even flat content can be parsed — it just produces flat tree."""

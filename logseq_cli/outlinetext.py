@@ -113,6 +113,25 @@ def contains_hierarchical_content(content: str) -> bool:
     return bool(re.search(r'\n[\t ]+- ', content))
 
 
+# For the --help of every command whose --content goes through
+# contains_hierarchical_content: one source for the rule, so no epilog
+# promises a form it does not detect (#146). Wrapped by hand with the
+# epilog's indent, as Click sets a \b paragraph line by line. No advice on
+# where to go instead: that differs per command and follows it there.
+TREE_CONTENT_RULE = """\
+  --content is read as a tree when a line after the first is indented and
+  starts with "- ", even inside a code block. Then every flush line starts
+  a block of its own, except property, SCHEDULED and DEADLINE lines, a
+  LOGBOOK drawer and a closed code block, which stay with the block above;
+  every indented line is a child of the nearest line above with less
+  indentation (a tab or two spaces per level). Otherwise --content is one
+  block, indented lines included.
+"""
+# The example add-journal-block's --help shows; tests write it and expect
+# the tree, so the example cannot drift from the detection.
+TREE_CONTENT_EXAMPLE = "Parent\n\t- Child"
+
+
 def has_mixed_indentation(content: str) -> bool:
     """True if any indented line mixes tabs and spaces in its leading whitespace.
 
@@ -423,5 +442,33 @@ def quote_break_note(tree: list) -> str | None:
 def note_quote_breaks(tree: list) -> None:
     """Print :func:`quote_break_note` for ``tree`` on stderr, if there is one."""
     note = quote_break_note(tree)
+    if note:
+        print_note(note)
+
+
+def indent_note(contents, way: str) -> str | None:
+    """A ``Note:`` when a flat value has indented lines after its first.
+
+    ``contents`` are the values written as one block each: without an
+    indented "- " line, contains_hierarchical_content reads none of them as
+    a tree, and an indented line stays text in the block (#146). Lines in a
+    closed code block are code, and a fence line is no text line. ``way`` is
+    the option that reads such lines as children, which differs per command.
+    The note says how the text is read, not that it was written: it comes
+    before --dry-run and before the refusals of the plan.
+    """
+    for content in contents:
+        lines = content.split("\n")
+        inside, _ = code_block_lines(lines)
+        if any(line[:1] in "\t " and line.strip() and not code and not is_fence(line)
+               for line, code in zip(lines[1:], inside[1:])):
+            return ('Note: indented lines without "- " are text in one block, not '
+                    f'children; for children, start them with "- " or use {way}.')
+    return None
+
+
+def note_indent(contents, way: str) -> None:
+    """Print :func:`indent_note` for ``contents`` on stderr, if there is one."""
+    note = indent_note(contents, way)
     if note:
         print_note(note)

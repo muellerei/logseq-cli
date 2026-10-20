@@ -54,6 +54,15 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `add-journal-block --content` and `insert-block --content` (or
+  `--content-file`) print a `Note:` on stderr when a value that is not read
+  as a tree has indented lines without `- ` (#146): they are text in one
+  block, not children. The note names the option that reads them as
+  children (`--content-file`, `--tree`). It comes under `--dry-run` and
+  `--upsert-heading` too, where nothing said so before; the written blocks,
+  stdout and the exit code are unchanged. No note for indentation inside a
+  closed code block, or under `--no-preserve`, where no value is a tree.
+
 - `insert-block --tree --page P` writes to the end of P without
   `--top-level`, as `--content --page P` does (#144); before, it was refused
   after a `getPage`. `--top-level` without `--page` is now a usage error in
@@ -108,6 +117,27 @@ file carries most of the reasoning behind the tool.
   it writes no ref.
 
 ### Fixed
+
+- The help of `add-journal-block` promised that it "auto-detects
+  tab-indented hierarchy in --content" (#146), and the help of
+  `add-journal-entry`, `add-journal-content` and `insert-block`, the docs
+  and the README said the same. `--content` is read as a tree only when a
+  line after the first is indented and starts with `- `: `$'Parent\n\tChild'`
+  was written as one block with a tab in it, exit 0. Reproduced against the
+  parser and the HTTP double. The help now states the rule, including that
+  in a tree every flush line is a block of its own, and that with
+  `--upsert-heading` only the children of the content's first block replace
+  the matched block's children, while every further block is added on every
+  run. The detection is unchanged; tests pin it to the example the help
+  shows.
+
+- The refusal `precondition_required` of an upsert that replaces children,
+  and the help of `--expect-tree-hash`, named no source for the first
+  `tree_hash` (#146): the option pointed to the command's own `--dry-run
+  --json`, which refuses the same way. Both now name `get-block --id UUID
+  --json`, and `get-journal-range --heading` with the `--under-heading` for
+  the uuid. The refusal of `remove-block` is unchanged, word for word.
+  `AGENTS.md` names `written_uuids`, which only the CHANGELOG mentioned.
 
 - `insert-block --tree` wrote to the first of two targets and dropped the
   rest with exit 0 (#144): `--after A --before B` and `--after A --first`
