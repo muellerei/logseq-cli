@@ -54,6 +54,12 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `insert-block --tree --page P` writes to the end of P without
+  `--top-level`, as `--content --page P` does (#144); before, it was refused
+  after a `getPage`. `--top-level` without `--page` is now a usage error in
+  both modes: beside `--child-of`, `--after` or `--before` it was ignored and
+  the block went to the anchor.
+
 - `add-journal-block --upsert-heading` with content that has children
   replaces the children of the block it matches (#142). Before, it replaced
   the text and appended the children, so the same call run twice left the
@@ -102,6 +108,14 @@ file carries most of the reasoning behind the tool.
   it writes no ref.
 
 ### Fixed
+
+- `insert-block --tree` wrote to the first of two targets and dropped the
+  rest with exit 0 (#144): `--after A --before B` and `--after A --first`
+  wrote after A, and `--page` beside an anchor was ignored, where
+  `--content` refused all three. Reproduced against the HTTP double. The
+  flat mode counted the targets and the tree mode went down an if/elif chain
+  that stopped at the first one it knew; both now share one check, run
+  before any request.
 
 - `add-journal-block --dry-run --json` with two `--content` values, or with
   a value that has children, printed text after the JSON when the journal

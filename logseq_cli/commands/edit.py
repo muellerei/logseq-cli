@@ -421,6 +421,29 @@ def replace_text(ctx, page, find_text, replace_text, use_regex, dry_run, as_json
              reason=common.pop() if len(common) == 1 else "write_not_verified",
              failed=failed, failed_reasons=reasons, writes_landed=api.writes_landed)
 
+def check_insert_targets(page, after, before, child_of, first, top_level) -> None:
+    """Exit with a usage error unless the call names exactly one target, with
+    --first only beside --child-of and --top-level only beside --page.
+
+    One rule for --content and --tree alike, checked before any request: the
+    tree mode once took the first target it knew and dropped the rest, with
+    exit 0, where the flat mode refused.
+    """
+    targets = sum(1 for x in (page, after, before, child_of) if x)
+    if targets == 0:
+        message = "Specify one of: --page, --after, --before, --child-of"
+    elif targets > 1:
+        message = "Specify only one of: --page, --after, --before, --child-of"
+    elif first and not child_of:
+        message = "--first only applies to --child-of (it selects the first child position)."
+    elif top_level and not page:
+        message = "--top-level only applies to --page (it is where --page writes anyway)."
+    else:
+        return
+    click.echo(message, err=True)
+    sys.exit(1)
+
+
 @cli.command("insert-block", cls=WriteCommand, epilog="""\b
 Examples:
   logseq-cli --token TOKEN insert-block --child-of UUID --content "Sub-Block"
@@ -459,12 +482,12 @@ Notes:
   a section goes before the empty blocks that end it, so they stay last, and
   nothing is overwritten.
 """ + REF_TARGET_ID_NOTE)
-@click.option("--page", "--name", default=None, help="Page name (append to end of page)")
+@click.option("--page", "--name", default=None, help="Page name: append to the end of the page (--content and --tree alike)")
 @click.option("--after", default=None, help="UUID of block to insert after (as sibling)")
 @click.option("--before", default=None, help="UUID of block to insert before (as sibling)")
 @click.option("--child-of", default=None, help="UUID of parent block (insert as child)")
 @click.option("--first", "as_first", is_flag=True, help="With --child-of: insert as FIRST child instead of appending last")
-@click.option("--top-level", is_flag=True, help="With --page and --tree: insert at page top-level")
+@click.option("--top-level", is_flag=True, help="With --page: the same as --page alone, kept for existing calls")
 @click.option("--content", default=None, help="Content for the new block; one of --content, --content-file, --tree, --tree-file is required")
 @click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--tree", "tree_input", default=None, help="Tab-indented hierarchy or JSON array of {content, children} nodes")
@@ -480,12 +503,14 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
     """Insert a block (or tree of blocks) at a specific position."""
     api = ctx.obj["api"]
     content = content_or_file(content, content_file, required=False)
-    # --page is the target only without an anchor: with --after, --before or
-    # --child-of it is refused or, in tree mode, not used, and must not be
-    # resolved into an alias_of for a page nothing is written to.
+    # Before any request: a conflict is refused, never resolved by taking
+    # the first target the code happens to look at.
+    check_insert_targets(page, after, before, child_of, as_first, top_level)
+    # With the targets checked, --page is the target exactly when it is set;
+    # a page name resolves to the page Logseq writes to (alias_of).
     alias = {}
     target = None
-    if page and not (after or before or child_of):
+    if page:
         # A missing page is written under the name Logseq creates it with: a
         # journal title in another format is the journal (measured).
         ref, target = follow_page_to_write(api, page, as_json)
@@ -561,7 +586,9 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
             position = f"before {clean_id[:8]}..."
             def do_insert():
                 return insert_block_tree_as_siblings(api, tree, clean_id, before=True, keep_ids=keep_ids)
-        elif page and top_level:
+        else:
+            # --page, with or without --top-level: the end of the page, as
+            # with --content.
             position = f"top-level of '{page}'"
             end_target = {"page_name": page}
 
@@ -571,12 +598,6 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                         api, tree, page, keep_ids=keep_ids),
                     keep_last=keep_on, keep_ids=keep_ids, **end_target)
                 return uuids
-        else:
-            click.echo(
-                "Tree insert requires --child-of, --after, --before, or --page NAME --top-level",
-                err=True,
-            )
-            sys.exit(1)
 
         note_quote_breaks(tree)
         if dry_run:
@@ -595,7 +616,7 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
                     click.echo(f"  would go before the empty block {would_anchor[:8]}...")
             return
 
-        if page and top_level:
+        if page:
             create_missing_page(api, target)
         # The tree is not empty (checked above), and every insert is proven,
         # so there is a first block.
@@ -628,17 +649,6 @@ def insert_block_cmd(ctx, page, after, before, child_of, as_first, top_level, co
         click.echo("Specify --content, --content-file, --tree or --tree-file.", err=True)
         sys.exit(1)
     require_content(content)
-
-    targets = sum(1 for x in [page, after, before, child_of] if x)
-    if targets == 0:
-        click.echo("Specify one of: --page, --after, --before, --child-of", err=True)
-        sys.exit(1)
-    if targets > 1:
-        click.echo("Specify only one of: --page, --after, --before, --child-of", err=True)
-        sys.exit(1)
-    if as_first and not child_of:
-        click.echo("--first only applies to --child-of (it selects the first child position).", err=True)
-        sys.exit(1)
 
     result = None
     position = ""
