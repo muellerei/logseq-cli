@@ -15,6 +15,7 @@ from logseq_cli.blockprops import stored_properties
 # is the net no write path can go around.
 from logseq_cli.blocktext import (
     PROPERTY_LINE_RE,
+    block_hash,
     block_ref_uuids,
     block_text_matches,
     refuse_id_lines,
@@ -373,6 +374,16 @@ def _target_text(target) -> str:
 def _block_count_text(n: int) -> str:
     """``n`` as "1 block" or "n blocks", for what a proof expected."""
     return f"{n} block" if n == 1 else f"{n} blocks"
+
+
+def _written_hash(block: dict) -> str | None:
+    """The hash of the block a proof read after the write, what a write that
+    proves it by reading the block returns: a caller writing the same block
+    again passes it as ``--expect-hash`` without reading in between. ``None``
+    when the read carries no ``content``; ``block_hash`` counts that as "",
+    and the hash of the empty text would pass for the block's."""
+    content = block.get("content")
+    return None if content is None else block_hash(content)
 
 
 def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerified:
@@ -757,13 +768,13 @@ class LogseqAPI:
             texts = stored_properties(self, target)[1]
             for key, value in properties.items():
                 self._prove_value(method, target, texts, key, value)
-        return result
+        return _written_hash(block)
 
     def _prove_property(self, method, target, result, *, key, value):
         """The block holds ``key`` with ``value`` in its text form."""
-        self._block_to_prove(method, target, f"{key}:: {_property_text(value).strip()}")
+        block = self._block_to_prove(method, target, f"{key}:: {_property_text(value).strip()}")
         self._prove_value(method, target, stored_properties(self, target)[1], key, value)
-        return result
+        return _written_hash(block)
 
     def _prove_no_property(self, method, target, result, *, key):
         """The block holds no ``key``, neither as a value nor as a text, in
@@ -775,14 +786,14 @@ class LogseqAPI:
         ``remove-block-property!``, 0.10.15), so ``:Status`` stays after
         ``status`` was removed, and checked under ``status`` alone that read
         as removed."""
-        self._block_to_prove(method, target, f"no {key}::")
+        block = self._block_to_prove(method, target, f"no {key}::")
         values, texts = stored_properties(self, target)
         wanted = stored_property_key(key)
         for held in (*texts, *values):
             if stored_property_key(held) == wanted:
                 got = texts.get(held, values.get(held))
                 raise _not_verified(method, target, f"no {key}::", f"{held}:: {got}")
-        return result
+        return _written_hash(block)
 
     def _prove_no_block(self, method, target, result):
         """No block under ``target`` any more; its children went with it
@@ -1277,6 +1288,7 @@ class LogseqAPI:
 
         Raises BlockChanged as above, and WriteNotVerified unless the block
         then reads back with ``content`` and ``properties`` (``_prove_text``).
+        Returns the block's hash as the proof read it (``_written_hash``).
         """
         refuse_split_block(content, command="logseq-cli", where="The text", replacing=replacing)
         refuse_id_lines(content, own=block_uuid, replacing=replacing)
@@ -1383,7 +1395,8 @@ class LogseqAPI:
 
     def upsert_block_property(self, block_uuid: str, key: str, value):
         """Set or update a property on a block; raises WriteNotVerified
-        unless the block then holds it (``_prove_property``)."""
+        unless the block then holds it (``_prove_property``). Returns the
+        block's hash as the proof read it (``_written_hash``)."""
         refuse_split_property(key, value)
         return self._write("logseq.Editor.upsertBlockProperty", [block_uuid, key, value],
                            target=block_uuid, texts=[str(value)], own=block_uuid,
@@ -1391,7 +1404,8 @@ class LogseqAPI:
 
     def remove_block_property(self, block_uuid: str, key: str):
         """Remove a property from a block; raises WriteNotVerified unless the
-        block then lacks it (``_prove_no_property``)."""
+        block then lacks it (``_prove_no_property``). Returns the block's hash
+        as the proof read it (``_written_hash``)."""
         return self._write("logseq.Editor.removeBlockProperty", [block_uuid, key],
                            target=block_uuid, proof_args={"key": key})
 
