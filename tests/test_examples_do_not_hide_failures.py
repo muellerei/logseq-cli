@@ -129,14 +129,21 @@ SAFE_UPDATE_PRIO_STUB = """echo "$@" >> "$CALLS"
 case "$1" in
   get-block) echo '{"uuid": "%s", "content": "TODO ship the parser", "hash": "0123456789ab"}';;
   update-block) %s;;
-  set-block-property) echo '{"status": "updated", "hash": "cdef01234567"}';;
+  set-block-property) %s;;
 esac
 """
+PRIO_SET = """echo '{"status": "updated", "hash": "cdef01234567"}'"""
 
 
-def _run_safe_update(tmp_path, update_body, *prio, stub=SAFE_UPDATE_STUB):
+def _run_safe_update(tmp_path, update_body, prio_body=None):
+    """Without prio_body the script runs without PRIO; with it, PRIO is high and
+    prio_body answers set-block-property."""
     calls = tmp_path / "calls"
-    env = _stub(tmp_path, stub % (BLOCK, update_body))
+    if prio_body is None:
+        env, prio = _stub(tmp_path, SAFE_UPDATE_STUB % (BLOCK, update_body)), []
+    else:
+        env = _stub(tmp_path, SAFE_UPDATE_PRIO_STUB % (BLOCK, update_body, prio_body))
+        prio = ["high"]
     env["CALLS"] = str(calls)
     result = subprocess.run(
         ["bash", str(SAFE_UPDATE), BLOCK, "TODO ship the parser, fixed", *prio],
@@ -156,8 +163,7 @@ def test_safe_update_passes_the_hash_it_read(tmp_path):
 @pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
                     reason="needs bash and jq")
 def test_safe_update_chains_prio_on_the_hash_the_update_returned(tmp_path):
-    result, calls = _run_safe_update(tmp_path, """echo '{"hash": "89abcdef0123"}'""",
-                                     "high", stub=SAFE_UPDATE_PRIO_STUB)
+    result, calls = _run_safe_update(tmp_path, """echo '{"hash": "89abcdef0123"}'""", PRIO_SET)
     assert result.returncode == 0, result.stderr
     assert [c.split()[0] for c in calls] == ["get-block", "update-block", "set-block-property"]
     assert "--expect-hash 89abcdef0123" in calls[2]
@@ -167,11 +173,24 @@ def test_safe_update_chains_prio_on_the_hash_the_update_returned(tmp_path):
 @pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
                     reason="needs bash and jq")
 def test_safe_update_reads_again_when_the_update_returned_no_hash(tmp_path):
-    result, calls = _run_safe_update(tmp_path, "echo '{}'", "high", stub=SAFE_UPDATE_PRIO_STUB)
+    result, calls = _run_safe_update(tmp_path, "echo '{}'", PRIO_SET)
     assert result.returncode == 0, result.stderr
     assert [c.split()[0] for c in calls] == [
         "get-block", "update-block", "get-block", "set-block-property"]
     assert "--expect-hash 0123456789ab" in calls[3]
+
+
+@pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),
+                    reason="needs bash and jq")
+def test_safe_update_says_the_text_is_written_when_prio_fails(tmp_path):
+    """A failed second write must not read as "nothing happened": a rerun would
+    read a fresh hash and write the text over what changed since."""
+    result, calls = _run_safe_update(
+        tmp_path, """echo '{"hash": "89abcdef0123"}'""",
+        """echo '{"error": "boom", "reason": "open_in_editor"}' >&2; exit 1""")
+    assert result.returncode == 1
+    assert len(calls) == 3
+    assert "The new text is written; prio was not set." in result.stderr
 
 
 @pytest.mark.skipif(not shutil.which("bash") or not shutil.which("jq"),

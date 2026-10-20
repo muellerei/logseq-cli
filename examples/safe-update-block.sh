@@ -22,8 +22,9 @@
 # Requires: LOGSEQ_TOKEN or --token, and jq
 # Prints the --json output of the last write.
 # Exit:  0 written; 3 the block changed since it was read (nothing written by
-#        the refused call; with PRIO, the text may already be written);
-#        anything else: the call failed for another reason (see stderr)
+#        the refused call); anything else: the call failed for another reason
+#        (see stderr). With PRIO, a failure of the second write leaves the new
+#        text written, and stderr says so.
 
 set -euo pipefail
 
@@ -35,7 +36,9 @@ ERR=$(mktemp)
 OUT=$(mktemp)
 trap 'rm -f "${ERR}" "${OUT}"' EXIT
 
+# $1, if given: what an earlier write of this script already left.
 refused() {
+    [[ -z "${1:-}" ]] || echo "$1" >&2
     if [[ "$(jq -r '.reason // empty' "${ERR}" 2>/dev/null)" == "precondition_failed" ]]; then
         echo "The block changed after it was read; nothing was written by this call." >&2
         echo "Read it again with: logseq-cli get-block --id ${ID} --json" >&2
@@ -67,6 +70,6 @@ fi
 
 if ! logseq-cli set-block-property --id "${ID}" --key prio --value "${PRIO}" \
     --expect-hash "${HASH}" --json >"${OUT}" 2>"${ERR}"; then
-    refused
+    refused "The new text is written; prio was not set."
 fi
 cat "${OUT}"
