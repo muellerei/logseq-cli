@@ -198,9 +198,10 @@ def _plan_upsert(api, target, roots, upsert, heading) -> UpsertPlan:
 
     The children of the content's first root replace the block's children;
     a first root without any keeps them, so a placeholder refreshed with
-    flat text keeps the notes written under it. Replacing children deletes blocks, which no upsert did
-    before: it owes --expect-tree-hash whatever require_preconditions says,
-    and is refused while a ((ref)) from elsewhere points into them."""
+    flat text keeps the notes written under it. Replacing children deletes
+    blocks, which no upsert did before: it owes --expect-tree-hash whatever
+    require_preconditions says, and is refused while a ((ref)) from
+    elsewhere points into them."""
     if not target:
         given = [o for o, v in (("--expect-hash", upsert.expect.hash),
                                 ("--expect-tree-hash", upsert.expect.tree_hash)) if v is not None]
