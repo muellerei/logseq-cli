@@ -62,6 +62,11 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `AGENTS.md` said `jq -er` exits 4 when a write's output has no `hash`; it
+  exits 1 (measured with jq 1.8.2) and now reads "non-zero", as no document
+  gives an exit number a meaning. It also ruled `jq -er` out where the
+  command reference offers it as the way to stop a chain; both now describe
+  the same two choices.
 - `add-block-ref` to a journal fails when the journal page cannot be read,
   instead of taking it for a missing one (#135). A failed `getPage` (connection,
   HTTP error) was caught and treated as no page: `--dry-run` reported
