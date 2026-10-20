@@ -62,6 +62,14 @@ file carries most of the reasoning behind the tool.
 
 ### Fixed
 
+- `add-block-ref` to a journal fails when the journal page cannot be read,
+  instead of taking it for a missing one (#135). A failed `getPage` (connection,
+  HTTP error) was caught and treated as no page: `--dry-run` reported
+  `would_create_page: true` and a write sent `createPage` for a journal never
+  read. `getPage` answers a missing page with `null`, so the catch held only
+  failures; every other writer already let them through. Found in a review of
+  the broad `except` clauses; a test makes the read fail, with and without
+  `--dry-run`.
 - `get-todos --help` names `hash`, which every task under `--json` has carried
   since 0.17.0 while only the command reference listed it, and both the help
   and the command reference now give each field its type. `references` is a

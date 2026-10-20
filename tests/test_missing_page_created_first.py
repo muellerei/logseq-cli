@@ -11,6 +11,7 @@ is tested in test_editor_gate against the real LogseqAPI, where the question
 is asked: a mock of it cannot see that.
 """
 import pytest
+import requests
 
 from logseq_cli.cli import cli
 from tests.conftest import mock_api, split_runner
@@ -121,3 +122,17 @@ def test_add_block_ref_under_heading_creates_the_page_before_the_heading(monkeyp
     result = _run(*WRITES["add-block-ref"], "--under-heading", "## Refs")
     assert result.exit_code == 0, result.stderr
     assert api.order[0] == ("create", MISSING, False), api.order
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["write", "dry-run"])
+def test_add_block_ref_journal_that_cannot_be_read_is_not_taken_as_missing(monkeypatch, dry_run):
+    # getPage answers None for a page that is not there; an error is a read
+    # that failed, and a journal never read is not one to create.
+    api = _api(monkeypatch)
+    _source(api)
+    api.get_page.side_effect = requests.ConnectionError("refused")
+    result = _run("add-block-ref", "--source-id", SOURCE, "--journal-date", "2026-04-23",
+                  "--json", *(["--dry-run"] if dry_run else []))
+    assert result.exit_code != 0, result.stdout
+    assert "would_create_page" not in result.stdout
+    assert api.order == []
