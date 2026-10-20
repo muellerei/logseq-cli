@@ -174,8 +174,10 @@ precondition is a mark on the command like the one for `read_only`, asked once
 in the same place before the first request, so a command that gains the option
 cannot forget to be asked, and a form of a command that changes no block it
 read (`copy-block` without `--remove`) owes none. `require_preconditions`
-turns the obligation on; it is off by default because the write outputs carry
-no new hash yet, see [safety.md](safety.md#why-it-is-off-by-default-and-when-to-turn-it-on).
+turns the obligation on; it is off by default, see
+[safety.md](safety.md#why-it-is-off-by-default-and-when-to-turn-it-on). The
+hash a write returns is the one its proof read (`_written_hash`): the state
+that was verified, with no extra request and nothing kept in the client.
 The refusal never prints the block's current hash: the next step is to read the
 block and decide again, not to send the same change with a hash that now
 matches.

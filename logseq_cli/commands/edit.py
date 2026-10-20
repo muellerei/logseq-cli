@@ -58,7 +58,7 @@ from logseq_cli.output import (
     would_go_before_fields,
 )
 from logseq_cli.preconditions import (
-    EXPECT_HASH_HELP, Expect, check_precondition, read_checked, read_fresh)
+    EXPECT_HASH_HELP, WRITTEN_HASH_NOTE, Expect, check_precondition, read_checked, read_fresh)
 from logseq_cli.safety import Owed, WriteCommand
 from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
@@ -107,6 +107,8 @@ Note:
   it this block's uuid and every ((ref)) to the block would dangle.
   --expect-hash H (the hash field of get-block --json) refuses, without
   writing, unless the block is still the one H was read from.
+""" + WRITTEN_HASH_NOTE + """\
+  No hash under --dry-run, or when it could not be read after the write.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", default=None, help="UUID of the block to update")
 @click.option("--where-content", "where_content", default=None, help="Select the block by content instead of --id; must match exactly one")
@@ -116,8 +118,8 @@ Note:
 @click.option("--content-file", "content_file", default=None, help="Read --content from this file instead ('-' reads stdin), so apostrophes, quotes and umlauts need no shell quoting. Mutually exclusive with --content")
 @click.option("--expect-hash", "expect_hash", default=None,
               help="Refuse, without writing, unless the block is still the one this hash was read "
-                   "from (the hash field of get-block --json). Checked on a read past the cache, "
-                   "before --dry-run and before the write")
+                   "from (the hash field of get-block --json or of a write's --json output). "
+                   "Checked on a read past the cache, before --dry-run and before the write")
 @click.option("--dry-run", is_flag=True, help="Show the block that would be overwritten, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context

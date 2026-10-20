@@ -274,3 +274,29 @@ def test_the_hash_costs_no_request(monkeypatch, name, expect):
     assert result.exit_code == 0, result.stderr
     assert "hash" in json.loads(result.stdout)
     assert len(double.requests) == REQUESTS[name][expect]
+
+
+# --- help ---------------------------------------------------------------------------
+
+def _help(name):
+    result = invoke(name, "--help")
+    assert result.exit_code == 0
+    return " ".join(result.stdout.split())
+
+
+@pytest.mark.parametrize("name", CARRYING)
+def test_help_names_the_hash_field_and_when_it_is_absent(name):
+    text = _help(name)
+    assert "--json carries hash" in text
+    assert "No hash under --dry-run" in text
+
+
+@pytest.mark.parametrize("name", _commands_with_a_precondition())
+def test_expect_hash_help_names_a_writes_output_as_a_source(name):
+    """Every --expect-hash text names both sources, waived commands too: the
+    hash a write returned is the block's, whichever command reads it next."""
+    command = cli.commands[name]
+    texts = [p.help for p in command.params if "--expect-hash" in p.opts]
+    if not texts:
+        pytest.skip("no --expect-hash")
+    assert "or of a write's --json output" in " ".join(texts[0].split())

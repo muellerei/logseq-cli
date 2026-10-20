@@ -117,15 +117,13 @@ nothing, and the option is a usage error there.
 
 A default of "on" would change what every script and person calling
 `update-block`, `remove-block` and the other six commands does today: calls that
-pass no hash would start to refuse with `precondition_required`. That is reason
-enough, but not the whole one. The stronger reason is friction. The output of a
-write does not carry the block's new hash yet, so a second write to the same
-block with the hash from the first read is refused (the block did change, by
-your own first write). With the switch on, the only way through is to read the
-block again before every write. That ritual protects no more than the re-read
-each command already does between its own read and its write (`block_changed`),
-so a mandatory switch costs more than it gives until the write outputs return a
-hash. It is off for that reason, and it stays a choice.
+pass no hash would start to refuse with `precondition_required`. With the
+switch on, every write needs a hash: one read before each single write, unless
+the write before it changed the same block. The `--json` output of
+`update-block`, `set-todo-status`, `set-block-property`, `remove-property --id`
+and `add-journal-block --upsert-heading` carries the block's new `hash`, and
+the next write to that block can pass it on without reading. It is off by
+default, and it stays a choice.
 
 Turn it on when an agent writes and you also edit the graph yourself while it
 works: then every write has to show the state it was decided on. Without an
@@ -173,8 +171,13 @@ way.
   or properties changed. `remove-block` takes the hash of the block and
   everything under it (`--expect-tree-hash`), because the hash of the block
   alone would not see a child added since.
-- **Write outputs carry no new hash.** Whoever changes the same block twice
-  reads it again in between.
+- **The hash a write returns says what the write left, not what you know.**
+  It lets the next write to the block skip the read; whoever decides on the
+  content reads it. `set-block-property` and `remove-property --id` check only
+  the property they wrote, so an edit to the block's text between their read
+  and their write goes unnoticed and is part of the hash they return.
+  `move-block`, `remove-block` and `copy-block` return none: a move keeps the
+  hash, a removed block has none, and the output does not name the copy.
 - **It guards against a mistake, not against an agent that sets out to avoid
   it.** An agent can read the block just before writing and pass what it finds,
   which proves nothing about what it decided on. The switch makes the honest

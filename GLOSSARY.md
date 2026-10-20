@@ -118,7 +118,8 @@ _Avoid_: lock, guard, version check
 
 **Hash**:
 A short digest of one Block's content, shown as `hash` by the read commands
-with `--json`. It sees text, properties and the DONE lines of the logbook; it
+with `--json`, and by the writes of five commands as the Block's hash after
+the write. It sees text, properties and the DONE lines of the logbook; it
 ignores collapsing, `id::` lines, clock lines and where the block stands, so
 moving a block does not change it. Compared by value, never ordered.
 _Avoid_: version, etag, checksum

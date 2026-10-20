@@ -10,6 +10,36 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Added
+
+- The `--json` output of `update-block`, `set-todo-status`,
+  `set-block-property`, `remove-property --id` and `add-journal-block
+  --upsert-heading` (when it replaced a block) carries `hash`, the block's
+  hash after the write (#133). The next write to the same block passes it as
+  `--expect-hash`, with no `get-block` in between; before, a second write on
+  the hash of the first read was refused, since the first write had changed
+  the block. The hash is the one the write's own proof read, so it costs no
+  request: the request counts are pinned in the tests at their earlier values.
+  Measured on a running Logseq, on pages made for it and deleted after: the
+  hash in the output equalled `get-block --json` 5 and 30 seconds later in
+  9 of 9 cases, including text Logseq normalizes on save (trailing spaces,
+  `Some_Key::`), both property writes, `--follow-refs` and an upsert with a
+  child. A chain of five writes on one block went through without a read;
+  after a change from elsewhere, each refused with `precondition_failed`.
+  No `hash` under `--dry-run`, for `set-todo-status` answering `unchanged`
+  (nothing was written), for a block the upsert created, for
+  `remove-property --page`, and when the proof read carries no content (the
+  write is done, so the exit stays 0). `move-block`, `remove-block` and
+  `copy-block` carry none: a move keeps the hash, a removed block has none,
+  and the output does not name the copy. A test fails for a new command with
+  `--expect-*` until it carries the hash or names why not.
+  Two limits stay. `set-block-property` and `remove-property --id` check only
+  the property they wrote, so an edit to the block's text between their read
+  and their write goes into the hash they return. And the case of
+  `set-todo-status ... DONE` with time tracking on (Logseq adds a LOGBOOK) is
+  not measured. The sentences in the 0.17.0 entry that write outputs carry no
+  new hash no longer hold.
+
 ### Changed
 
 - The refusal of `id` and `custom-id` as a property key gives a reason that
