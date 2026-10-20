@@ -98,25 +98,25 @@ def find_heading(api, page_name: str, heading: str, *, cached: bool = True) -> s
 
 
 def find_upsert_target(api, page_name: str, under_heading: str, upsert_heading: str):
-    """Which block ``--upsert-heading`` replaces: ``(heading_uuid, child_uuid)``.
+    """Which block ``--upsert-heading`` replaces: ``(heading_uuid, matches)``.
 
     The one choice the live run and the preview share, so a preview cannot
     name another block than the run writes. It reads without the cache, since
     the answer decides which block is overwritten, and it never creates
     anything: it runs before the journal page and the heading are brought into
-    existence. ``heading_uuid`` is None when the page has no such heading,
-    ``child_uuid`` None when no child of the heading matches (the first match
-    wins).
+    existence. ``heading_uuid`` is None when the page has no such heading;
+    ``matches`` are the uuids of the heading's children that match, every one
+    of them, so that the caller can refuse more than one instead of taking the
+    first.
     """
     heading_uuid = find_heading(api, page_name, under_heading, cached=False)
     if not heading_uuid:
-        return None, None
+        return None, []
     heading_block = api.get_block(heading_uuid, include_children=True, cached=False)
     target = normalize_heading(upsert_heading)
-    for child in (heading_block or {}).get("children") or []:
-        if isinstance(child, dict) and normalize_heading(child.get("content", "")) == target:
-            return heading_uuid, child.get("uuid")
-    return heading_uuid, None
+    return heading_uuid, [child.get("uuid") for child in (heading_block or {}).get("children") or []
+                          if isinstance(child, dict)
+                          and normalize_heading(child.get("content", "")) == target]
 
 
 def find_or_create_heading(api, page_name: str, heading: str, *, keep_last: bool = False) -> str:

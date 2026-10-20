@@ -80,8 +80,8 @@ def test_the_scan_sees_the_writers_it_is_meant_to():
     assert ("headings.py", "find_or_create_heading") in seen
     # Through the helpers, past a direct call:
     assert ("commands/edit.py", "insert_block_cmd") in seen
-    assert ("commands/journal.py", "add_journal_block") in seen
-    assert ("commands/pages.py", "add_note_content") in seen
+    assert ("sectionwrite.py", "apply_section_plan") in seen
+    assert ("sectionwrite.py", "_apply_upsert") in seen
 
 
 @pytest.mark.parametrize("key", sorted(direct_writers()), ids=lambda k: "::".join(k))

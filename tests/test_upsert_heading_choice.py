@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-import logseq_cli.commands.journal as journal
+import logseq_cli.sectionwrite as sectionwrite
 from logseq_cli.api import LogseqAPI
 from logseq_cli.cli import cli
 from tests.conftest import split_runner
@@ -63,18 +63,18 @@ def test_the_choice_does_not_come_from_the_cache(monkeypatch):
 def test_the_preview_chooses_the_way_the_run_does_with_the_setting_off(monkeypatch):
     LogseqHttpDouble.installed(monkeypatch, {JOURNAL: log_with("### Carol\nold")})
     chosen = []
-    real_choice = journal.find_upsert_target
+    real_choice = sectionwrite.find_upsert_target
 
     def record(*args):
         chosen.append((args[1:], real_choice(*args)))
         return chosen[-1][1]
 
-    monkeypatch.setattr(journal, "find_upsert_target", record)
+    monkeypatch.setattr(sectionwrite, "find_upsert_target", record)
     assert run(*UPSERT, "--dry-run").exit_code == 0
     assert run(*UPSERT).exit_code == 0
     preview, live = chosen
     assert preview == live
-    assert preview[1][1] is not None
+    assert preview[1][1]
 
 
 @pytest.mark.parametrize("graph", [{}, {JOURNAL: ["top"]}],
@@ -82,13 +82,13 @@ def test_the_preview_chooses_the_way_the_run_does_with_the_setting_off(monkeypat
 def test_nothing_is_written_when_the_choice_is_made(monkeypatch, graph):
     double = LogseqHttpDouble.installed(monkeypatch, graph)
     written_before = []
-    real_choice = journal.find_upsert_target
+    real_choice = sectionwrite.find_upsert_target
 
     def record(*args):
         written_before.append(list(double.writes()))
         return real_choice(*args)
 
-    monkeypatch.setattr(journal, "find_upsert_target", record)
+    monkeypatch.setattr(sectionwrite, "find_upsert_target", record)
     r = run(*UPSERT)
     assert r.exit_code == 0, r.stderr
     assert written_before == [[]]

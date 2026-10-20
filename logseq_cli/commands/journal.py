@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import click
 
-from logseq_cli.blockprops import REF_TARGET_ID_NOTE, kept_properties
+from logseq_cli.blockprops import REF_TARGET_ID_NOTE
 from logseq_cli.blocktext import refuse_split_heading, refuse_split_tree, with_hashes_in, without_block_ids
 from logseq_cli.cliinput import content_or_file, read_content_file, require_content
 from logseq_cli.config import keep_empty_blocks_last, load_config, resolve_heading
@@ -18,9 +18,6 @@ from logseq_cli.dates import (
 )
 from logseq_cli.group import cli
 from logseq_cli.headings import (
-    first_empty_under,
-    find_upsert_target,
-    find_or_create_heading,
     strip_title_heading,
 )
 from logseq_cli.ids import (
@@ -36,7 +33,6 @@ from logseq_cli.lookup import get_page_content
 from logseq_cli.notes import print_note
 from logseq_cli.outlinetext import (
     contains_hierarchical_content,
-    count_blocks,
     has_mixed_indentation,
     normalize_indentation,
     note_quote_breaks,
@@ -50,10 +46,10 @@ from logseq_cli.output import (
     json_text,
     output,
     uuid_fields,
-    would_go_before_fields,
 )
-from logseq_cli.preconditions import HASH_SOURCES, Expect, check_precondition, read_fresh
-from logseq_cli.safety import Owed, WriteCommand, require_precondition
+from logseq_cli.preconditions import HASH_SOURCES, Expect
+from logseq_cli.safety import WriteCommand
+from logseq_cli.sectionwrite import Upsert, apply_section_plan, plan_fields, plan_lines, plan_section_write
 from logseq_cli.pagenames import journal_page_name
 from logseq_cli.render import (
     blocks_to_markdown,
@@ -67,15 +63,6 @@ from logseq_cli.render import (
 )
 from logseq_cli.strictinsert import (
     BEFORE_EMPTY_SUFFIX,
-    append_in_page,
-    before_first_empty,
-    before_empty_or_append,
-    first_empty_at_end,
-    insert_block_at,
-    insert_block_tree_as_siblings,
-    insert_block_tree_at_page_top,
-    insert_block_tree_with_uuids,
-    insert_tree_at_page_end,
 )
 
 
@@ -453,7 +440,7 @@ def add_journal_entry(ctx, content, date, as_block, as_json, dry_run):
 
 # The precondition belongs to the block --upsert-heading replaces, which is
 # unknown until the command has chosen it: so nothing is owed up front, and the
-# body asks for it after the choice (see find_upsert_target).
+# plan asks for it after the choice (see sectionwrite.plan_section_write).
 @cli.command("add-journal-block", cls=WriteCommand, owes=lambda params: None, epilog="""\b
 Examples:
   logseq-cli --token TOKEN add-journal-block --content "**$(date +%H:%M)** Meeting with [[Bob]]"
@@ -561,9 +548,11 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
     if expect_hash is not None and not upsert_heading:
         raise click.UsageError("--expect-hash goes with --upsert-heading: it is the hash of "
                                "the block that option replaces.")
-    if expect_hash is not None and len(contents) > 1:
-        raise click.UsageError("--expect-hash takes one --content: --upsert-heading replaces "
-                               "one block.")
+    # Several values took the batch path, which never looked at the option:
+    # the upsert was skipped and the old block stayed, with exit 0.
+    if upsert_heading and len(contents) > 1:
+        raise click.UsageError("--upsert-heading replaces one block: pass one --content, "
+                               "or --content-file for several roots.")
     if keep_ids and upsert_heading:
         raise click.UsageError("--keep-ids cannot be combined with --upsert-heading: "
                                "the block it replaces keeps its own uuid.")
@@ -649,310 +638,103 @@ def add_journal_block(ctx, contents, content_file, date, under_heading, upsert_h
                  dropped_ids=collect_block_ids(blocks[:1]))
         print_note(note)
 
-    # For single content: unwrap to scalar for backward-compatible logic below
-    if len(contents) == 1:
-        content = contents[0]
-    else:
-        content = None  # Will be handled in batch path below
-
     # After the checks that can refuse, and on the text as written: dropped
     # id:: lines are gone from it.
     note_quote_breaks([node for c, t in zip(contents, trees)
                        for node in (t if t is not None else [{"content": c}])])
 
-    # --- Batch path: multiple --content values ---
-    if len(contents) > 1:
-        existing = api.get_page(page_name)
-        # Creating the journal page is a write, so it waits for the dry-run
-        # check below: a preview that brings a page into existence is not a
-        # preview. The flag is reported instead, because "the page does not
-        # exist yet" is part of what the run would do.
-        would_create_page = not existing
-        if not existing and not dry_run:
-            api.create_page(page_name, first_block=False)
+    # Each value as it is written: a tree, or one block. A batch value with
+    # mixed indentation is normalized, as the batch path always did.
+    batch = len(contents) > 1
+    values = [("tree", t) if t is not None
+              else ("flat", normalize_indentation(c) if batch and has_mixed_indentation(c) else c)
+              for c, t in zip(contents, trees)]
+    if not upsert_heading and any(kind == "tree" for kind, _ in values):
+        # --content-file always takes the tree path: its flush "- " lines are
+        # roots, which contains_hierarchical_content (indentation-based)
+        # would not detect.
+        print_note("Note: Hierarchical content detected, using structured insertion")
 
-        # Plan each --content value the same way for dry-run and live, so the
-        # reported block count matches what is actually written (a value with
-        # tab sub-bullets expands to a header + children, not one flat block).
-        planned = []  # list of (kind, payload) where kind in {"tree", "flat"}
-        any_hierarchical = False
-        for c, tree in zip(contents, trees):
-            if tree is not None:
-                any_hierarchical = True
-                planned.append(("tree", tree))
-            else:
-                if has_mixed_indentation(c):
-                    c = normalize_indentation(c)
-                planned.append(("flat", c))
-        planned_total = sum(count_blocks(p) if k == "tree" else 1 for k, p in planned)
+    # Which block --upsert-heading replaces is chosen in the plan, before the
+    # journal page and the heading are created, from reads that skip the
+    # cache; its precondition is checked there too, before --dry-run.
+    upsert = Upsert(upsert_heading, Expect(hash=expect_hash)) if upsert_heading else None
+    # Creating the journal page is a write, so it waits for the plan to be
+    # carried out: a preview that brings a page into existence is not one.
+    plan = plan_section_write(api, page_name, under_heading, values,
+                              page_exists=bool(api.get_page(page_name)),
+                              upsert=upsert, keep_last=keep_on, preview=dry_run)
 
-        # The roots as one list: one command is one write, so all of them go
-        # before the empty blocks together, in order (#110).
-        roots = [node for kind, payload in planned
-                 for node in (payload if kind == "tree" else [{"content": payload, "children": []}])]
+    content = contents[0]
+    if plan.path == "upsert":
+        position = f"upsert '{upsert_heading}' under '{under_heading}'"
+    else:
+        position = f"under '{under_heading}'" if under_heading else "top-level"
 
-        if dry_run:
-            would_anchor = (first_empty_under(api, roots, page_name, under_heading)
-                          if keep_on and not would_create_page else None)
-            if as_json:
-                output({"page": page_name, "date": str(d), "blocks": planned_total,
-                        "would_create_page": would_create_page, "contents": list(contents), "dry_run": True,
-                        **would_go_before_fields(would_anchor)}, True)
-            else:
-                if any_hierarchical:
-                    print_note("Note: Hierarchical content detected, using structured insertion")
-                click.echo(f"[DRY RUN] Would add {planned_total} block(s) to journal: {page_name}")
-                if would_anchor:
-                    click.echo(f"  would go before the empty block {would_anchor[:8]}...")
-            if would_create_page:
-                click.echo("  the journal page does not exist yet and would be created")
-                for c in contents:
-                    click.echo(f"  {c[:80]}")
-            return
-
-        heading_uuid = (find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-                        if under_heading else None)
-        end = {"parent_uuid": heading_uuid} if heading_uuid else {"page_name": page_name}
-        uuids, anchor = (before_first_empty(api, roots, keep_ids=keep_ids, **end)
-                         if keep_on else (None, None))
-        if uuids is not None:
-            ahead_of = anchor
-        else:
-            uuids = []
-            for kind, payload in planned:
-                if kind == "tree":
-                    if heading_uuid:
-                        uuids.extend(insert_block_tree_with_uuids(
-                            api, payload, heading_uuid, keep_ids=keep_ids))
-                    else:
-                        # payload is the parsed tree; insert top nodes + children at page level
-                        uuids.extend(insert_block_tree_at_page_top(
-                            api, payload, page_name, keep_ids=keep_ids))
-                else:
-                    if heading_uuid:
-                        r = insert_block_at(api, heading_uuid, payload, sibling=False,
-                                            keep_ids=keep_ids)
-                    else:
-                        r = append_in_page(api, page_name, payload, keep_ids)
-                    uuids.append(r["uuid"])
-        total = len(uuids)
-        if any_hierarchical:
-            print_note("Note: Hierarchical content detected, using structured insertion")
-
-        # The heading was found or written, or the command failed before
-        # the blocks (#93).
-        position = f"under '{under_heading}'" if heading_uuid else "top-level"
+    if dry_run:
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks_added": total, **uuid_fields(uuids),
-                    **before_empty_fields(ahead_of)}, True)
+            payload = {"page": page_name, "date": str(d)}
+            if plan.path == "batch":
+                payload["contents"] = list(contents)
+            else:
+                payload.update(position=position, content=content)
+            output({**payload, "blocks": plan.blocks, "dry_run": True, **plan_fields(plan)}, True)
+            return
+        if plan.path == "upsert":
+            click.echo(f"[DRY RUN] Would upsert to journal: {page_name} ({position})")
         else:
-            click.echo(f"Added {total} block(s) to journal: {page_name} ({position})"
-                       f"{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
-            if uuids:
-                click.echo(f"  uuid: {uuids[0]}")
+            click.echo(f"[DRY RUN] Would add {plan.blocks} block(s) to journal: {page_name} ({position})")
+        for c in contents:
+            click.echo(f"  {c[:120]}{'...' if len(c) > 120 else ''}")
+        for line in plan_lines(plan):
+            click.echo(line)
         return
 
-    tree = trees[0]
+    written = apply_section_plan(api, plan, keep_ids=keep_ids,
+                                 create_page=lambda: api.create_page(page_name, first_block=False))
+    uuids, ahead_of = written.uuids, written.anchor
+    suffix = BEFORE_EMPTY_SUFFIX if ahead_of else ""
 
-    # Which block --upsert-heading replaces is chosen first: before the journal
-    # page and the heading are created, from reads that skip the cache, and the
-    # same way for the preview as for the run.
-    heading_uuid, found_uuid = (find_upsert_target(api, page_name, under_heading, upsert_heading)
-                                if upsert_heading else (None, None))
-    # The precondition is for that block, so it is checked now: on a read past
-    # the cache, before --dry-run and before the page or heading are created.
-    # With no match there is no block and no hash, and creating one is free.
-    expect = Expect(hash=expect_hash)
-    held = {}
-    if upsert_heading and found_uuid:
-        if expect:
-            matched = read_fresh(api, found_uuid)
-            check_precondition(matched, expect)
-            # Held to the text the hash was checked on, as update-block does.
-            held = {"expect": matched.get("content") or ""}
-        else:
-            require_precondition(Owed(("--expect-hash",)), False)
-    elif expect:
-        print_note("Note: --expect-hash has no object: no block matches "
-                   f"'{upsert_heading}' under '{under_heading}', so one is created.")
-
-    # Ensure the journal page exists. Deferred when only
-    # previewing: a dry run must not bring the page into existence.
-    existing = api.get_page(page_name)
-    would_create_page = not existing
-    if not existing and not dry_run:
-        api.create_page(page_name, first_block=False)
-
-    # --- upsert-heading: find-or-replace child block under a heading ---
-    if upsert_heading:
-        if dry_run:
-            position_desc = f"upsert '{upsert_heading}' under '{under_heading}'"
-            # A block to update is written in place; only one that is not there
-            # yet goes at the end of the heading, before the empty blocks there.
-            would_anchor = None
-            if keep_on and heading_uuid and not found_uuid:
-                would_anchor = first_empty_at_end(
-                    api, tree if tree is not None else [{"content": content, "children": []}],
-                    parent_uuid=heading_uuid)
-            if as_json:
-                output({"page": page_name, "date": str(d), "position": position_desc, "content": content, "dry_run": True,
-                        **would_go_before_fields(would_anchor)}, True)
-            else:
-                click.echo(f"[DRY RUN] Would upsert to journal: {page_name} ({position_desc})")
-                click.echo(f"  {content[:120]}{'...' if len(content) > 120 else ''}")
-                if would_anchor:
-                    click.echo(f"  would go before the empty block {would_anchor[:8]}...")
-            return
-
-        if not heading_uuid:
-            heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-
-        if found_uuid:
-            root_uuid = found_uuid
-            # The first root of a tree replaces the matched block; its
-            # children nest under it. Any further roots are siblings after it —
-            # dropping them would lose content while still reporting
-            # count_blocks(tree) as written.
-            text = tree[0]["content"] if tree else content
-            # The matched block keeps its properties, as with update-block (#67).
-            _, kept = kept_properties(api, found_uuid, text)
-            # The replaced block's hash, as its proof read it: the inserts
-            # below go through proofs of their own and leave it as it is.
-            written = api.update_block(found_uuid, text, properties=kept or None, **held)
-            # n counts the UUIDs the inserts returned, plus 1 for the
-            # update. The API proves each insert and raises on one that did
-            # not land, so this is what the graph took, not the size asked
-            # for, as count_blocks(tree) would be.
-            n = 1
-            if tree:
-                kids = tree[0].get("children", [])
-                if kids:
-                    n += len(insert_block_tree_with_uuids(api, kids, found_uuid))
-                if len(tree) > 1:
-                    n += len(insert_block_tree_as_siblings(api, tree[1:], found_uuid))
-            status = "updated"
-        else:
-            written = None
-            # A new block as the last child of the heading: the write
-            # [graph] keep_empty_blocks_last is about. A found block is replaced
-            # where it stands, which is no end position.
-            nodes = tree if tree is not None else [{"content": content, "children": []}]
-            created, ahead_of = before_empty_or_append(
-                api, nodes, lambda: insert_block_tree_with_uuids(api, nodes, heading_uuid),
-                keep_last=keep_on, parent_uuid=heading_uuid)
-            n = len(created)
-            root_uuid = created[0] if created else None
-            status = "created"
-
-        position = f"upsert '{upsert_heading}' under '{under_heading}' ({status})"
+    if plan.path == "upsert":
+        position = f"{position} ({written.status})"
+        n = len(uuids)
+        root_uuid = uuids[0] if uuids else None
         if as_json:
             result = {"page": page_name, "date": str(d), "position": position, "blocks": n,
                       **uuid_fields([u for u in [root_uuid] if u]), **before_empty_fields(ahead_of)}
-            if status == "updated" and isinstance(written, str):
-                result["hash"] = written
+            if written.hash:
+                result["hash"] = written.hash
             output(result, True)
         else:
-            click.echo(f"Added {n} block(s) to journal: {page_name} ({position})"
-                       f"{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
+            click.echo(f"Added {n} block(s) to journal: {page_name} ({position}){suffix}")
             if root_uuid:
                 click.echo(f"  uuid: {root_uuid}")
         return
 
-    # Auto-detect hierarchical content and delegate to structured insertion.
-    # --content-file always takes this path: its flush "- " lines are roots,
-    # which contains_hierarchical_content (indentation-based) would not detect.
-    if tree is not None:
-        print_note("Note: Hierarchical content detected, using structured insertion")
-        n = count_blocks(tree)
-        position = f"under '{under_heading}'" if under_heading else "top-level"
-
-        if dry_run:
-            would_anchor = (first_empty_under(api, tree, page_name, under_heading)
-                          if keep_on and not would_create_page else None)
-            if as_json:
-                output({"page": page_name, "date": str(d), "position": position, "blocks": n, "content": content, "dry_run": True,
-                        **would_go_before_fields(would_anchor)}, True)
-            else:
-                click.echo(f"[DRY RUN] Would add {n} block(s) to journal: {page_name} ({position})")
-                if would_anchor:
-                    click.echo(f"  would go before the empty block {would_anchor[:8]}...")
-            if would_create_page:
-                click.echo("  the journal page does not exist yet and would be created")
-                click.echo(f"  {content[:120]}{'...' if len(content) > 120 else ''}")
-            return
-
-        if under_heading:
-            heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-            uuids, ahead_of = before_empty_or_append(
-                api, tree, lambda: insert_block_tree_with_uuids(
-                    api, tree, heading_uuid, keep_ids=keep_ids),
-                keep_last=keep_on, parent_uuid=heading_uuid, keep_ids=keep_ids)
-        else:
-            uuids, ahead_of = before_empty_or_append(
-                api, tree, lambda: insert_tree_at_page_end(
-                    api, page_name, tree, keep_ids=keep_ids),
-                keep_last=keep_on, page_name=page_name, keep_ids=keep_ids)
-
-        n = len(uuids)
+    if plan.path == "flat":
+        result = written.result
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, **uuid_fields(uuids),
-                    **before_empty_fields(ahead_of)}, True)
+            output({"page": page_name, "date": str(d), "position": position, "result": result,
+                    **uuid_fields(uuids), **before_empty_fields(ahead_of)}, True)
         else:
-            click.echo(f"Added {n} block(s) to journal: {page_name} ({position})"
-                       f"{BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
-            if uuids:
-                click.echo(f"  uuid: {uuids[0]}")
+            click.echo(f"Added block to journal: {page_name} ({position}){suffix}")
+            # Before the preview: the content may itself contain "uuid: ...".
+            click.echo(f"  uuid: {uuids[0]}")
+            click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
         return
 
-    node = [{"content": content, "children": []}]
-    if dry_run:
-        position_desc = f"under '{under_heading}'" if under_heading else "top-level"
-        would_anchor = (first_empty_under(api, node, page_name, under_heading)
-                      if keep_on and not would_create_page else None)
-        if as_json:
-            output({"page": page_name, "date": str(d), "position": position_desc,
-                    "content": content, "would_create_page": would_create_page,
-                    "dry_run": True,
-                    **would_go_before_fields(would_anchor)}, True)
-        else:
-            click.echo(f"[DRY RUN] Would add to journal: {page_name} ({position_desc})")
-            if would_anchor:
-                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
-            if would_create_page:
-                click.echo("  the journal page does not exist yet and would be created")
-            click.echo(f"  {content}")
-        return
-
-    # The write is proven like every other: the API raises when Logseq's
-    # answer names no block. Unchecked, a single flat entry (the common case
-    # for a timestamped log line) was once reported as "Added block to
-    # journal" with exit 0 while nothing had been written.
-    if under_heading:
-        heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-        end = {"parent_uuid": heading_uuid}
-        position = f"under '{under_heading}'"
-    else:
-        end = {"page_name": page_name}
-        position = "top-level"
-    written, ahead_of = (before_first_empty(api, node, keep_ids=keep_ids, **end)
-                         if keep_on else (None, None))
-    if written is not None:
-        result = api.get_block(written[0], include_children=False) or {"uuid": written[0]}
-    elif under_heading:
-        result = insert_block_at(api, heading_uuid, content, sibling=False,
-                                 keep_ids=keep_ids)
-    else:
-        result = append_in_page(api, page_name, content, keep_ids)
-    _u = result["uuid"]
-
+    # The heading was found or written, or the command failed before the
+    # blocks (#93).
+    if plan.path == "batch":
+        position = f"under '{under_heading}'" if written.heading_uuid else "top-level"
     if as_json:
-        output({"page": page_name, "date": str(d), "position": position, "result": result, **uuid_fields([_u]),
-                **before_empty_fields(ahead_of)}, True)
+        output({"page": page_name, "date": str(d), "position": position, "blocks_added": len(uuids),
+                **uuid_fields(uuids), **before_empty_fields(ahead_of)}, True)
     else:
-        click.echo(f"Added block to journal: {page_name} ({position}){BEFORE_EMPTY_SUFFIX if ahead_of else ''}")
-        # Before the preview: the content may itself contain "uuid: ...".
-        click.echo(f"  uuid: {_u}")
-        click.echo(f"  {content[:80]}{'...' if len(content) > 80 else ''}")
+        click.echo(f"Added {len(uuids)} block(s) to journal: {page_name} ({position}){suffix}")
+        if uuids:
+            click.echo(f"  uuid: {uuids[0]}")
+
 
 @cli.command("add-journal-content", cls=WriteCommand, epilog="""\b
 Example:
@@ -1038,39 +820,25 @@ def add_journal_content(ctx, content, content_file, date, under_heading, top_lev
         tree = tree_without_block_ids(tree)
         content = outline_text(tree)  # what the preview shows
 
-    # Ensure the journal page exists
-    existing = api.get_page(page_name)
-    if not existing and not dry_run:
-        api.create_page(page_name, first_block=False)
-
+    plan = plan_section_write(api, page_name, under_heading, [("tree", tree)],
+                              page_exists=bool(api.get_page(page_name)), keep_last=keep_on,
+                              preview=dry_run)
     position = f"under '{under_heading}'" if under_heading else "top-level"
 
     if dry_run:
-        n = count_blocks(tree)
-        would_anchor = (first_empty_under(api, tree, page_name, under_heading)
-                      if keep_on and existing else None)
         if as_json:
-            output({"page": page_name, "date": str(d), "position": position, "blocks": n, "content": content, "dry_run": True,
-                    **would_go_before_fields(would_anchor)}, True)
+            output({"page": page_name, "date": str(d), "position": position, "blocks": plan.blocks,
+                    "content": content, "dry_run": True, **plan_fields(plan)}, True)
         else:
-            click.echo(f"[DRY RUN] Would add {n} block(s) to journal: {page_name} ({position})")
+            click.echo(f"[DRY RUN] Would add {plan.blocks} block(s) to journal: {page_name} ({position})")
             click.echo(f"  {content[:120]}{'...' if len(content) > 120 else ''}")
-            if would_anchor:
-                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
+            for line in plan_lines(plan):
+                click.echo(line)
         return
 
-    if under_heading:
-        heading_uuid = find_or_create_heading(api, page_name, under_heading, keep_last=keep_on)
-        uuids, ahead_of = before_empty_or_append(
-            api, tree, lambda: insert_block_tree_with_uuids(
-                api, tree, heading_uuid, keep_ids=keep_ids),
-            keep_last=keep_on, parent_uuid=heading_uuid, keep_ids=keep_ids)
-    else:
-        uuids, ahead_of = before_empty_or_append(
-            api, tree, lambda: insert_tree_at_page_end(
-                api, page_name, tree, keep_ids=keep_ids),
-            keep_last=keep_on, page_name=page_name, keep_ids=keep_ids)
-
+    written = apply_section_plan(api, plan, keep_ids=keep_ids,
+                                 create_page=lambda: api.create_page(page_name, first_block=False))
+    uuids, ahead_of = written.uuids, written.anchor
     n = len(uuids)
     if as_json:
         output({"page": page_name, "date": str(d), "position": position, "blocks_added": n, "content_added": True, **uuid_fields(uuids),

@@ -12,6 +12,11 @@ file carries most of the reasoning behind the tool.
 
 ### Added
 
+- The `--dry-run` of `add-journal-block --upsert-heading` says what the run
+  would do with the block (#140): `action` is `replace`, with the uuid of the
+  block in `would_replace`, or `create` when no block under the heading
+  matches. It also carries `blocks`, as the other paths' previews did.
+
 - The `--json` output of `update-block`, `set-todo-status`,
   `set-block-property`, `remove-property --id` and `add-journal-block
   --upsert-heading` (when it replaced a block) carries `hash`, the block's
@@ -42,6 +47,14 @@ file carries most of the reasoning behind the tool.
 
 ### Changed
 
+- `add-journal-block --upsert-heading` refuses, before anything is written
+  and under `--dry-run` too, when more than one block under the heading
+  matches (#140): `reason: "ambiguous"`, with their uuids in `matches`.
+  Before, the first one was replaced, and the caller could not tell which.
+  With two `--content` values the option is a usage error (exit 2) before
+  any request; before, the batch path ran without looking at it, so the old
+  block stayed, both values were added under the heading, and the exit was 0.
+
 - The refusal of `id` and `custom-id` as a property key gives a reason that
   holds for every call and, where there is one, the way that works (#131). It
   said a write "would replace the uuid that ((refs)) to the block point at",
@@ -61,6 +74,32 @@ file carries most of the reasoning behind the tool.
   it writes no ref.
 
 ### Fixed
+
+- `add-journal-block --dry-run --json` with two `--content` values, or with
+  a value that has children, printed text after the JSON when the journal
+  page did not exist yet (#140): `json.loads` failed with "Extra data" while
+  the exit was 0. Found in a review of the repository and reproduced against
+  the HTTP double. The tree path also left `would_create_page` out of the
+  JSON, the upsert's preview and the one of `add-journal-content` did too,
+  and no journal preview said whether the heading would be created, which
+  `add-note-content` and `add-block-ref` did. The cause was the shape of the
+  code: the four paths of `add-journal-block`, `add-journal-content` and
+  `add-note-content` each worked out their preview and their run apart, and
+  the previews drifted. They now share one plan (`logseq_cli/sectionwrite.py`)
+  that reads the page, the heading, the block an upsert replaces and the
+  empty block a write goes before once; the preview reports it and the run
+  carries it out, so what the preview says cannot differ from what is
+  written. Every preview of the three now carries `would_create_page` and
+  `would_create_heading`, and the flat path `blocks`; no key was renamed. The
+  write helpers stay as each path had them, and a run sends the requests it
+  sent before. The cost is one read more in the previews of
+  `add-journal-block` and `add-journal-content` under a heading, to look the
+  heading up. Without `--json` the previews of the three now print the same
+  lines for the page, the heading and the empty block, and every
+  `add-journal-block` preview names the count and the position of what it
+  would add and the content given. A new test runs `--dry-run --json` for every
+  writing command and parses stdout as one JSON object; no other command
+  printed anything after it.
 
 - A write that `[graph] keep_empty_blocks_last` puts before the empty blocks
   at the end of a section no longer reports that place unchecked (#138). After the
