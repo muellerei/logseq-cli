@@ -481,7 +481,7 @@ rollback), and the message ends with how many, or "Nothing was written.".
 | `ref_cycle` | `set-todo-status --follow-refs`: the chain of refs comes back to a block it passed | `id` (the block met again), `followed` |
 | `not_a_task` | `set-todo-status` on a block Logseq reads no marker in, or whose marker is not at the start of the text (after an optional `#` prefix and a space), or that only points to another block and `--follow-refs` is missing | `id`; `points_to` for the pointer case |
 | `no_task_matches` | `set-todo-status --content`: blocks match, none is a task; not given with `--follow-refs` | `content`, `page`, `match_count` |
-| `ambiguous` | `set-todo-status --content`: several blocks match | `content`, `page`, `matches` (the uuids of all candidates) |
+| `ambiguous` | `set-todo-status --content`: several blocks match; `add-journal-block --upsert-heading`: several blocks under `--under-heading` match, refused before any write and under `--dry-run` too | `matches` (the uuids of all candidates); `content` and `page` for `set-todo-status` |
 | `missing_selector` | `set-todo-status` without `--id` and without `--content` plus `--page`; refused before any request | none |
 
 `set-property` and `remove-property --name` check the page themselves and

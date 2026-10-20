@@ -45,6 +45,13 @@ class BlockChanged(WriteRefused):
     reason = "block_changed"
 
 
+class AmbiguousTarget(WriteRefused):
+    """Several blocks match the one a write replaces, and taking the first
+    would overwrite one the caller could not tell from the others. Field:
+    matches (their uuids)."""
+    reason = "ambiguous"
+
+
 class BlockNotFound(WriteRefused):
     """The block the caller meant is gone, found out before the write it
     refuses (a call may have written other blocks before, as copy-block does).

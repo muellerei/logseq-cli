@@ -41,6 +41,7 @@ logseq-cli/
 │   ├── preconditions.py # Does the block still match what the caller read: --expect-hash, --expect-tree-hash, --expect-marker
 │   ├── render.py       # Blocks to text; finding and resolving references
 │   ├── safety.py       # What keeps a command from writing: [safety] read_only and require_preconditions, the gates every writing command carries
+│   ├── sectionwrite.py # What a write into a page section would do: one plan for the preview and the run of add-journal-block, add-journal-content and add-note-content
 │   ├── strictinsert.py # Strict Insert: trees and --keep-ids writes land where sent; whether a move is possible; which empty block a write at the end goes before
 │   ├── tasks.py        # What a task is: the eleven markers, their states, reading and swapping a marker
 │   ├── writerefused.py # The ways a write ends without being done or proven, each with its reason

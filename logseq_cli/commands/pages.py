@@ -16,9 +16,6 @@ from logseq_cli.cliinput import content_or_file
 from logseq_cli.config import keep_empty_blocks_last, load_config
 from logseq_cli.group import cli
 from logseq_cli.headings import (
-    first_empty_under,
-    find_heading,
-    find_or_create_heading,
     strip_title_heading,
 )
 from logseq_cli.ids import (
@@ -42,9 +39,9 @@ from logseq_cli.output import (
     json_text,
     output,
     uuid_fields,
-    would_go_before_fields,
 )
 from logseq_cli.safety import WriteCommand
+from logseq_cli.sectionwrite import apply_section_plan, plan_fields, plan_lines, plan_section_write
 from logseq_cli.pagenames import (
     AmbiguousAliasError,
     js_trim,
@@ -70,9 +67,6 @@ from logseq_cli.render import (
 from logseq_cli.strictinsert import (
     BEFORE_EMPTY_SUFFIX,
     create_missing_page,
-    before_empty_or_append,
-    insert_block_tree_with_uuids,
-    insert_tree_at_page_end,
 )
 
 
@@ -710,49 +704,30 @@ def add_note_content(ctx, page, content, content_file, create, under_heading, pr
     # the run and its preview say it alike, in the text and in the JSON.
     where = f"under '{under_heading}' on '{page}'" if under_heading else f"'{page}'"
 
-    if dry_run:
-        # Everything below this point writes — the page, possibly the heading,
-        # then the blocks. The block count comes from the same parse the live
-        # path uses, so the preview reports what would actually land, not the
-        # raw line count.
-        planned = count_blocks(tree)
-        heading_exists = (find_heading(api, page, under_heading) is not None
-                          if under_heading and existing else False)
-        parsed_properties = dict(parse_property_pairs(properties))
-        would_anchor = (first_empty_under(api, tree, page, under_heading)
-                      if keep_on and existing else None)
+    plan = plan_section_write(api, page, under_heading, [("tree", tree)],
+                              page_exists=existing is not None, keep_last=keep_on,
+                              preview=dry_run)
 
+    if dry_run:
+        # Everything after this writes: the page, possibly the heading, then
+        # the blocks. The block count comes from the same parse the live path
+        # uses, so the preview reports what would land, not the line count.
+        parsed_properties = dict(parse_property_pairs(properties))
         if as_json:
-            output({**ref.fields(), "would_create_page": existing is None,
-                    "blocks_added": planned, "under_heading": under_heading,
-                    "would_create_heading": bool(under_heading) and not heading_exists,
+            output({**ref.fields(), "blocks_added": plan.blocks, "under_heading": under_heading,
                     "properties": parsed_properties, "position": where,
-                    **would_go_before_fields(would_anchor),
-                    "dry_run": True}, True)
+                    **plan_fields(plan), "dry_run": True}, True)
         else:
-            click.echo(f"[DRY RUN] Would add {planned} block(s) to {where}")
-            if would_anchor:
-                click.echo(f"  would go before the empty block {would_anchor[:8]}...")
-            if existing is None:
-                click.echo(f"  page: {page} (would be created)")
-            if under_heading and not heading_exists:
-                click.echo(f"  heading: {under_heading} (would be created)")
+            click.echo(f"[DRY RUN] Would add {plan.blocks} block(s) to {where}")
+            for line in plan_lines(plan):
+                click.echo(line)
             for key, value in parsed_properties.items():
                 click.echo(f"  {key}:: {value}")
         return
 
-    create_missing_page(api, target)
-
-    if under_heading:
-        heading_uuid = find_or_create_heading(api, page, under_heading, keep_last=keep_on)
-        uuids, ahead_of = before_empty_or_append(
-            api, tree, lambda: insert_block_tree_with_uuids(
-                api, tree, heading_uuid, keep_ids=keep_ids),
-            keep_last=keep_on, parent_uuid=heading_uuid, keep_ids=keep_ids)
-    else:
-        uuids, ahead_of = before_empty_or_append(
-            api, tree, lambda: insert_tree_at_page_end(api, page, tree, keep_ids=keep_ids),
-            keep_last=keep_on, page_name=page, keep_ids=keep_ids)
+    written = apply_section_plan(api, plan, keep_ids=keep_ids,
+                                 create_page=lambda: create_missing_page(api, target))
+    uuids, ahead_of = written.uuids, written.anchor
 
     # The tree is not empty (text only of the title heading or of id:: lines
     # is refused above), and every insert is proven, so there is a first block.

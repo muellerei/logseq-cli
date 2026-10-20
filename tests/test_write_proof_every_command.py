@@ -154,8 +154,10 @@ DRY_RUN_READS = {
     "add-note-content-keep-ids": 1,
     "add-note-content-new-page": 2,
     "add-journal-block-top": 2,
-    "add-journal-block-heading": 2,
-    "add-journal-block-tree": 2,
+    # One more each since the preview reports whether the heading would be
+    # created: getPageBlocksTree looks for it (sectionwrite.plan_section_write).
+    "add-journal-block-heading": 3,
+    "add-journal-block-tree": 3,
     "add-journal-block-keep-ids": 2,
     # Four: the upsert's preview chooses the block it would replace the way
     # the run does (the page's blocks, then the heading's children), whether
@@ -163,7 +165,8 @@ DRY_RUN_READS = {
     "add-journal-block-upsert": 4,
     "add-journal-block-new-journal": 2,
     "add-journal-content": 2,
-    "add-journal-content-multiline": 2,
+    # One more: the heading lookup for would_create_heading, as above.
+    "add-journal-content-multiline": 3,
     "add-journal-content-keep-ids": 2,
     "add-journal-content-new-journal": 2,
     "add-journal-entry": 2,

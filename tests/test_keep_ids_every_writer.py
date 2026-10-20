@@ -258,7 +258,7 @@ def test_a_heading_not_created_writes_no_id(args):
     api = _fake()
     refused = _not_verified("appendBlockInPage", "Page A", "a new block",
                             "no block uuid in the answer")
-    with patch("logseq_cli.commands.journal.find_or_create_heading", side_effect=refused):
+    with patch("logseq_cli.sectionwrite.find_or_create_heading", side_effect=refused):
         r = _run(args + ["--keep-ids"], api)
     assert r.exit_code == 1
     assert "did not show in Logseq" in r.stderr
