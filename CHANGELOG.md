@@ -40,19 +40,38 @@ file carries most of the reasoning behind the tool.
   after a change from elsewhere, each refused with `precondition_failed`.
   No `hash` under `--dry-run`, for `set-todo-status` answering `unchanged`
   (nothing was written), for a block the upsert created, for
-  `remove-property --page`, and when the proof read carries no content (the
-  write is done, so the exit stays 0). `move-block`, `remove-block` and
+  `remove-property --page`, when the proof read carries no content (the
+  write is done, so the exit stays 0), and for `set-block-property` and
+  `remove-property --id` when the block's text changed while they wrote
+  (#148, below). `move-block`, `remove-block` and
   `copy-block` carry none: a move keeps the hash, a removed block has none,
   and the output does not name the copy. A test fails for a new command with
   `--expect-*` until it carries the hash or names why not.
-  Two limits stay. `set-block-property` and `remove-property --id` check only
-  the property they wrote, so an edit to the block's text between their read
-  and their write goes into the hash they return. And the case of
+  One limit stays: the case of
   `set-todo-status ... DONE` with time tracking on (Logseq adds a LOGBOOK) is
   not measured. The sentences in the 0.17.0 entry that write outputs carry no
   new hash no longer hold.
 
 ### Changed
+
+- `set-block-property` and `remove-property --id` leave `hash` out of their
+  `--json` when the block's text changed between the command's read and the
+  read that proves the write (#148). Before, an edit made in Logseq in that
+  moment went into the hash, and a chained write that passed it as
+  `--expect-hash` overwrote the edit, which nobody had read. The write itself
+  lands and is proven, so the exit stays 0; a script that finds no `hash`
+  reads the block with `get-block`, as after `--dry-run`. The comparison
+  leaves out the lines of the written key and uses the hash's own
+  normalization, so what the hash does not see (`collapsed::`, `id::`,
+  trailing spaces) keeps it. Measured on a running Logseq 0.10.15, on a page
+  made for it and deleted after: `upsertBlockProperty` takes a
+  `collapsed:: true` line out of the text, which a comparison of the raw text
+  would have taken for an edit; with the normalization, none of 15 property
+  writes without an edit lost its hash. No extra request.
+  `upsert_block_property` and `remove_block_property` take `expect` with no
+  default, so a new caller cannot get a hash for text it did not read by
+  leaving it out. Without `--expect-hash` the binding is to the command's own
+  read, not the caller's; closing that gap is up to `require_preconditions`.
 
 - `add-journal-block --content` and `insert-block --content` (or
   `--content-file`) print a `Note:` on stderr when a value that is not read
