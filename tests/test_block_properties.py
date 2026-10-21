@@ -226,7 +226,7 @@ class TestRemovePropertyById:
             r = CliRunner().invoke(cli, [
                 "remove-property", "--id", "b-9", "--key", "prio"])
         assert r.exit_code == 0, r.output
-        api.remove_block_property.assert_called_once_with("b-9", "prio")
+        api.remove_block_property.assert_called_once_with("b-9", "prio", expect="x")
         api.get_page_blocks_tree.assert_not_called()
 
     def test_page_path_still_uses_the_first_block(self):

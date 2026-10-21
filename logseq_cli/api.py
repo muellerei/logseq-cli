@@ -796,7 +796,7 @@ class LogseqAPI:
         self._prove_value(method, target, stored_properties(self, target)[1], key, value)
         return _bound_hash(block, key, expect)
 
-    def _prove_no_property(self, method, target, result, *, key):
+    def _prove_no_property(self, method, target, result, *, key, expect):
         """The block holds no ``key``, neither as a value nor as a text, in
         any spelling Logseq's parser stores as the same key, the key as sent
         among them: remove-property sends a key the parser would drop as
@@ -805,7 +805,8 @@ class LogseqAPI:
         the keyword it is sent (editor/property.cljs
         ``remove-block-property!``, 0.10.15), so ``:Status`` stays after
         ``status`` was removed, and checked under ``status`` alone that read
-        as removed."""
+        as removed. The hash only while the rest of the text is as ``expect``
+        (``_bound_hash``)."""
         block = self._block_to_prove(method, target, f"no {key}::")
         values, texts = stored_properties(self, target)
         wanted = stored_property_key(key)
@@ -813,7 +814,7 @@ class LogseqAPI:
             if stored_property_key(held) == wanted:
                 got = texts.get(held, values.get(held))
                 raise _not_verified(method, target, f"no {key}::", f"{held}:: {got}")
-        return _written_hash(block)
+        return _bound_hash(block, key, expect)
 
     def _prove_no_block(self, method, target, result):
         """No block under ``target`` any more; its children went with it
@@ -1427,12 +1428,14 @@ class LogseqAPI:
                            target=block_uuid, texts=[str(value)], own=block_uuid,
                            proof_args={"key": key, "value": value, "expect": expect})
 
-    def remove_block_property(self, block_uuid: str, key: str):
+    def remove_block_property(self, block_uuid: str, key: str, *, expect: str | None):
         """Remove a property from a block; raises WriteNotVerified unless the
         block then lacks it (``_prove_no_property``). Returns the block's hash
-        as the proof read it (``_written_hash``)."""
+        as the proof read it, or ``None`` when the text beside the property
+        is no longer ``expect`` (``_bound_hash``); required, with no default,
+        as for upsert_block_property."""
         return self._write("logseq.Editor.removeBlockProperty", [block_uuid, key],
-                           target=block_uuid, proof_args={"key": key})
+                           target=block_uuid, proof_args={"key": key, "expect": expect})
 
     def rename_refusal(self, old_name: str, new_name: str) -> str | None:
         """Why renaming ``old_name`` to ``new_name`` is refused, or ``None``.

@@ -413,7 +413,7 @@ def test_property_value_is_compared_stripped(monkeypatch):
 
 @pytest.mark.parametrize("write", [
     lambda api, uuid: api.upsert_block_property(uuid, "k", "v", expect=None),
-    lambda api, uuid: api.remove_block_property(uuid, "k"),
+    lambda api, uuid: api.remove_block_property(uuid, "k", expect=None),
     lambda api, uuid: api.update_block(uuid, "text"),
 ], ids=["upsertBlockProperty", "removeBlockProperty", "updateBlock"])
 def test_property_write_on_unknown_uuid_is_not_verified(monkeypatch, write):

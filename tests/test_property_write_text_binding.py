@@ -178,24 +178,80 @@ def test_expect_none_binds_to_nothing_not_to_the_empty_text(monkeypatch):
         block_hash("prio:: low")
 
 
-def test_with_expect_hash_the_binding_is_the_read_the_check_passed(monkeypatch):
+# --- remove-property --id ------------------------------------------------------------
+
+REMOVE = ["remove-property", "--id", BLOCK, "--key", "prio"]
+WITH_PRIO = f"{TEXT}\nprio:: high"
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+@pytest.mark.parametrize("expect", [False, True])
+def test_remove_property_leaves_out_the_hash_when_the_text_changed(monkeypatch, phase, expect):
+    double = graph(monkeypatch, WITH_PRIO)
+    double.on_next_write(edit_text(double), phase=phase)
+    out = run(*REMOVE, *(expecting(WITH_PRIO) if expect else []))
+    assert out == {"id": BLOCK, "property": "prio", "status": "removed"}
+    assert double.content_of(BLOCK) == "edited meanwhile"
+
+
+def test_remove_property_keeps_the_hash_without_an_edit(monkeypatch):
+    graph(monkeypatch, WITH_PRIO)
+    out = run(*REMOVE, *expecting(WITH_PRIO))
+    assert out["hash"] == block_hash(TEXT)
+    assert out["hash"] == hash_now()
+
+
+def test_remove_property_of_a_missing_key_keeps_the_hash(monkeypatch):
+    double = graph(monkeypatch)
+    out = run(*REMOVE)
+    assert double.sent("removeBlockProperty")
+    assert out["hash"] == hash_now()
+
+
+def test_remove_property_of_a_verbatim_key_keeps_the_hash(monkeypatch):
+    # A key the parser would refuse is sent as given and has no line in the
+    # text; the line exception meets nothing, and the text is unchanged.
+    double = graph(monkeypatch)
+    out = run("remove-property", "--id", BLOCK, "--key", "two words")
+    assert double.sent("removeBlockProperty")
+    assert out["hash"] == hash_now()
+
+
+def test_remove_block_property_takes_expect_with_no_default(monkeypatch):
+    double = graph(monkeypatch, WITH_PRIO)
+    api = LogseqAPI(token="t")
+    with pytest.raises(TypeError):
+        api.remove_block_property(BLOCK, "prio")
+    assert api.remove_block_property(BLOCK, "prio", expect=None) is None
+    assert double.content_of(BLOCK) == TEXT
+    double.set_content(BLOCK, WITH_PRIO)
+    assert api.remove_block_property(BLOCK, "prio", expect=WITH_PRIO) == block_hash(TEXT)
+
+
+# --- both commands ----------------------------------------------------------------
+
+@pytest.mark.parametrize("args, written", [
+    (SET, "edited before the check\nprio:: high"),
+    (REMOVE, "edited before the check"),
+])
+def test_with_expect_hash_the_binding_is_the_read_the_check_passed(monkeypatch, args, written):
     # Someone edits the block between the command's first read and the read
     # its --expect-hash is checked on; the caller had read the edit. The
     # write is bound to the checked read, so the hash stays.
-    double = graph(monkeypatch)
+    double = graph(monkeypatch, WITH_PRIO)
     read = double._handlers["logseq.Editor.getBlock"]
     reads = []
 
-    def edited_after_the_first_read(args):
-        block = read(args)
+    def edited_after_the_first_read(read_args):
+        block = read(read_args)
         reads.append(1)
         if len(reads) == 1:
-            double.set_content(BLOCK, "edited before the check")
+            double.set_content(BLOCK, "edited before the check\nprio:: high")
         return block
 
     double._handlers["logseq.Editor.getBlock"] = edited_after_the_first_read
-    out = run(*SET, *expecting("edited before the check"))
-    assert out["hash"] == block_hash("edited before the check\nprio:: high")
+    out = run(*args, *expecting("edited before the check\nprio:: high"))
+    assert out["hash"] == block_hash(written)
 
 
 # --- no command loses the binding -------------------------------------------------
@@ -206,6 +262,7 @@ def test_with_expect_hash_the_binding_is_the_read_the_check_passed(monkeypatch):
 # that expects none; this pins that each binds to what it read.
 BOUND = {
     "set-block-property": ("upsert_block_property", SET),
+    "remove-property": ("remove_block_property", REMOVE),
 }
 
 
