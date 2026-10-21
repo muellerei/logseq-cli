@@ -396,12 +396,10 @@ def _bound_hash(block: dict, key: str, expect: str | None) -> str | None:
     now would vouch for an edit nobody read. The write itself is proven; only
     the hash goes. ``expect is None``, never its truth value: "" is a text.
     """
-    content = block.get("content")
-    if expect is None or content is None:
+    if expect is None or \
+            text_beside_property(block.get("content"), key) != text_beside_property(expect, key):
         return None
-    if text_beside_property(content, key) != text_beside_property(expect, key):
-        return None
-    return block_hash(content)
+    return _written_hash(block)
 
 
 def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerified:
