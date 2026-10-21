@@ -148,7 +148,7 @@ class TestSetProperty:
     def test_a_key_the_old_way_added_to_a_property_block_reaches_the_page(self):
         graph = PageGraph()
         page = graph.with_property_block("P", "kind:: a", "text")
-        graph.upsert_block_property(page["blocks"][0]["uuid"], "team", "x")
+        graph.upsert_block_property(page["blocks"][0]["uuid"], "team", "x", expect=None)
         _, r = _run(graph, "set-property", "--name", "P", "--key", "team", "--value", "x")
         assert r.exit_code == 0, r.output
         assert _props(graph, "P") == {"kind": "a", "team": "x"}

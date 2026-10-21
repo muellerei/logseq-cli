@@ -157,6 +157,20 @@ def _stored_key(key: str) -> str:
     return key.lower().replace("_", "-")
 
 
+def _key_lines(lines: list, key: str) -> list:
+    """The indexes of ``key``'s lines, in any spelling stored as it, outside a
+    code block: upsertBlockProperty and removeBlockProperty leave a line in a
+    fence alone (measured, 0.10.15). A fence is a line starting with ```."""
+    at, fenced = [], False
+    for j, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+        elif (not fenced and (m := _PROPERTY_LINE.fullmatch(ln))
+              and _stored_key(m.group(1)) == _stored_key(key)):
+            at.append(j)
+    return at
+
+
 def _camel(key: str) -> str:
     """The plugin API camel-cases keys on the way out (created-at →
     createdAt, due-date → dueDate)."""
@@ -314,6 +328,9 @@ class LogseqHttpDouble:
         self.check_editing_form = "raw"
         self.time_tracking = False
         self.blocks_without_content = False
+        self.strip_collapsed_on_upsert = False   # Logseq does, measured
+        self.trim_line_ends_on_upsert = False    # for a line end from a file edit
+        self._next_write = None     # (phase, callback) at the next property write
         self._visible = set()       # page ids on screen
         self.batch_opens_after_checks = 0
         self._opening = None        # [uuid, checks left] of a batch's block
@@ -372,6 +389,15 @@ class LogseqHttpDouble:
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
         self._modes[method] = (mode, from_call)
+
+    def on_next_write(self, callback, *, phase: str):
+        """Run ``callback`` once, at the next upsertBlockProperty or
+        removeBlockProperty: ``before`` the double writes, or ``after`` it
+        wrote and before it answers. Someone editing the block in Logseq
+        while a command writes to it."""
+        if phase not in ("before", "after"):
+            raise ValueError(f"phase must be before or after, not {phase!r}")
+        self._next_write = (phase, callback)
 
     def show_page(self, name):
         """Put the page on screen: Logseq then opens an inserted block."""
@@ -637,7 +663,15 @@ class LogseqHttpDouble:
                     # Logseq's answer to a write that did not happen: null.
                     return self._answer(None)
                 return self._answer({"error": f"{short} failed"})
-        return self._answer(handler(args))
+        hook = None
+        if short in ("upsertBlockProperty", "removeBlockProperty") and self._next_write:
+            hook, self._next_write = self._next_write, None
+        if hook and hook[0] == "before":
+            hook[1]()
+        value = handler(args)
+        if hook and hook[0] == "after":
+            hook[1]()
+        return self._answer(value)
 
     @staticmethod
     def _answer(value):
@@ -1141,8 +1175,11 @@ class LogseqHttpDouble:
         text = _value_text(value)
         line = f"{key}:: {text}"
         lines = node["content"].split("\n") if node["content"] else []
-        at = [j for j, ln in enumerate(lines)
-              if (m := _PROPERTY_LINE.fullmatch(ln)) and _stored_key(m.group(1)) == _stored_key(key)]
+        if self.strip_collapsed_on_upsert:
+            lines = [ln for ln in lines if ln.strip() != "collapsed:: true"]
+        if self.trim_line_ends_on_upsert:
+            lines = [ln.rstrip() for ln in lines]
+        at = _key_lines(lines, key)
         if at:
             lines[at[0]] = line
             lines = [ln for j, ln in enumerate(lines) if j not in at[1:]]
@@ -1160,10 +1197,9 @@ class LogseqHttpDouble:
         found = self._locate(uuid.lower())
         if found:
             node = found[1][found[2]]
-            node["content"] = "\n".join(
-                ln for ln in node["content"].split("\n")
-                if not ((m := _PROPERTY_LINE.fullmatch(ln))
-                        and _stored_key(m.group(1)) == _stored_key(key)))
+            lines = node["content"].split("\n")
+            at = _key_lines(lines, key)
+            node["content"] = "\n".join(ln for j, ln in enumerate(lines) if j not in at)
             node["typed"].pop(_stored_key(key), None)
         return None
 

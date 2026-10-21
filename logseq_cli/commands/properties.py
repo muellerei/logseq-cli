@@ -369,7 +369,7 @@ Note:
   --expect-hash goes with --id only: a page property has no block that was read.
 """ + WRITTEN_HASH_NOTE + """\
   With --id only. No hash under --dry-run, or when it could not be read
-  after the write.
+  after the write, or when the block's text changed while it was written.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--page", "--name", default=None, help="Page name (removes a page property)")
 @click.option("--id", "block_id", default=None, help="Block UUID (removes the property from that block)")
@@ -410,7 +410,10 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         if not block:
             fail(f"Block not found: {block_uuid}", as_json=as_json, id=block_uuid)
         if expect_hash is not None:
-            check_precondition(read_fresh(api, block_uuid), Expect(hash=expect_hash))
+            block = read_fresh(api, block_uuid)
+            check_precondition(block, Expect(hash=expect_hash))
+        # Bound to the text read here: the hash goes when someone edits it meanwhile.
+        expect = block.get("content")
         target = f"block '{block_uuid}'"
         result = {"id": block_uuid, "property": key, "status": "removed"}
     else:
@@ -426,6 +429,8 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         # property line to Logseq, so there is no line to take out, and Logseq
         # removes it by name.
         block_uuid = blocks[0]["uuid"]
+        # No hash for --page (below), so nothing to bind.
+        expect = None
         target = f"page '{page}'"
         result = {**ref.fields(), "property": key, "status": "removed"}
 
@@ -434,7 +439,7 @@ def remove_property(ctx, page, block_id, key, expect_hash, dry_run, as_json):
         _preview_removal(result, target, key, existing.get(key), key in existing, as_json)
         return
 
-    written = api.remove_block_property(str(block_uuid), key)
+    written = api.remove_block_property(str(block_uuid), key, expect=expect)
 
     if as_json:
         # --id only: with --page the block written is the page's property
@@ -504,7 +509,8 @@ Note:
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
 """ + WRITTEN_HASH_NOTE + """\
-  No hash under --dry-run, or when it could not be read after the write.
+  No hash under --dry-run, or when it could not be read after the write, or
+  when the block's text changed while it was written.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
@@ -538,7 +544,8 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
         fail(f"Block not found: {block_id}", as_json=as_json,
              reason="block_not_found", id=block_id)
     if expect_hash is not None:
-        check_precondition(read_fresh(api, block_id), Expect(hash=expect_hash))
+        block = read_fresh(api, block_id)
+        check_precondition(block, Expect(hash=expect_hash))
 
     if dry_run:
         # The preview also shows the old value: one more read, for the
@@ -555,7 +562,8 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
             click.echo(f"  now: {value}")
         return
 
-    written = api.upsert_block_property(block_id, key, value)
+    # Bound to the text read above: the hash goes when someone edits it meanwhile.
+    written = api.upsert_block_property(block_id, key, value, expect=block.get("content"))
 
     result = {"block": block_id, "property": key, "value": value, "status": "updated"}
     # The hash the proof read, for the next write's --expect-hash.

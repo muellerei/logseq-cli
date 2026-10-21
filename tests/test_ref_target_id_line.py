@@ -117,7 +117,7 @@ WRITES = {
     "updateBlock": lambda api, text: api.update_block(OWN, text),
     "insertBatchBlock": lambda api, text: api.insert_batch_block(
         OWN, [{"content": "parent", "children": [{"content": text}]}]),
-    "upsertBlockProperty": lambda api, text: api.upsert_block_property(OWN, "see", text),
+    "upsertBlockProperty": lambda api, text: api.upsert_block_property(OWN, "see", text, expect=None),
 }
 
 

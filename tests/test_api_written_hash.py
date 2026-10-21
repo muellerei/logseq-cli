@@ -19,8 +19,10 @@ TEXT = "TODO ship the parser"
 # The public write behind each proof that reads the target block.
 WRITES = {
     "_prove_text": lambda api, u: api.update_block(u, "TODO ship the parser, fixed"),
-    "_prove_property": lambda api, u: api.upsert_block_property(u, "prio", "high"),
-    "_prove_no_property": lambda api, u: api.remove_block_property(u, "prio"),
+    "_prove_property": lambda api, u: api.upsert_block_property(u, "prio", "high",
+                                                                expect=TEXT + "\nprio:: low"),
+    "_prove_no_property": lambda api, u: api.remove_block_property(u, "prio",
+                                                                   expect=TEXT + "\nprio:: low"),
 }
 
 

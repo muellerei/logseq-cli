@@ -175,9 +175,11 @@ way.
   alone would not see a child added since.
 - **The hash a write returns says what the write left, not what you know.**
   It lets the next write to the block skip the read; whoever decides on the
-  content reads it. `set-block-property` and `remove-property --id` check only
-  the property they wrote, so an edit to the block's text between their read
-  and their write goes unnoticed and is part of the hash they return.
+  content reads it. `set-block-property` and `remove-property --id` leave it
+  out when the block's text changed between their read and the read that
+  proves the write, so it never vouches for an edit they did not read. Without
+  `--expect-hash` that read is the command's own, not yours: an edit between
+  your read and the command's still goes unseen.
   `move-block`, `remove-block` and `copy-block` return none: a move keeps the
   hash, a removed block has none, and the output does not name the copy.
 - **It guards against a mistake, not against an agent that sets out to avoid

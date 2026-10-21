@@ -60,7 +60,7 @@ class TestAddNoteContentProperties:
                 "--json",
             ])
         assert result.exit_code == 0, result.output
-        api.upsert_block_property.assert_called_once_with("appended-uuid", "type", "note")
+        api.upsert_block_property.assert_called_once_with("appended-uuid", "type", "note", expect=None)
         payload = json.loads(result.output)
         assert payload["uuid"] == "appended-uuid"
 
@@ -91,7 +91,7 @@ class TestAddNoteContentProperties:
                 "--property", "count=5",
             ])
         assert result.exit_code == 0, result.output
-        api.upsert_block_property.assert_called_once_with("appended-uuid", "count", 5)
+        api.upsert_block_property.assert_called_once_with("appended-uuid", "count", 5, expect=None)
         # value is an int, not the string "5"
         assert api.upsert_block_property.call_args.args[2] == 5
         assert isinstance(api.upsert_block_property.call_args.args[2], int)
@@ -106,7 +106,7 @@ class TestAddNoteContentProperties:
                 "add-note-content", "--page", "Foo", "--content", "body",
                 "--property", f"zip={typed}"])
         assert result.exit_code == 0, result.output
-        api.upsert_block_property.assert_called_once_with("appended-uuid", "zip", typed)
+        api.upsert_block_property.assert_called_once_with("appended-uuid", "zip", typed, expect=None)
         json.dumps(api.upsert_block_property.call_args.args[2], allow_nan=False)
 
     @pytest.mark.parametrize("typed, sent", [("5", 5), ("01234", "01234")])
@@ -136,7 +136,7 @@ class TestInsertBlockProperties:
                 "--json",
             ])
         assert result.exit_code == 0, result.output
-        api.upsert_block_property.assert_called_once_with("appended-uuid", "k", "v")
+        api.upsert_block_property.assert_called_once_with("appended-uuid", "k", "v", expect=None)
         payload = json.loads(result.output)
         assert payload["uuid"] == "appended-uuid"
         assert payload["properties"] == {"k": "v"}
@@ -226,7 +226,7 @@ class TestRemovePropertyById:
             r = CliRunner().invoke(cli, [
                 "remove-property", "--id", "b-9", "--key", "prio"])
         assert r.exit_code == 0, r.output
-        api.remove_block_property.assert_called_once_with("b-9", "prio")
+        api.remove_block_property.assert_called_once_with("b-9", "prio", expect="x")
         api.get_page_blocks_tree.assert_not_called()
 
     def test_page_path_still_uses_the_first_block(self):

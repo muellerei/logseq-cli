@@ -146,13 +146,13 @@ def test_gate_refuses_update_block(double, api):
 
 def test_gate_refuses_upsert_block_property(double, api):
     x = _uuid(double, "target block")
-    _assert_refused(double, lambda: api.upsert_block_property(x, "k", "v"), x)
+    _assert_refused(double, lambda: api.upsert_block_property(x, "k", "v", expect=None), x)
 
 
 def test_gate_refuses_remove_block_property(double, api):
     double.add_page("Props Page", ["body\nprio:: 1"])
     x = _uuid(double, "body\nprio:: 1")
-    _assert_refused(double, lambda: api.remove_block_property(x, "prio"), x)
+    _assert_refused(double, lambda: api.remove_block_property(x, "prio", expect=None), x)
 
 
 def test_gate_refuses_move_block_source(double, api):
@@ -294,9 +294,9 @@ def test_gate_lets_unrelated_writes_through(double, api, write):
     double.editing = _uuid(double, "unrelated block")
     calls = {
         "update_block": lambda: api.update_block(x, "new text"),
-        "upsert_block_property": lambda: api.upsert_block_property(x, "k", "v"),
+        "upsert_block_property": lambda: api.upsert_block_property(x, "k", "v", expect=None),
         "remove_block_property": lambda: api.remove_block_property(
-            _uuid(double, "body\nprio:: 1"), "prio"),
+            _uuid(double, "body\nprio:: 1"), "prio", expect=None),
         "move_block_next_to_open": lambda: api.move_block(x, anchor, {"children": True}),
         "set_blocks_id": lambda: api.set_blocks_id([y]),
         "remove_block": lambda: api.remove_block(x, expect_tree=None),

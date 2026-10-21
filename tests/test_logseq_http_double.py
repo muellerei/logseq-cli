@@ -353,6 +353,83 @@ def test_remove_block_property(double):
     assert block["properties"] == {"keep": 1}
 
 
+def test_on_next_write_runs_before_the_property_write(double):
+    # Someone edits the text just before the write lands: the write keeps it.
+    double.add_page("Probe Page", ["x"])
+    uuid = double.uuid_of("x")
+    double.on_next_write(lambda: double.set_content(uuid, "edited"), phase="before")
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == "edited\nk:: v"
+
+
+def test_on_next_write_runs_after_the_property_write_and_once(double):
+    double.add_page("Probe Page", ["x"])
+    uuid = double.uuid_of("x")
+    calls = []
+    double.on_next_write(lambda: (calls.append(1), double.set_content(uuid, "edited")),
+                         phase="after")
+    answer(double, "removeBlockProperty", uuid, "k")
+    assert double.content_of(uuid) == "edited"
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert calls == [1]
+    assert double.content_of(uuid) == "edited\nk:: v"
+
+
+def test_on_next_write_waits_for_a_property_write(double):
+    double.add_page("Probe Page", ["x"])
+    uuid = double.uuid_of("x")
+    calls = []
+    double.on_next_write(lambda: calls.append(1), phase="after")
+    answer(double, "updateBlock", uuid, "y")
+    assert calls == []
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert calls == [1]
+
+
+def test_on_next_write_takes_before_or_after(double):
+    with pytest.raises(ValueError):
+        double.on_next_write(lambda: None, phase="during")
+
+
+def test_upsert_keeps_collapsed_and_line_ends_by_default(double):
+    double.add_page("Probe Page", ["x  \ncollapsed:: true"])
+    uuid = double.uuid_of("x  \ncollapsed:: true")
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == "x  \ncollapsed:: true\nk:: v"
+
+
+def test_upsert_drops_collapsed_when_switched_on(double):
+    # Measured, 0.10.15: upsertBlockProperty takes collapsed:: true out of
+    # the text.
+    double.strip_collapsed_on_upsert = True
+    double.add_page("Probe Page", ["x\ncollapsed:: true"])
+    uuid = double.uuid_of("x\ncollapsed:: true")
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == "x\nk:: v"
+
+
+def test_upsert_trims_line_ends_when_switched_on(double):
+    # Whitespace at a line end comes from editing the file; Logseq's own
+    # writes do not keep it.
+    double.trim_line_ends_on_upsert = True
+    double.add_page("Probe Page", ["x  \nmore\t"])
+    uuid = double.uuid_of("x  \nmore\t")
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == "x\nmore\nk:: v"
+
+
+def test_property_writes_leave_a_line_in_a_code_block_alone(double):
+    # Measured, 0.10.15: a line of the key in a fence is code, upsert and
+    # remove write only the key's line outside it.
+    fenced = "x\n```yaml\nk:: 1\n```"
+    double.add_page("Probe Page", [fenced])
+    uuid = double.uuid_of(fenced)
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == fenced + "\nk:: v"
+    answer(double, "removeBlockProperty", uuid, "k")
+    assert double.content_of(uuid) == fenced
+
+
 def test_upsert_on_unknown_uuid_is_null(double):
     assert answer(double, "upsertBlockProperty", UNKNOWN, "k", "v") is None
 

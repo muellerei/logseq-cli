@@ -152,8 +152,8 @@ A write that ends a section (`add-journal-block`, `add-journal-content`,
 | Command | Description |
 |---------|-------------|
 | `set-property --page NAME --key KEY --value VAL [--dry-run]` | Set/update a page property, in the page's property block (made before the first block when there is none), so Logseq and `query-pages-by-property` see it at once. `title` is refused: it would rename the page; use `rename-page`. So is `collapsed`, which Logseq reads as the block's folded state. `--dry-run` shows the value being overwritten, or that the key is new. The key is stored as Logseq reads it back (lower-case, `_` as `-`, noted on stderr); a key Logseq would drop — whitespace, `/`, `:` and similar — is refused before anything is read, and so are `id` and `custom-id`, which Logseq reads as the block's uuid |
-| `remove-property (--page NAME \| --id UUID) --key KEY [--expect-hash H] [--dry-run]` | `--expect-hash H` goes with `--id` (usage error with `--page`) and refuses with `precondition_failed` unless the block is still the one that was read. Remove a page property; the property block goes with its last one, unless it is the page's only block. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it; a key `set-property` would refuse is passed through as given, except `id`, which holds the block's uuid and is refused before anything is read. Under `--json` the output carries `hash`, the block's hash after the write, for the next write's `--expect-hash`; not under `--dry-run`, and only with `--id` |
-| `set-block-property --id UUID --key KEY --value VAL [--expect-hash H] [--dry-run]` | Set/update a block property. `--expect-hash H` refuses with `precondition_failed` unless the block is still the one that was read, before `--dry-run` and the write. Fails on an unknown UUID, with or without `--dry-run`; `--dry-run` also shows the old value. Keys follow the `set-property` rule. Under `--json` the output carries `hash`, the block's hash after the write, for the next write's `--expect-hash`; not under `--dry-run` |
+| `remove-property (--page NAME \| --id UUID) --key KEY [--expect-hash H] [--dry-run]` | `--expect-hash H` goes with `--id` (usage error with `--page`) and refuses with `precondition_failed` unless the block is still the one that was read. Remove a page property; the property block goes with its last one, unless it is the page's only block. `--id` targets a single block instead of the page. `--dry-run` names the value that would go, or reports that the key is not set. The key is addressed as `set-property` stores it; a key `set-property` would refuse is passed through as given, except `id`, which holds the block's uuid and is refused before anything is read. Under `--json` the output carries `hash`, the block's hash after the write, for the next write's `--expect-hash`; not under `--dry-run`, not when the block's text changed while it was written, and only with `--id` |
+| `set-block-property --id UUID --key KEY --value VAL [--expect-hash H] [--dry-run]` | Set/update a block property. `--expect-hash H` refuses with `precondition_failed` unless the block is still the one that was read, before `--dry-run` and the write. Fails on an unknown UUID, with or without `--dry-run`; `--dry-run` also shows the old value. Keys follow the `set-property` rule. Under `--json` the output carries `hash`, the block's hash after the write, for the next write's `--expect-hash`; not under `--dry-run`, and not when the block's text changed while it was written |
 
 ### Page Management (2)
 
@@ -198,9 +198,10 @@ logseq-cli set-block-property --id 6650a1b2-0000-4000-8000-000000000001 --key pr
 `update-block`, `set-todo-status`, `set-block-property`, `remove-property --id`
 and `add-journal-block --upsert-heading` (when it replaced a block) carry it.
 It says what the write left, not that you know the content. It is absent under
-`--dry-run`, for `set-todo-status` `unchanged` and when it could not be read;
-`jq -er` then stops the chain, `jq -r '.hash // empty'` lets a script read with
-`get-block` instead.
+`--dry-run`, for `set-todo-status` `unchanged`, when it could not be read, and
+for `set-block-property` and `remove-property --id` when the block's text
+changed while they wrote; `jq -er` then stops the chain, `jq -r '.hash // empty'`
+lets a script read with `get-block` instead.
 
 An upsert whose content has children replaces the matched block's children and
 owes `--expect-tree-hash`. Its `--json` carries `tree_hash` for the next run, so
