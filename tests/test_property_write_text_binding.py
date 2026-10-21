@@ -62,6 +62,25 @@ def test_an_edit_to_the_text_counts():
         text_beside_property("edited\nstatus:: done", "status")
 
 
+def test_a_completion_in_the_drawer_counts():
+    # The hash sees a State "DONE" line (strip_volatile), so the comparison has
+    # to: a replayed completion would otherwise get a hash it never read.
+    drawer = 'DONE task\nstatus:: done\n:LOGBOOK:\n{}:END:'
+    assert text_beside_property(drawer.format(""), "status") != \
+        text_beside_property(drawer.format('* State "DONE" from "TODO" [2026-01-01 Thu 10:00]\n'),
+                             "status")
+
+
+def test_a_line_of_the_key_in_a_code_block_is_code_and_counts():
+    # In a fence the line is code, and the hash sees it: an edit there has to
+    # count, or the hash would vouch for it.
+    fenced = "text\nstatus:: done\n```yaml\nstatus:: {}\n```"
+    assert text_beside_property(fenced.format(1), "status") != \
+        text_beside_property(fenced.format(2), "status")
+    assert text_beside_property(fenced.format(1), "status") == \
+        text_beside_property(fenced.format(1).replace("status:: done", "status:: todo"), "status")
+
+
 # --- set-block-property ----------------------------------------------------------
 
 BLOCK = "00000000-0000-4000-8000-0000000000b1"
@@ -259,6 +278,29 @@ def test_with_expect_hash_the_binding_is_the_read_the_check_passed(monkeypatch, 
     double._handlers["logseq.Editor.getBlock"] = edited_after_the_first_read
     out = run(*args, *expecting("edited before the check\nprio:: high"))
     assert out["hash"] == block_hash(written)
+
+
+# set-block-property only. Logseq leaves the fence alone on both writes
+# (measured, 0.10.15), but it holds the values in its database, and the double
+# reads them from the text, where the fenced line counts (as after updateBlock,
+# #68). After removeBlockProperty Logseq no longer holds the key; the double
+# still would, and the proof would fail. remove-property shares
+# text_beside_property, which the code-block test above pins.
+FENCED = f"{TEXT}\n```yaml\nprio:: 1\n```\nprio:: low"
+
+
+def test_a_line_of_the_key_in_a_code_block_keeps_the_hash(monkeypatch):
+    graph(monkeypatch, FENCED)
+    out = run(*SET)
+    assert out["hash"] == hash_now()
+
+
+def test_an_edit_to_the_key_in_a_code_block_leaves_out_the_hash(monkeypatch):
+    # The line looks like the written key, but it is code, and the hash sees it.
+    double = graph(monkeypatch, FENCED)
+    double.on_next_write(lambda: double.set_content(
+        BLOCK, double.content_of(BLOCK).replace("prio:: 1", "prio:: 2")), phase="after")
+    assert "hash" not in run(*SET)
 
 
 # --- no command loses the binding -------------------------------------------------

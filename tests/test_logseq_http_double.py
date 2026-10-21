@@ -418,6 +418,18 @@ def test_upsert_trims_line_ends_when_switched_on(double):
     assert double.content_of(uuid) == "x\nmore\nk:: v"
 
 
+def test_property_writes_leave_a_line_in_a_code_block_alone(double):
+    # Measured, 0.10.15: a line of the key in a fence is code, upsert and
+    # remove write only the key's line outside it.
+    fenced = "x\n```yaml\nk:: 1\n```"
+    double.add_page("Probe Page", [fenced])
+    uuid = double.uuid_of(fenced)
+    answer(double, "upsertBlockProperty", uuid, "k", "v")
+    assert double.content_of(uuid) == fenced + "\nk:: v"
+    answer(double, "removeBlockProperty", uuid, "k")
+    assert double.content_of(uuid) == fenced
+
+
 def test_upsert_on_unknown_uuid_is_null(double):
     assert answer(double, "upsertBlockProperty", UNKNOWN, "k", "v") is None
 

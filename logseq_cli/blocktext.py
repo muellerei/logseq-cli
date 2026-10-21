@@ -295,14 +295,18 @@ def text_beside_property(content: str, key: str) -> str:
     same key, wherever they sit; what is left gets block_hash's normalisation.
     A property write compares this before and after: its own line changes, and
     Logseq takes ``collapsed:: true`` out of the text on upsertBlockProperty
-    (measured, 0.10.15), which a raw comparison would take for an edit. No
-    code-block mask, as in _prove_text: a line in a fence that looks like the
-    key goes on both sides alike.
+    (measured, 0.10.15), which a raw comparison would take for an edit. A line
+    in a code block is code and stays (property_line_mask): the hash sees it,
+    so an edit to it has to count.
     """
     wanted = stored_property_key(key)
-    rest = "\n".join(line for line in (content or "").split("\n")
-                     if not ((m := PROPERTY_LINE_RE.match(line))
-                             and stored_property_key(m.group(1)) == wanted))
+    lines = (content or "").split("\n")
+
+    def is_key(line):
+        return stored_property_key(PROPERTY_LINE_RE.match(line).group(1)) == wanted
+
+    rest = "\n".join(line for line, prop in zip(lines, property_line_mask(lines))
+                     if not (prop and is_key(line)))
     return strip_volatile(normalize_block_text(rest, keep_logbook=True))
 
 

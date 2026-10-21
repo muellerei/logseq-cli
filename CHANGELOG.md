@@ -63,12 +63,15 @@ file carries most of the reasoning behind the tool.
   reads the block with `get-block`, as after `--dry-run`. The comparison
   leaves out the lines of the written key and uses the hash's own
   normalization, so what the hash does not see (`collapsed::`, `id::`,
-  trailing spaces) keeps it. Measured on a running Logseq 0.10.15, on pages
-  made for it and deleted after: `upsertBlockProperty` takes a
-  `collapsed:: true` line out of the text, which a comparison of the raw text
-  would have taken for an edit. With the change, 15 property writes without
-  an edit and one to a page's property block all kept their hash, and it
-  equalled `get-block --json` 5 and 30 seconds later. No extra request.
+  trailing spaces) keeps it. A line of the key inside a code block is code
+  and stays in the comparison, since the hash sees it. Measured on a running
+  Logseq 0.10.15, on pages made for it and deleted after:
+  `upsertBlockProperty` takes a `collapsed:: true` line out of the text,
+  which a comparison of the raw text would have taken for an edit, and both
+  writes leave a line of the key in a code block alone. With the change, 15
+  property writes without an edit, one to a page's property block and five
+  with the key in a code block all kept their hash, and it equalled
+  `get-block --json` 5 and 30 seconds later. No extra request.
   `upsert_block_property` and `remove_block_property` take `expect` with no
   default, so a new caller cannot get a hash for text it did not read by
   leaving it out. Without `--expect-hash` the binding is to the command's own

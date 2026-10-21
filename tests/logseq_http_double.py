@@ -157,6 +157,20 @@ def _stored_key(key: str) -> str:
     return key.lower().replace("_", "-")
 
 
+def _key_lines(lines: list, key: str) -> list:
+    """The indexes of ``key``'s lines, in any spelling stored as it, outside a
+    code block: upsertBlockProperty and removeBlockProperty leave a line in a
+    fence alone (measured, 0.10.15). A fence is a line starting with ```."""
+    at, fenced = [], False
+    for j, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+        elif (not fenced and (m := _PROPERTY_LINE.fullmatch(ln))
+              and _stored_key(m.group(1)) == _stored_key(key)):
+            at.append(j)
+    return at
+
+
 def _camel(key: str) -> str:
     """The plugin API camel-cases keys on the way out (created-at →
     createdAt, due-date → dueDate)."""
@@ -1165,8 +1179,7 @@ class LogseqHttpDouble:
             lines = [ln for ln in lines if ln.strip() != "collapsed:: true"]
         if self.trim_line_ends_on_upsert:
             lines = [ln.rstrip() for ln in lines]
-        at = [j for j, ln in enumerate(lines)
-              if (m := _PROPERTY_LINE.fullmatch(ln)) and _stored_key(m.group(1)) == _stored_key(key)]
+        at = _key_lines(lines, key)
         if at:
             lines[at[0]] = line
             lines = [ln for j, ln in enumerate(lines) if j not in at[1:]]
@@ -1184,10 +1197,9 @@ class LogseqHttpDouble:
         found = self._locate(uuid.lower())
         if found:
             node = found[1][found[2]]
-            node["content"] = "\n".join(
-                ln for ln in node["content"].split("\n")
-                if not ((m := _PROPERTY_LINE.fullmatch(ln))
-                        and _stored_key(m.group(1)) == _stored_key(key)))
+            lines = node["content"].split("\n")
+            at = _key_lines(lines, key)
+            node["content"] = "\n".join(ln for j, ln in enumerate(lines) if j not in at)
             node["typed"].pop(_stored_key(key), None)
         return None
 
