@@ -266,6 +266,7 @@ def apply_block_properties(api, block_uuid: str, pairs) -> dict:
     """Upsert parsed KEY=VALUE pairs onto a block. Returns the applied {key: value}."""
     applied = {}
     for key, value in parse_property_pairs(pairs):
+        # The callers print no hash of this block, so there is no read to bind to.
         api.upsert_block_property(block_uuid, key, value, expect=None)
         applied[key] = value
     return applied

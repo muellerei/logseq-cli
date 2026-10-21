@@ -200,8 +200,8 @@ and `add-journal-block --upsert-heading` (when it replaced a block) carry it.
 It says what the write left, not that you know the content. It is absent under
 `--dry-run`, for `set-todo-status` `unchanged`, when it could not be read, and
 for `set-block-property` and `remove-property --id` when the block's text
-changed while they wrote; `jq -er` then stops the chain, `jq -r '.hash // empty'` lets a script read with
-`get-block` instead.
+changed while they wrote; `jq -er` then stops the chain, `jq -r '.hash // empty'`
+lets a script read with `get-block` instead.
 
 An upsert whose content has children replaces the matched block's children and
 owes `--expect-tree-hash`. Its `--json` carries `tree_hash` for the next run, so

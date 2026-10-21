@@ -151,6 +151,13 @@ def test_logseqs_own_normalisation_keeps_the_hash(monkeypatch, switch, content):
     assert out["hash"] == hash_now()
 
 
+def test_an_empty_block_binds_to_its_empty_text(monkeypatch):
+    # "" is a text the command read, not "read nothing".
+    graph(monkeypatch, "")
+    out = run(*SET)
+    assert out["hash"] == hash_now()
+
+
 def test_a_block_of_only_properties_keeps_the_hash(monkeypatch):
     graph(monkeypatch, "owner:: alice")
     out = run(*SET)
