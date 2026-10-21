@@ -287,6 +287,8 @@ def test_help_names_the_hash_field_and_when_it_is_absent(name):
     assert "could not be read after the write" in text
     if name == "set-todo-status":
         assert "(unchanged)" in text
+    if name == "set-block-property":
+        assert "or when the block's text changed while it was written" in text
 
 
 @pytest.mark.parametrize("name", _commands_with_a_precondition())

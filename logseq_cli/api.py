@@ -24,6 +24,7 @@ from logseq_cli.blocktext import (
     refuse_split_property,
     refuse_split_tree,
     stored_property_key,
+    text_beside_property,
     tree_hash,
     tree_texts,
     without_block_ids,
@@ -384,6 +385,23 @@ def _written_hash(block: dict) -> str | None:
     and the hash of the empty text would pass for the block's."""
     content = block.get("content")
     return None if content is None else block_hash(content)
+
+
+def _bound_hash(block: dict, key: str, expect: str | None) -> str | None:
+    """_written_hash for a property write, bound to the text its command read.
+
+    ``expect`` is the ``content`` of that read. ``None`` when there was none,
+    or when the text beside ``key`` (text_beside_property) changed between it
+    and the proof read: someone edited the block meanwhile, and a hash taken
+    now would vouch for an edit nobody read. The write itself is proven; only
+    the hash goes. ``expect is None``, never its truth value: "" is a text.
+    """
+    content = block.get("content")
+    if expect is None or content is None:
+        return None
+    if text_beside_property(content, key) != text_beside_property(expect, key):
+        return None
+    return block_hash(content)
 
 
 def _not_verified(method: str, target, expected: str, got: str) -> WriteNotVerified:
@@ -771,11 +789,12 @@ class LogseqAPI:
                 self._prove_value(method, target, texts, key, value)
         return _written_hash(block)
 
-    def _prove_property(self, method, target, result, *, key, value):
-        """The block holds ``key`` with ``value`` in its text form."""
+    def _prove_property(self, method, target, result, *, key, value, expect):
+        """The block holds ``key`` with ``value`` in its text form. The hash
+        only while the rest of the text is as ``expect`` (``_bound_hash``)."""
         block = self._block_to_prove(method, target, f"{key}:: {_property_text(value).strip()}")
         self._prove_value(method, target, stored_properties(self, target)[1], key, value)
-        return _written_hash(block)
+        return _bound_hash(block, key, expect)
 
     def _prove_no_property(self, method, target, result, *, key):
         """The block holds no ``key``, neither as a value nor as a text, in
@@ -1394,14 +1413,19 @@ class LogseqAPI:
         """Get backlinks using native Logseq API (faster than brute-force search)."""
         return self.call("logseq.Editor.getPageLinkedReferences", [page_name])
 
-    def upsert_block_property(self, block_uuid: str, key: str, value):
+    def upsert_block_property(self, block_uuid: str, key: str, value, *,
+                              expect: str | None):
         """Set or update a property on a block; raises WriteNotVerified
         unless the block then holds it (``_prove_property``). Returns the
-        block's hash as the proof read it (``_written_hash``)."""
+        block's hash as the proof read it, or ``None`` when the text beside
+        the property is no longer ``expect``, the ``content`` the caller read
+        (``_bound_hash``). Required, with no default, so that no caller gets
+        a hash for text it did not read by forgetting it; ``None`` binds to
+        nothing and returns no hash."""
         refuse_split_property(key, value)
         return self._write("logseq.Editor.upsertBlockProperty", [block_uuid, key, value],
                            target=block_uuid, texts=[str(value)], own=block_uuid,
-                           proof_args={"key": key, "value": value})
+                           proof_args={"key": key, "value": value, "expect": expect})
 
     def remove_block_property(self, block_uuid: str, key: str):
         """Remove a property from a block; raises WriteNotVerified unless the

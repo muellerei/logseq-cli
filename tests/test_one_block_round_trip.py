@@ -106,7 +106,7 @@ class TestTheApiRefusesBeforeSending:
     def test_a_property_value_is_block_text_too(self):
         api = self._api()
         with pytest.raises(SplitBlockError):
-            api.upsert_block_property(ANCHOR, "k", "v\n- x")
+            api.upsert_block_property(ANCHOR, "k", "v\n- x", expect=None)
         api.call.assert_not_called()
 
     def test_the_message_ends_with_its_last_line(self):

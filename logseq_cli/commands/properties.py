@@ -504,7 +504,8 @@ Note:
   A value is one line: a line break in it is refused, since Logseq would read
   each line after it as a line of the block (a block, a property, its id).
 """ + WRITTEN_HASH_NOTE + """\
-  No hash under --dry-run, or when it could not be read after the write.
+  No hash under --dry-run, or when it could not be read after the write, or
+  when the block's text changed while it was written.
 """ + REF_TARGET_ID_NOTE)
 @click.option("--id", "block_id", required=True, help="Block UUID")
 @click.option("--key", required=True, help="Property key")
@@ -538,7 +539,8 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
         fail(f"Block not found: {block_id}", as_json=as_json,
              reason="block_not_found", id=block_id)
     if expect_hash is not None:
-        check_precondition(read_fresh(api, block_id), Expect(hash=expect_hash))
+        block = read_fresh(api, block_id)
+        check_precondition(block, Expect(hash=expect_hash))
 
     if dry_run:
         # The preview also shows the old value: one more read, for the
@@ -555,7 +557,8 @@ def set_block_property(ctx, block_id, key, value, expect_hash, dry_run, as_json)
             click.echo(f"  now: {value}")
         return
 
-    written = api.upsert_block_property(block_id, key, value)
+    # Bound to the text read above: the hash goes when someone edits it meanwhile.
+    written = api.upsert_block_property(block_id, key, value, expect=block.get("content"))
 
     result = {"block": block_id, "property": key, "value": value, "status": "updated"}
     # The hash the proof read, for the next write's --expect-hash.

@@ -288,6 +288,24 @@ def block_hash(content: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def text_beside_property(content: str, key: str) -> str:
+    """The text of ``content`` beside property ``key``, as the hash sees it.
+
+    The lines of ``key`` go, in any spelling stored_property_key reads as the
+    same key, wherever they sit; what is left gets block_hash's normalisation.
+    A property write compares this before and after: its own line changes, and
+    Logseq takes ``collapsed:: true`` out of the text on upsertBlockProperty
+    (measured, 0.10.15), which a raw comparison would take for an edit. No
+    code-block mask, as in _prove_text: a line in a fence that looks like the
+    key goes on both sides alike.
+    """
+    wanted = stored_property_key(key)
+    rest = "\n".join(line for line in (content or "").split("\n")
+                     if not ((m := PROPERTY_LINE_RE.match(line))
+                             and stored_property_key(m.group(1)) == wanted))
+    return strip_volatile(normalize_block_text(rest, keep_logbook=True))
+
+
 def tree_hash(block: dict) -> str:
     """The hash of a block and all its descendants: content and order.
 

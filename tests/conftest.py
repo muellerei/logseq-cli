@@ -608,7 +608,7 @@ class PageGraph:
         elif block.get("pre"):
             block["pre"], page["props"] = False, {}
 
-    def upsert_block_property(self, uuid, key, value):
+    def upsert_block_property(self, uuid, key, value, *, expect):
         found = self.locate(uuid)
         if found:
             _, siblings, i, _ = found

@@ -399,7 +399,7 @@ def test_update_block_that_loses_a_property_is_not_verified(monkeypatch):
 def test_property_value_forms(monkeypatch, key, value):
     double = _one_page(monkeypatch, "alpha block")
     api = LogseqAPI(token="t")
-    api.upsert_block_property(double.uuid_of("alpha block"), key, value)
+    api.upsert_block_property(double.uuid_of("alpha block"), key, value, expect=None)
     assert api.writes_landed == 1
 
 
@@ -407,12 +407,12 @@ def test_property_value_is_compared_stripped(monkeypatch):
     # Logseq's parser trims a value (blockprops.py), so "x " reads back "x".
     double = _one_page(monkeypatch, "alpha block")
     api = LogseqAPI(token="t")
-    api.upsert_block_property(double.uuid_of("alpha block"), "k", "x ")
+    api.upsert_block_property(double.uuid_of("alpha block"), "k", "x ", expect=None)
     assert api.writes_landed == 1
 
 
 @pytest.mark.parametrize("write", [
-    lambda api, uuid: api.upsert_block_property(uuid, "k", "v"),
+    lambda api, uuid: api.upsert_block_property(uuid, "k", "v", expect=None),
     lambda api, uuid: api.remove_block_property(uuid, "k"),
     lambda api, uuid: api.update_block(uuid, "text"),
 ], ids=["upsertBlockProperty", "removeBlockProperty", "updateBlock"])

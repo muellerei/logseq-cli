@@ -271,7 +271,8 @@ class TestSetBlockPropertyDryRun:
         result = CliRunner().invoke(cli, ["set-block-property", "--id", "00000000-0000-4000-8000-0000000000b1",
                                           "--key", "prio", "--value", "3"])
         assert result.exit_code == 0
-        api.upsert_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "prio", 3)
+        api.upsert_block_property.assert_called_once_with("00000000-0000-4000-8000-0000000000b1", "prio", 3,
+                                                          expect=None)
         api.get_block.assert_called_once()
 
     def test_missing_block_fails_without_dry_run(self, api):
