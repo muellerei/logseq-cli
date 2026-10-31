@@ -10,6 +10,8 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-31
+
 ### Added
 
 - `add-journal-block` takes `--expect-tree-hash` with `--upsert-heading`
