@@ -208,7 +208,9 @@ def guard_preconditions(command, params: dict) -> None:
     owed = owes(params) if owes is not None else None
     if owed is None:
         return
-    require_precondition(owed, any(params.get(_param_name(option)) is not None
+    # click hands a repeatable option (multiple=True) that was left out as
+    # (), not None: counted as given, the switch would be off without a word.
+    require_precondition(owed, any(params.get(_param_name(option)) not in (None, ())
                                    for option in owed.options))
 
 
