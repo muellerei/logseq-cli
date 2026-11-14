@@ -264,6 +264,26 @@ class TestOwesIsDecidedPerCall:
         result = invoke("zz-synthetic", "--expect-hash", "abc")
         assert result.exit_code == 0 and "body ran" in result.stdout
 
+    def test_a_repeatable_option_left_out_is_not_given(self, monkeypatch, config):
+        """click hands a ``multiple=True`` option left out as ``()``, not
+        ``None`` (click 8.5.0). Counted as given, the switch would be off for
+        every command with a repeatable precondition, without a word."""
+        @click.command("zz-repeat", cls=WriteCommand,
+                       owes=lambda params: Owed(("--expect-hash",)))
+        @click.option("--expect-hash", "expect_hash", multiple=True)
+        @click.option("--json", "as_json", is_flag=True)
+        @handle_connection_error
+        def zz(expect_hash, as_json):
+            click.echo("body ran")
+
+        monkeypatch.setitem(cli.commands, "zz-repeat", zz)
+        config(ON)
+        refused = invoke("zz-repeat", "--json")
+        assert error_of(refused)["reason"] == "precondition_required"
+        assert "body ran" not in refused.stdout
+        met = invoke("zz-repeat", "--expect-hash", "abc", "--expect-hash", "def")
+        assert met.exit_code == 0 and "body ran" in met.stdout
+
     def test_always_still_gives_way_to_read_only(self, synthetic):
         synthetic(lambda params: Owed(("--expect-hash",), always="--next"))
         assert error_of(invoke("--read-only", "zz-synthetic", "--json"))["reason"] == "read_only"
