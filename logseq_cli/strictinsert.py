@@ -510,19 +510,23 @@ def check_move(api, src_uuid: str, target_uuid: str) -> None:
             "Nothing was moved.")
 
 
-def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = False) -> None:
-    """Move ``src_uuid`` to ``target_uuid``, refusing up front what Logseq
-    would not do; LogseqAPI.move_block proves that it landed.
+MOVE_OPTIONS = {"under": {"children": True}, "before": {"before": True}, "after": {}}
+
+
+def move_block_verified(api, src_uuid: str, target_uuid: str, *, place: str = "under") -> None:
+    """Move ``src_uuid`` to ``place`` relative to ``target_uuid``, refusing up
+    front what Logseq would not do; LogseqAPI.move_block proves that it landed.
 
     Unlike copy+remove, the block keeps its UUID, so every ``((block-ref))``
     pointing at it survives the move.
 
-    Position follows what ``moveBlock`` actually does, which is narrower than
-    its option names suggest (probed against a live graph): ``before: true``
-    places the block as the sibling *before* the target; everything else,
-    including the ``sibling: true`` the option list implies, nests it as the
-    target's first child. There is no "sibling after" - anchor on the following
-    block with ``before`` instead.
+    Where ``moveBlock`` puts the block, measured against Logseq 0.10.15
+    (2026-11-14): ``children: true`` (``under``) nests it as the target's
+    FIRST child, collapsed or not, so moving several blocks under one target
+    one by one reverses their order; ``before: true`` puts it in front of the
+    target as a sibling; an empty option map (``after``) puts it right behind
+    the target's subtree as a sibling. ``sibling: true`` and ``before: false``
+    act as the empty map.
 
     ``moveBlock`` answers ``null`` for a successful move, a non-existent target
     AND a refused one (Logseq declines to move a block into its own subtree, and
@@ -533,7 +537,7 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, before: bool = 
     src_uuid = unwrap_block_id(src_uuid)
     target_uuid = unwrap_block_id(target_uuid)
     check_move(api, src_uuid, target_uuid)
-    api.move_block(src_uuid, target_uuid, {"before": True} if before else {"children": True})
+    api.move_block(src_uuid, target_uuid, MOVE_OPTIONS[place])
 
 
 def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, keep_ids: bool = False) -> list:

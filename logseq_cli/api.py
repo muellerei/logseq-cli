@@ -735,24 +735,27 @@ class LogseqAPI:
             raise failed
         return [b["uuid"] for b in new]
 
-    def _prove_move(self, method, target, result, *, to, before):
-        """``target`` sits right in front of ``to`` (``before``), or among its
-        children. Among, not first: moveBlock's own placement is not held to
-        more than it was (that finding is left open)."""
+    def _prove_move(self, method, target, result, *, to, place):
+        """``target`` (the moved block) sits where ``place`` says, relative to
+        ``to``: ``under`` as its first child, ``before`` right in front of it,
+        ``after`` right behind it, among the same siblings. Measured against
+        Logseq 0.10.15 (2026-11-14), so the first child is held to, not just
+        "among the children"."""
         landed = self.get_block(to, include_children=True) or {}
-        if before:
-            # Directly in front: "same parent" would pass a move that did
+        if place == "under":
+            first = (landed.get("children") or [None])[0]
+            ok = isinstance(first, dict) and first.get("uuid") == target
+            where = f"it as the first child of block {to[:8]}..."
+        else:
+            # Directly next to it: "same parent" would pass a move that did
             # nothing, since source and target often share one already.
             siblings = self._sibling_uuids_in_order(landed)
+            first, second = (target, to) if place == "before" else (to, target)
             try:
-                ok = siblings.index(target) + 1 == siblings.index(to)
+                ok = siblings.index(first) + 1 == siblings.index(second)
             except ValueError:
                 ok = False
-            where = f"it directly before block {to[:8]}..."
-        else:
-            ok = any(isinstance(c, dict) and c.get("uuid") == target
-                     for c in landed.get("children") or [])
-            where = f"it under block {to[:8]}..."
+            where = f"it directly {place} block {to[:8]}..."
         if not ok:
             raise _not_verified(method, target, where, "it somewhere else")
         return result
@@ -1253,8 +1256,11 @@ class LogseqAPI:
         Structural move, unlike copy+remove: the block keeps its UUID, so
         ``((block-ref))`` backlinks survive. Logseq answers null whether it
         moved or not; ``_prove_move`` reads the block back where it was sent
-        (``before``: right in front of ``target_uuid``; else among its
-        children) and raises WriteNotVerified otherwise.
+        and raises WriteNotVerified otherwise. The place follows from the
+        options, as measured against Logseq 0.10.15 (2026-11-14):
+        ``before: true`` right in front of ``target_uuid``; ``children: true``
+        its first child; anything else (an empty map) right behind its
+        subtree, as a sibling.
 
         Both uuids go in lower case, as Logseq's are: the proof compares them
         with what Logseq reads back, and one typed in capitals failed a move
@@ -1265,7 +1271,9 @@ class LogseqAPI:
         return self._write(
             "logseq.Editor.moveBlock", [src_uuid, target_uuid, options],
             target=src_uuid,
-            proof_args={"to": target_uuid, "before": bool(options.get("before"))},
+            proof_args={"to": target_uuid,
+                        "place": ("before" if options.get("before")
+                                  else "under" if options.get("children") else "after")},
         )
 
     def update_block(self, block_uuid: str, content: str, properties: dict = None, *,

@@ -601,10 +601,24 @@ def test_insert_batch_block_keeps_uuid_only_when_asked(double):
 def test_move_block(double):
     double.add_page("Probe Page", ["a", "b", {"content": "c", "children": ["c1"]}])
     a, c = double.uuid_of("a"), double.uuid_of("c")
+    # Measured, 0.10.15 (2026-11-14): children: true is the FIRST child.
     assert answer(double, "moveBlock", a, c, {"children": True}) is None
-    assert double.tree("Probe Page") == [("b", []), ("c", [("c1", []), ("a", [])])]
+    assert double.tree("Probe Page") == [("b", []), ("c", [("a", []), ("c1", [])])]
     answer(double, "moveBlock", a, double.uuid_of("b"), {"before": True})
     assert double.tree("Probe Page") == [("a", []), ("b", []), ("c", [("c1", [])])]
+    # An empty option map: the sibling right behind the target's subtree.
+    answer(double, "moveBlock", a, c, {})
+    assert double.tree("Probe Page") == [("b", []), ("c", [("c1", [])]), ("a", [])]
+
+
+def test_move_block_misplace_lands_last(double):
+    """``misplace`` puts ``children: true`` where the double once did, as the
+    last child: a move that lands, but not where Logseq puts it."""
+    double.add_page("Probe Page", ["a", {"content": "c", "children": ["c1"]}])
+    double.set_mode("moveBlock", "misplace")
+    assert answer(double, "moveBlock", double.uuid_of("a"), double.uuid_of("c"),
+                  {"children": True}) is None
+    assert double.tree("Probe Page") == [("c", [("c1", []), ("a", [])])]
 
 
 def test_set_blocks_id_forms(double):
