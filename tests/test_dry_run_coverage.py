@@ -707,8 +707,8 @@ class TestEveryWriteHasADryRun:
     # than it should, and a sample of five cannot see that — nor can a set
     # derived from the scan, which would assert that the scan equals itself.
     # move-block joined when the scan learned to follow writing helpers
-    # (#31): it moves only through move_block_verified, and was a writer the
-    # body scan never saw.
+    # (#31): it moves only through writing helpers (move_blocks_verified now),
+    # and was a writer the body scan never saw.
     _KNOWN_WRITERS = {
         "add-block-ref", "add-journal-block", "add-journal-content",
         "add-journal-entry", "add-note-content", "copy-block", "create-page",

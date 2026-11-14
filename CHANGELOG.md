@@ -10,6 +10,29 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+### Added
+
+- `move-block --after X` puts the block right behind X as a sibling, behind
+  everything under X. Measured against Logseq 0.10.15, that is where
+  `moveBlock` with an empty option map puts it.
+- `move-block` takes `--id` more than once, and the blocks then stand at the
+  position in the order given, with `--under`, `--before` and `--after`
+  alike. Moving them one by one under the same target reversed them, and
+  agent sessions did move blocks under one target one after another. The
+  first block goes to the position and each next one right behind the one
+  before. `--expect-hash` repeats with `--id`, one per block in the same
+  order. Every block is checked before the first move, under `--dry-run`
+  too: a block given twice (`duplicate_source`), one inside another given
+  block (`source_in_source`), a wrong number of hashes
+  (`expect_hash_count`), the target among them or inside one of them. A
+  block open in Logseq's editor in any of them refuses the run before the
+  first move, so no move lands; the dry run does not check the editor, as
+  for a single block. When a later move fails,
+  the earlier ones stay, and the error names them in `moved`. With one
+  `--id` the output is as before, plus `source_ids`. Checked live on a
+  probe page against Logseq 0.10.15, including a chain whose previous block
+  has children of its own.
+
 ### Fixed
 
 - `move-block --under` counted a move as proven when the block landed

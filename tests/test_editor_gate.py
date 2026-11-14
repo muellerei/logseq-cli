@@ -673,3 +673,27 @@ def test_batch_proof_failure_names_an_editor_it_could_not_ask(double, api):
         _batch(api, double)
     assert "checkEditing" in str(refused.value)
     assert api.writes_landed == 0
+
+
+class TestMoveSeveralChecksEverySourceFirst:
+    """move-block with several --id: a block open in any source's subtree
+    refuses before the first move, so nothing lands; one open elsewhere does
+    not refuse (only the subtrees count, as for a single move)."""
+
+    def _move(self, double, *sources):
+        ids = [p for s in sources for p in ("--id", _uuid(double, s))]
+        return split_runner().invoke(cli, ["--token", "t", "move-block", *ids,
+                                           "--after", _uuid(double, "anchor block"), "--json"])
+
+    def test_open_block_in_the_last_source_refuses_before_any_move(self, double):
+        double.editing = _uuid(double, "kid block")
+        r = self._move(double, "target block", "ref target", "parent block")
+        assert r.exit_code == 1
+        assert json.loads(r.stderr)["reason"] == "open_in_editor"
+        assert double.sent("moveBlock") == []
+
+    def test_open_block_outside_every_source_does_not_refuse(self, double):
+        double.editing = _uuid(double, "unrelated block")
+        r = self._move(double, "target block", "ref target")
+        assert r.exit_code == 0, r.stderr
+        assert len(double.sent("moveBlock")) == 2

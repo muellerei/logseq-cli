@@ -513,6 +513,10 @@ class LogseqAPI:
         # (refuse_open_before_first_write); None once it is sent, or when
         # the call asked for nothing of the kind.
         self._first_write_refuses_open = None
+        # The blocks whose subtrees the call's first write checks for an open
+        # block (refuse_open_in_sources_before_first_write); None once it is
+        # sent, or when the call asked for nothing of the kind.
+        self._first_write_refuses_open_in = None
 
     def _cache_key(self, method, args):
         try:
@@ -625,7 +629,9 @@ class LogseqAPI:
            for it (``editing``, when given, is that answer already, so
            set_blocks_id does not ask again); refuse the first write here
            if a block is open and the call asked for that
-           (:meth:`refuse_open_before_first_write`);
+           (:meth:`refuse_open_before_first_write`), or if it is open in the
+           subtree of a block the call named
+           (:meth:`refuse_open_in_sources_before_first_write`);
         2. find the Block Ref targets in ``texts`` that need an id, ``own``
            excepted (reads only);
         3. refuse if the open block is one the entry's ``editor`` rule
@@ -661,10 +667,15 @@ class LogseqAPI:
         can_refuse = kind.editor != "never"
         refs = [u for t in texts for u in block_ref_uuids(t)]
         first_refuses, self._first_write_refuses_open = self._first_write_refuses_open, None
+        first_sources, self._first_write_refuses_open_in = self._first_write_refuses_open_in, None
         if editing is _UNSET:
-            editing = self.check_editing() if can_refuse or refs or first_refuses else None
+            editing = (self.check_editing()
+                       if can_refuse or refs or first_refuses or first_sources else None)
         if editing is not None and first_refuses:
             self.refuse_open(editing, why=first_refuses)
+        if editing is not None and first_sources:
+            for source in first_sources:
+                self._gate_subtree(editing, source)
         wanted = self._ref_targets_needing_id(refs, own=own)
         if editing is not None and can_refuse:
             getattr(self, f"_gate_{kind.editor}")(editing, target)
@@ -1062,6 +1073,19 @@ class LogseqAPI:
         Only the first: the writes after it keep their own rules.
         """
         self._first_write_refuses_open = why
+
+    def refuse_open_in_sources_before_first_write(self, uuids) -> None:
+        """Refuse this call's first write while a block is open in the
+        subtree of any of ``uuids``.
+
+        For a move of several blocks: each move is gated on its own source
+        only, so a block open in the third source would refuse the third
+        move, after two had landed. Asked at the first write instead, nothing
+        lands. Narrower than :meth:`refuse_open_before_first_write`, which
+        refuses for any open block: a single move refuses only for its own
+        subtree, and so does a list of them. The writes after the first keep
+        their own gate."""
+        self._first_write_refuses_open_in = tuple(uuids)
 
     def page_name_of(self, block) -> str:
         """The name of the page ``block`` (as getBlock answers it) is on, or "".

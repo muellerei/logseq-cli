@@ -351,3 +351,22 @@ class TestUpdateBlockOwesAHash:
         LogseqHttpDouble.installed(monkeypatch, {"Probe Page": [{"content": "note", "uuid": TASK}]})
         result = invoke("update-block", "--id", TASK, "--content", "new", "--json")
         assert result.exit_code == 0, result.stderr
+
+
+class TestMoveBlockOwesAHashPerId:
+    def test_several_ids_without_a_hash_are_refused_before_any_request(self, config, sent):
+        config(ON)
+        result = invoke("move-block", "--id", TASK, "--id", TASK.replace("a1", "a2"),
+                        "--under", TASK.replace("a1", "a3"), "--json")
+        assert error_of(result)["reason"] == "precondition_required"
+        assert sent == []
+
+    def test_one_hash_per_id_meets_the_switch(self, config, monkeypatch):
+        from logseq_cli.blocktext import block_hash
+        double = LogseqHttpDouble.installed(monkeypatch, {"page a": ["a", "b", "x"]})
+        config(ON)
+        result = invoke("move-block", "--id", double.uuid_of("a"), "--id", double.uuid_of("b"),
+                        "--after", double.uuid_of("x"), "--expect-hash", block_hash("a"),
+                        "--expect-hash", block_hash("b"), "--json")
+        assert result.exit_code == 0, result.stderr
+        assert [n for n, _ in double.tree("page a")] == ["x", "a", "b"]

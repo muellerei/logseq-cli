@@ -46,7 +46,7 @@ for example the token from Logseq's API settings, passed as `LOGSEQ_TOKEN`.
   `rename-page`, `update-block` and `replace-text` show what they would
   change and write nothing. Deletes also refuse while `((refs))` from
   elsewhere point into the target; `--ignore-refs` overrides that, so name
-  the refs to the user first.
+  the refs to the user first. `move-block --id A --id B --under P` (or `--before`, `--after`) keeps A, B in that order; one by one under P they would reverse.
 - **Read large pages in parts**: `get-page --outline` lists the headings with
   their UUIDs, `get-page --heading "## X"` returns one section, and
   `get-page --max-chars N` cuts the output to size and names how to go on.

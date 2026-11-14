@@ -23,7 +23,13 @@ from logseq_cli.outlinetext import (
     trailing_empty_run,
 )
 from logseq_cli.pagenames import PageToWrite
-from logseq_cli.writerefused import WriteNotVerified, WriteRefused, partial_state
+from logseq_cli.writerefused import (
+    DuplicateSource,
+    SourceInSource,
+    WriteNotVerified,
+    WriteRefused,
+    partial_state,
+)
 
 
 def create_missing_page(api, target: PageToWrite) -> None:
@@ -538,6 +544,53 @@ def move_block_verified(api, src_uuid: str, target_uuid: str, *, place: str = "u
     target_uuid = unwrap_block_id(target_uuid)
     check_move(api, src_uuid, target_uuid)
     api.move_block(src_uuid, target_uuid, MOVE_OPTIONS[place])
+
+
+def check_moves(api, sources: list, target: str) -> None:
+    """Refuse a list of moves before anything is written: every
+    :func:`check_move`, no block twice, none inside another one's subtree.
+
+    Shared by the run and its dry run. Compared in lower case, as
+    :func:`check_move` compares: a uuid typed in capitals is the same block.
+    A block inside another source's subtree moves along with it, so naming it
+    too has two readings; the CLI refuses rather than pick one.
+    """
+    keys = [unwrap_block_id(s).lower() for s in sources]
+    if len(set(keys)) != len(keys):
+        raise DuplicateSource(
+            "The same block is given twice in --id. Nothing was moved.", ids=list(sources))
+    for src in keys:
+        check_move(api, src, target)
+    for src in keys:
+        block = api.get_block(src, include_children=True)
+        inner = {u.lower() for u in collect_child_uuids(block or {})}
+        for other in keys:
+            if other in inner:
+                raise SourceInSource(
+                    f"Block {other[:8]}... lies inside {src[:8]}..., which is moved "
+                    "with everything under it; give only one of them. Nothing was moved.",
+                    source=other, inside=src)
+
+
+def move_blocks_verified(api, sources: list, target: str, *, place: str,
+                         landed=lambda moved: None) -> None:
+    """Move ``sources`` so they stand at ``place`` in the order given: the
+    first to ``place``, each next one right ``after`` the one before. One way
+    for all three places, with one proof per step, and no reversing.
+
+    ``landed`` gets the uuids in place so far after each move, for what a
+    later failure has to say.
+    """
+    move_block_verified(api, sources[0], target, place=place)
+    landed(list(sources[:1]))
+    for i in range(1, len(sources)):
+        # Checked as a list before the first move (check_moves). Checked again
+        # here, a block deleted in Logseq meanwhile would end the call with
+        # "Nothing was moved" after a move had landed; the proof of the write
+        # fails instead, with what stayed named.
+        api.move_block(unwrap_block_id(sources[i]), unwrap_block_id(sources[i - 1]),
+                       MOVE_OPTIONS["after"])
+        landed(list(sources[:i + 1]))
 
 
 def insert_block_tree_as_first_children(api, tree: list, parent_uuid: str, *, keep_ids: bool = False) -> list:
