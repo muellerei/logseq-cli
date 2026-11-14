@@ -20,11 +20,16 @@ file carries most of the reasoning behind the tool.
   the block the first child, collapsed target or not, so moving several
   blocks under one target one by one reverses their order. An empty option
   map places it as a sibling right behind the target's subtree. The code
-  said there was no such place, and the test fakes had both cases wrong:
+  said there was no such place, as the 0.8.0 entry did ("everything else
+  nests it as the first child"), and the reason 0.17.0 gave for not moving
+  the source of `copy-block --remove` ("only before another or as a first
+  child") no longer holds. The test fakes had both cases wrong:
   two appended a moved child last, one nested an empty-map move as the
   first child. The suite stayed green because of the soft proof. Fakes and
   docstrings now follow the measurement, and the HTTP double has a mode
-  that places a move as the last child, which the proof must catch.
+  that places a move as the last child, which the proof must catch. The
+  refusal now reads "expected it as the first child of block ..." where it
+  said "expected it under block ...".
 
 ## [0.18.0] - 2026-10-31
 

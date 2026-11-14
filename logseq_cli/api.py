@@ -743,8 +743,8 @@ class LogseqAPI:
         "among the children"."""
         landed = self.get_block(to, include_children=True) or {}
         if place == "under":
-            children = [c for c in landed.get("children") or [] if isinstance(c, dict)]
-            ok = bool(children) and children[0].get("uuid") == target
+            first = (landed.get("children") or [None])[0]
+            ok = isinstance(first, dict) and first.get("uuid") == target
             where = f"it as the first child of block {to[:8]}..."
         else:
             # Directly next to it: "same parent" would pass a move that did

@@ -98,9 +98,12 @@ when the target sits at the top level, because its parent is then the page and
 was reported as failed, moved or not. The subtree case is checked before the
 call instead, so it is refused with its reason rather than guessed at
 afterwards. The option names mislead as well, which
-only a live graph will tell you: `before: true` inserts a sibling in front, and
-everything else — including the `sibling: true` the API's own option list
-suggests — nests the block as the target's first child. This matters beyond
+only a live graph will tell you. Measured against Logseq 0.10.15: `children:
+true` nests the block as the target's first child, `before: true` inserts a
+sibling in front, and an empty option map (or `sibling: true`, which acts the
+same) puts it right behind the target's subtree. Up to 0.18.0 the code held
+that this last place did not exist, and the proof of `--under` asked only for
+"among the children". This matters beyond
 tidiness, because the alternative route quietly destroys data: `copy-block
 --remove` writes a new block with a new UUID and deletes the original, so every
 `((block-ref))` aimed at it dangles afterwards. A structural move keeps the
