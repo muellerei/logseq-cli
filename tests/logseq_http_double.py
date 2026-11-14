@@ -18,7 +18,10 @@ Switches, all on the instance:
   method. ``noop`` answers ``null`` and writes nothing: that is how Logseq
   answers a write that did not happen, so every proof has something to
   catch, ``insertBlock`` and ``createPage`` included. ``error`` answers an
-  error object. With ``from_call`` the first k-1 calls still execute.
+  error object. ``misplace`` (``moveBlock`` only; elsewhere it executes)
+  puts a ``children: true`` move where Logseq does not, as the last child:
+  a move that lands, but in the wrong place. With ``from_call`` the first
+  k-1 calls still execute.
 * ``editing``: the uuid of the block open in the editor, or ``None``.
 * ``blocks_without_content``: block answers leave ``content`` out. Not a
   form Logseq was seen to answer; it stands for a hash that cannot be taken.
@@ -52,7 +55,7 @@ WRITES = frozenset({
     "updateBlock", "removeBlock", "upsertBlockProperty", "removeBlockProperty",
     "insertBatchBlock", "moveBlock", "setBlocksId",
 })
-MODES = ("execute", "noop", "error")
+MODES = ("execute", "noop", "error", "misplace")
 CHECK_EDITING_FORMS = ("raw", "json", "empty", "error", "ok1", "timeout")
 
 # These four check the uuid before anything else, in every mode.
@@ -658,7 +661,7 @@ class LogseqHttpDouble:
                 return self._answer({"error": f"{args[0] if args else None} is not a valid UUID string."})
             self._calls[short] = self._calls.get(short, 0) + 1
             mode, from_call = self._modes.get(short, ("execute", 1))
-            if mode != "execute" and self._calls[short] >= from_call:
+            if mode not in ("execute", "misplace") and self._calls[short] >= from_call:
                 if mode == "noop":
                     # Logseq's answer to a write that did not happen: null.
                     return self._answer(None)
@@ -1204,8 +1207,11 @@ class LogseqHttpDouble:
         return None
 
     def _move_block(self, args):
-        """null. ``children``: last child of the target; else after it
-        (before it with ``before``). Into its own subtree: nothing."""
+        """null. Measured, 0.10.15 (2026-11-14): ``children``: first child of
+        the target, collapsed or not; ``before``: in front of it; else
+        (``{}``, ``sibling: true``, ``before: false``) right behind its
+        subtree. Into its own subtree: nothing. ``misplace``: ``children``
+        lands as the last child."""
         src, target = str(args[0]).lower(), str(args[1]).lower()
         options = (args[2] if len(args) > 2 else None) or {}
         moving = self._locate(src)
@@ -1217,7 +1223,12 @@ class LogseqHttpDouble:
         node = siblings.pop(i)
         _, t_siblings, t_i, _ = self._locate(target)
         if options.get("children"):
-            t_siblings[t_i]["children"].append(node)
+            kids = t_siblings[t_i]["children"]
+            mode, from_call = self._modes.get("moveBlock", ("execute", 1))
+            if mode == "misplace" and self._calls.get("moveBlock", 0) >= from_call:
+                kids.append(node)
+            else:
+                kids.insert(0, node)
         else:
             t_siblings.insert(t_i if options.get("before") else t_i + 1, node)
         return None

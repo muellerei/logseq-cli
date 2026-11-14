@@ -1146,7 +1146,7 @@ def move_block_cmd(ctx, block_id, under, before, expect_hash, dry_run, as_json):
                 click.echo(f"  root: {preview}")
         return
 
-    move_block_verified(api, block_id, target, before=bool(before))
+    move_block_verified(api, block_id, target, place="before" if before else "under")
     count = count_blocks([source])
 
     if as_json:

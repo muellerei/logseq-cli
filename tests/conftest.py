@@ -712,6 +712,9 @@ class PageGraph:
         return None
 
     def move_block(self, src, target, options=None):
+        """Measured, 0.10.15 (2026-11-14): ``children`` makes the block the
+        target's first child; ``before`` puts it in front of the target;
+        anything else right behind the target's subtree."""
         opts = options or {}
         moving = self.locate(src)
         if not moving or not self.locate(target):
@@ -720,7 +723,7 @@ class PageGraph:
         block = siblings.pop(i)
         _, t_siblings, t_i, _ = self.locate(target)
         if opts.get("children"):
-            t_siblings[t_i]["children"].append(block)
+            t_siblings[t_i]["children"].insert(0, block)
         else:
             t_siblings.insert(t_i if opts.get("before") else t_i + 1, block)
         return None

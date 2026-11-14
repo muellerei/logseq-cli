@@ -166,7 +166,10 @@ class _Graph:
       although a top-level block reports that very id as its ``parent``.
     - ``getPage`` accepts the numeric id; ``getPageBlocksTree`` wants the name.
     - ``moveBlock`` answers ``null`` always, and does nothing when the target
-      lies in the source's own subtree.
+      lies in the source's own subtree. ``children: true`` makes the block
+      the target's first child, ``before: true`` the sibling in front of it,
+      anything else the sibling right behind its subtree (measured
+      2026-11-14).
 
     ``_api`` answers ``getBlock`` for any parent id, page or block,
     which is how the top-level failure of #23 got past the suite.
@@ -244,13 +247,15 @@ class _Graph:
             return None  # refused, silently
         node, tgt = self.nodes[src], self.nodes[target]
         self._kids(node["parent"]).remove(src)
-        if (options or {}).get("before"):
-            siblings = self._kids(tgt["parent"])
-            siblings.insert(siblings.index(target), src)
-            new_parent = tgt["parent"]
-        else:
+        opts = options or {}
+        if opts.get("children"):
             tgt["children"].insert(0, src)
             new_parent = tgt["id"]
+        else:
+            siblings = self._kids(tgt["parent"])
+            at = siblings.index(target)
+            siblings.insert(at if opts.get("before") else at + 1, src)
+            new_parent = tgt["parent"]
         node["parent"] = new_parent
         for u in self._subtree(src):
             self.nodes[u]["page"] = tgt["page"]
@@ -303,7 +308,7 @@ class TestTheMoveProvesItself:
     def test_silent_no_op_under_is_reported(self, monkeypatch):
         double = _double({"page a": ["src", "tgt"]}, noop=True, monkeypatch=monkeypatch)
         error = _not_moved(_move(double, "src", "--under", "tgt"))
-        assert "under block" in error["error"]
+        assert "first child of block" in error["error"]
 
     def test_before_requires_source_directly_in_front(self, monkeypatch):
         """Same parent is not enough: a move that did nothing must not pass."""
@@ -460,3 +465,72 @@ class TestUuidsInCapitals:
         assert r.exit_code == 1
         assert "same block" in r.stderr
         assert double.sent("moveBlock") == []
+
+
+class TestPlacementAsMeasured:
+    """Where ``moveBlock`` puts a block, measured against Logseq 0.10.15
+    (2026-11-14): ``children: true`` makes it the target's FIRST child,
+    collapsed or not; ``before: true`` the sibling in front of the target;
+    an empty option map the sibling right behind the target's subtree.
+
+    The fakes once had it otherwise (``children`` appended as the last
+    child, ``{}`` nested as the first), and the proof of ``--under`` only
+    asked for "among the children", so the suite stayed green either way."""
+
+    def test_page_graph_under_is_first_child(self):
+        from tests.conftest import PageGraph
+        g = PageGraph({"page a": ["src", {"content": "tgt", "children": ["kid"]}]})
+        src, tgt = g.every_uuid()[0], g.every_uuid()[1]
+        g.move_block(src, tgt, {"children": True})
+        assert g.tree("page a") == [("tgt", [("src", []), ("kid", [])])]
+
+    def test_page_graph_empty_options_is_sibling_after_subtree(self):
+        from tests.conftest import PageGraph
+        g = PageGraph({"page a": ["src", {"content": "tgt", "children": ["kid"]}, "next"]})
+        src, tgt = g.every_uuid()[0], g.every_uuid()[1]
+        g.move_block(src, tgt, {})
+        assert g.tree("page a") == [("tgt", [("kid", [])]), ("src", []), ("next", [])]
+
+    def test_graph_empty_options_is_sibling_after_subtree(self):
+        g = _Graph({"page a": [(A, []), (B, [(A1, [])]), (C, [])]})
+        g.move_block(A, B, {})
+        assert g.order("page a") == [B, A, C]
+        assert g.nodes[B]["children"] == [A1]
+
+    def test_graph_under_is_first_child(self):
+        g = _Graph({"page a": [(A, []), (B, [(A1, [])])]})
+        g.move_block(A, B, {"children": True})
+        assert g.nodes[B]["children"] == [A, A1]
+
+    def test_under_that_lands_last_is_not_verified(self, monkeypatch):
+        """``misplace``: the block lands among the children, but last. Before
+        the measurement that passed the proof."""
+        double = _double({"page a": ["src", {"content": "tgt", "children": ["kid"]}]},
+                         monkeypatch=monkeypatch)
+        double.set_mode("moveBlock", "misplace")
+        error = _not_moved(_move(double, "src", "--under", "tgt"))
+        assert "first child of block" in error["error"]
+        assert double.tree("page a") == [("tgt", [("kid", []), ("src", [])])]
+
+    def test_under_lands_first_among_existing_children(self, monkeypatch):
+        double = _double({"page a": ["src", {"content": "tgt", "children": ["kid"]}]},
+                         monkeypatch=monkeypatch)
+        r = _move(double, "src", "--under", "tgt")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("tgt", [("src", []), ("kid", [])])]
+
+    def test_empty_options_are_proven_right_after_the_target(self, monkeypatch):
+        """No flag reaches ``{}`` yet; the method derives the place from the
+        options and proves it."""
+        from logseq_cli.api import LogseqAPI
+        double = _double({"page a": ["src", {"content": "tgt", "children": ["kid"]}, "next"]},
+                         monkeypatch=monkeypatch)
+        LogseqAPI(token="t").move_block(double.uuid_of("src"), double.uuid_of("tgt"), {})
+        assert double.tree("page a") == [("tgt", [("kid", [])]), ("src", []), ("next", [])]
+
+    def test_empty_options_that_did_nothing_are_not_verified(self, monkeypatch):
+        from logseq_cli.api import LogseqAPI
+        from logseq_cli.writerefused import WriteNotVerified
+        double = _double({"page a": ["src", "tgt"]}, noop=True, monkeypatch=monkeypatch)
+        with pytest.raises(WriteNotVerified, match="directly after block"):
+            LogseqAPI(token="t").move_block(double.uuid_of("src"), double.uuid_of("tgt"), {})
