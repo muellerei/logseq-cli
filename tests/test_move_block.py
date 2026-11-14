@@ -534,3 +534,40 @@ class TestPlacementAsMeasured:
         double = _double({"page a": ["src", "tgt"]}, noop=True, monkeypatch=monkeypatch)
         with pytest.raises(WriteNotVerified, match="directly after block"):
             LogseqAPI(token="t").move_block(double.uuid_of("src"), double.uuid_of("tgt"), {})
+
+
+class TestAfter:
+    """``--after X``: the block goes right behind X, as a sibling, behind
+    everything under X (measured, Logseq 0.10.15)."""
+
+    def test_after_a_block_without_children(self, monkeypatch):
+        double = _double({"page a": ["src", "x", "y"]}, monkeypatch=monkeypatch)
+        r = _move(double, "src", "--after", "x")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("x", []), ("src", []), ("y", [])]
+        assert json.loads(r.stdout)["position"].startswith("after ")
+
+    def test_after_a_block_with_children_goes_behind_its_subtree(self, monkeypatch):
+        double = _double({"page a": ["src", {"content": "x", "children": ["x1"]}, "y"]},
+                         monkeypatch=monkeypatch)
+        r = _move(double, "src", "--after", "x")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("x", [("x1", [])]), ("src", []), ("y", [])]
+
+    def test_after_that_did_nothing_is_reported(self, monkeypatch):
+        double = _double({"page a": ["src", "x"]}, noop=True, monkeypatch=monkeypatch)
+        error = _not_moved(_move(double, "src", "--after", "x"))
+        assert "directly after block" in error["error"]
+
+    @pytest.mark.parametrize("positions", [
+        (), ("--under", "--after"), ("--after", "--before"),
+        ("--under", "--before", "--after")])
+    def test_none_or_two_positions_name_all_three(self, monkeypatch, positions):
+        double = _double({"page a": ["src", "x"]}, monkeypatch=monkeypatch)
+        flags = [part for p in positions for part in (p, double.uuid_of("x"))]
+        r = split_runner().invoke(cli, ["--token", "t", "move-block", "--id",
+                                        double.uuid_of("src"), *flags])
+        assert r.exit_code == 1
+        for name in ("--under", "--before", "--after"):
+            assert name in r.stderr
+        assert double.sent("moveBlock") == []

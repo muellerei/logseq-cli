@@ -1100,12 +1100,15 @@ def copy_block(ctx, block_id, to_page, remove, ignore_refs, expect_hash, dry_run
 Examples:
   logseq-cli --token TOKEN move-block --id UUID --under UUID
   logseq-cli --token TOKEN move-block --id UUID --before UUID
+  logseq-cli --token TOKEN move-block --id UUID --after UUID
 Note:
   Structural move: the block keeps its UUID, so ((block-refs)) to it survive.
   Prefer this over `copy-block --remove`, which writes a new block (new UUID,
   dead refs) and deletes the original.
   --under nests the block as the target's FIRST child; --before puts it directly
-  in front of the target as a sibling. Children always move along.
+  in front of the target as a sibling; --after puts it directly behind the
+  target as a sibling, behind everything under the target. Children always
+  move along.
   A target inside the block's own subtree is refused before anything moves,
   and --dry-run refuses it (and a missing target) the same way.
   Logseq answers every move with null, so the move is verified by re-reading
@@ -1114,24 +1117,28 @@ Note:
 @click.option("--id", "block_id", required=True, help="UUID of the block to move")
 @click.option("--under", default=None, help="UUID of the new parent (block becomes its first child)")
 @click.option("--before", default=None, help="UUID of the block to move in front of (as sibling)")
+@click.option("--after", default=None,
+              help="UUID of the block to move behind (as sibling, behind its children)")
 @click.option("--expect-hash", "expect_hash", default=None, help=EXPECT_HASH_HELP)
 @click.option("--dry-run", is_flag=True, help="Show what would be moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def move_block_cmd(ctx, block_id, under, before, expect_hash, dry_run, as_json):
-    """Move a block (with children) under or before another block."""
+def move_block_cmd(ctx, block_id, under, before, after, expect_hash, dry_run, as_json):
+    """Move a block (with children) under, before or after another block."""
     api = ctx.obj["api"]
-    if bool(under) == bool(before):
-        fail("Specify exactly one of: --under, --before.", as_json=as_json)
-
-    target = under or before
+    places = {"under": under, "before": before, "after": after}
+    given = [place for place, uuid in places.items() if uuid]
+    if len(given) != 1:
+        fail("Specify exactly one of: --under, --before, --after.", as_json=as_json)
+    place = given[0]
+    target = places[place]
     block_id = block_id.strip("()")
     source = read_checked(api, block_id, Expect(hash=expect_hash), include_children=True)
     if not source:
         fail("Block not found.", as_json=as_json, id=block_id)
 
-    position = f"under {target[:8]}..." if under else f"before {target[:8]}..."
+    position = f"{place} {target[:8]}..."
     if dry_run:
         check_move(api, block_id, target)
         planned = count_blocks([source])
@@ -1146,7 +1153,7 @@ def move_block_cmd(ctx, block_id, under, before, expect_hash, dry_run, as_json):
                 click.echo(f"  root: {preview}")
         return
 
-    move_block_verified(api, block_id, target, place="before" if before else "under")
+    move_block_verified(api, block_id, target, place=place)
     count = count_blocks([source])
 
     if as_json:
