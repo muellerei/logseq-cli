@@ -10,6 +10,8 @@ file carries most of the reasoning behind the tool.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-14
+
 ### Added
 
 - `move-block --after X` puts the block right behind X as a sibling, behind
