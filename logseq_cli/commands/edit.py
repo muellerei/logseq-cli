@@ -66,7 +66,7 @@ from logseq_cli.pagenames import PageToWrite, journal_page_name
 from logseq_cli.strictinsert import (
     BEFORE_EMPTY_SUFFIX,
     append_in_page,
-    check_move,
+    check_moves,
     create_missing_page,
     before_first_empty,
     before_empty_or_append,
@@ -77,9 +77,9 @@ from logseq_cli.strictinsert import (
     insert_block_tree_at_page_top,
     insert_block_tree_with_uuids,
     insert_tree_at_page_end,
-    move_block_verified,
+    move_blocks_verified,
 )
-from logseq_cli.writerefused import BlockNotFound, WriteRefused, partial_state
+from logseq_cli.writerefused import BlockNotFound, ExpectHashCount, WriteRefused, partial_state
 
 
 @cli.command("update-block", cls=WriteCommand, owes=lambda params: Owed(("--expect-hash",)), epilog="""\b
@@ -1101,6 +1101,7 @@ Examples:
   logseq-cli --token TOKEN move-block --id UUID --under UUID
   logseq-cli --token TOKEN move-block --id UUID --before UUID
   logseq-cli --token TOKEN move-block --id UUID --after UUID
+  logseq-cli --token TOKEN move-block --id A --id B --id C --under UUID
 Note:
   Structural move: the block keeps its UUID, so ((block-refs)) to it survive.
   Prefer this over `copy-block --remove`, which writes a new block (new UUID,
@@ -1109,23 +1110,34 @@ Note:
   in front of the target as a sibling; --after puts it directly behind the
   target as a sibling, behind everything under the target. Children always
   move along.
-  A target inside the block's own subtree is refused before anything moves,
-  and --dry-run refuses it (and a missing target) the same way.
-  Logseq answers every move with null, so the move is verified by re-reading
-  and reported as an error if it did not take.
+  --id repeats: the blocks then stand at the position in the order given
+  (A, B, C above, ahead of the target's other children). --expect-hash
+  repeats with it, one per --id, the n-th for the n-th block.
+  Every block and the target are checked before anything moves: a block given
+  twice, a block inside another given block, the target among them or inside
+  one of them, and a missing block or target are refused, and --dry-run
+  refuses them the same way. A block open in Logseq's editor in any of them
+  refuses the run before the first move; the dry run does not check the
+  editor.
+  Logseq answers every move with null, so each move is verified by re-reading
+  and reported as an error if it did not take. When a later move fails, the
+  earlier ones stay where they went: the error names them (--json: moved).
 """)
-@click.option("--id", "block_id", required=True, help="UUID of the block to move")
+@click.option("--id", "block_ids", required=True, multiple=True,
+              help="UUID of a block to move; repeat to move several, in this order")
 @click.option("--under", default=None, help="UUID of the new parent (block becomes its first child)")
 @click.option("--before", default=None, help="UUID of the block to move in front of (as sibling)")
 @click.option("--after", default=None,
               help="UUID of the block to move behind (as sibling, behind its children)")
-@click.option("--expect-hash", "expect_hash", default=None, help=EXPECT_HASH_HELP)
+# The parameter keeps the name guard_preconditions derives from --expect-hash.
+@click.option("--expect-hash", "expect_hash", multiple=True,
+              help=EXPECT_HASH_HELP + " Repeat it with --id: one per block, in the same order.")
 @click.option("--dry-run", is_flag=True, help="Show what would be moved, without writing")
 @click.option("--json", "as_json", is_flag=True, help="JSON output")
 @click.pass_context
 @handle_connection_error
-def move_block_cmd(ctx, block_id, under, before, after, expect_hash, dry_run, as_json):
-    """Move a block (with children) under, before or after another block."""
+def move_block_cmd(ctx, block_ids, under, before, after, expect_hash, dry_run, as_json):
+    """Move blocks (with children) under, before or after another block."""
     api = ctx.obj["api"]
     places = {"under": under, "before": before, "after": after}
     given = [place for place, uuid in places.items() if uuid]
@@ -1133,34 +1145,62 @@ def move_block_cmd(ctx, block_id, under, before, after, expect_hash, dry_run, as
         fail("Specify exactly one of: --under, --before, --after.", as_json=as_json)
     place = given[0]
     target = places[place]
-    block_id = block_id.strip("()")
-    source = read_checked(api, block_id, Expect(hash=expect_hash), include_children=True)
-    if not source:
-        fail("Block not found.", as_json=as_json, id=block_id)
+    sources = [block_id.strip("()") for block_id in block_ids]
+    # One hash per block, paired by position as --id is ordered; a count is a
+    # property of this call, so it is checked here, not in safety.py.
+    if expect_hash and len(expect_hash) != len(sources):
+        raise ExpectHashCount(
+            f"--expect-hash was given {len(expect_hash)} time(s) for {len(sources)} "
+            "--id; give one per block, in the same order. Nothing was moved.",
+            ids=len(sources), hashes=len(expect_hash))
+    hashes = expect_hash or (None,) * len(sources)
+    read = []
+    for block_id, one_hash in zip(sources, hashes):
+        source = read_checked(api, block_id, Expect(hash=one_hash), include_children=True)
+        if not source:
+            fail("Block not found.", as_json=as_json, id=block_id)
+        read.append(source)
 
     position = f"{place} {target[:8]}..."
+    count = count_blocks(read)
+    result = {"action": "move", "blocks": count, "position": position}
+    if len(sources) == 1:
+        result["source_id"] = sources[0]
+    result["source_ids"] = sources
     if dry_run:
-        check_move(api, block_id, target)
-        planned = count_blocks([source])
-        content = source.get("content", "") if isinstance(source, dict) else ""
+        check_moves(api, sources, target)
         if as_json:
-            output({"action": "move", "blocks": planned, "position": position,
-                    "source_id": block_id, "dry_run": True}, True)
+            output({**result, "dry_run": True}, True)
         else:
-            click.echo(f"[DRY RUN] Would move {planned} block(s) {position}")
-            preview = content[:80] + ("..." if len(content) > 80 else "")
-            if preview:
-                click.echo(f"  root: {preview}")
+            roots = f" in {len(sources)} roots" if len(sources) > 1 else ""
+            click.echo(f"[DRY RUN] Would move {count} block(s){roots} {position}")
+            for source in read:
+                content = source.get("content", "") if isinstance(source, dict) else ""
+                preview = content[:80] + ("..." if len(content) > 80 else "")
+                if preview:
+                    click.echo(f"  root: {preview}")
         return
 
-    move_block_verified(api, block_id, target, place=place)
-    count = count_blocks([source])
+    check_moves(api, sources, target)
+    if len(sources) > 1:
+        # A block open in the third source would otherwise refuse the third
+        # move, after two had landed; one source keeps the gate per write.
+        api.refuse_open_in_sources_before_first_write(sources)
+
+    def landed(moved):
+        on_failure(f"Moved so far: {', '.join(moved)}; read the target, then "
+                   "move only the rest.", moved=moved)
+
+    move_blocks_verified(api, sources, target, place=place, landed=landed)
 
     if as_json:
-        output({"action": "move", "blocks": count, "position": position,
-                "source_id": block_id}, True)
-    else:
+        output(result, True)
+    elif len(sources) == 1:
         click.echo(f"Moved {count} block(s) {position}")
+    else:
+        click.echo(f"Moved {count} block(s) in {len(sources)} roots {position}")
+        for source in sources:
+            click.echo(f"  uuid: {source}")
 
 
 cli.add_command(remove_block_cmd, "delete-block")

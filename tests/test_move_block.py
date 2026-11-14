@@ -571,3 +571,197 @@ class TestAfter:
         for name in ("--under", "--before", "--after"):
             assert name in r.stderr
         assert double.sent("moveBlock") == []
+
+
+def _move_many(double, sources, flag, target, *extra, json_out=True):
+    ids = [part for s in sources for part in ("--id", double.uuid_of(s))]
+    return split_runner().invoke(cli, [
+        "--token", "t", "move-block", *ids, flag, double.uuid_of(target), *extra,
+        *(["--json"] if json_out else [])])
+
+
+class TestSeveralIdsInTheGivenOrder:
+    """Several ``--id``: the blocks stand at the position in the order given,
+    in every mode. The first goes to the position, each next one right
+    behind the one before."""
+
+    def test_under(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c", {"content": "p", "children": ["p1"]}]},
+                         monkeypatch=monkeypatch)
+        r = _move_many(double, ["c", "a", "b"], "--under", "p")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("p", [("c", []), ("a", []), ("b", []), ("p1", [])])]
+
+    def test_before(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c", "x", "y"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["c", "a", "b"], "--before", "y")
+        assert r.exit_code == 0, r.stderr
+        assert [n for n, _ in double.tree("page a")] == ["x", "c", "a", "b", "y"]
+
+    def test_after(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c", "x", "y"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["c", "a", "b"], "--after", "x")
+        assert r.exit_code == 0, r.stderr
+        assert [n for n, _ in double.tree("page a")] == ["x", "c", "a", "b", "y"]
+
+    def test_a_previous_block_with_children_keeps_them(self, monkeypatch):
+        """The next block goes behind the previous one's subtree, not into it."""
+        double = _double({"page a": [{"content": "a", "children": ["a1"]}, "b",
+                                     {"content": "p", "children": ["p1"]}]},
+                         monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "b"], "--under", "p")
+        assert r.exit_code == 0, r.stderr
+        assert double.tree("page a") == [("p", [("a", [("a1", [])]), ("b", []), ("p1", [])])]
+
+    def test_json_names_every_root_in_order(self, monkeypatch):
+        double = _double({"page a": [{"content": "a", "children": ["a1"]}, "b", "x"]},
+                         monkeypatch=monkeypatch)
+        r = _move_many(double, ["b", "a"], "--after", "x")
+        assert r.exit_code == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["source_ids"] == [double.uuid_of("b"), double.uuid_of("a")]
+        assert out["blocks"] == 3
+        assert out["position"] == f"after {double.uuid_of('x')[:8]}..."
+        assert "source_id" not in out
+
+    def test_text_names_the_roots_in_order(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["b", "a"], "--after", "x", json_out=False)
+        assert r.exit_code == 0, r.stderr
+        lines = r.stdout.splitlines()
+        assert lines[0] == f"Moved 2 block(s) in 2 roots after {double.uuid_of('x')[:8]}..."
+        assert lines[1:] == [f"  uuid: {double.uuid_of('b')}", f"  uuid: {double.uuid_of('a')}"]
+
+
+class TestOneIdAsBefore:
+    def test_json_adds_source_ids_only(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, monkeypatch=monkeypatch)
+        r = _move(double, "src", "--under", "tgt")
+        out = json.loads(r.stdout)
+        assert out == {"action": "move", "blocks": 1,
+                       "position": f"under {double.uuid_of('tgt')[:8]}...",
+                       "source_id": double.uuid_of("src"),
+                       "source_ids": [double.uuid_of("src")]}
+
+    def test_text_is_unchanged(self, monkeypatch):
+        double = _double({"page a": ["src", "tgt"]}, monkeypatch=monkeypatch)
+        r = split_runner().invoke(cli, ["--token", "t", "move-block", "--id",
+                                        double.uuid_of("src"), "--under", double.uuid_of("tgt")])
+        assert r.stdout == f"Moved 1 block(s) under {double.uuid_of('tgt')[:8]}...\n"
+
+
+class TestTheWholeListIsCheckedFirst:
+    """Every refusal comes before the first request to a write method, and
+    the dry run refuses the same."""
+
+    @pytest.fixture(params=[False, True], ids=["run", "dry-run"])
+    def dry(self, request):
+        return ["--dry-run"] if request.param else []
+
+    def _refused(self, double, r, reason):
+        assert r.exit_code == 1
+        assert double.sent("moveBlock") == []
+        if reason:
+            assert json.loads(r.stderr)["reason"] == reason
+        return r
+
+    def test_duplicate_in_another_case(self, monkeypatch, dry):
+        double = _double({"page a": ["a", "x"]}, monkeypatch=monkeypatch)
+        a = double.uuid_of("a")
+        r = split_runner().invoke(cli, ["--token", "t", "move-block", "--id", a,
+                                        "--id", a.upper(), "--after", double.uuid_of("x"),
+                                        *dry, "--json"])
+        self._refused(double, r, "duplicate_source")
+
+    def test_source_inside_another_source(self, monkeypatch, dry):
+        double = _double({"page a": [{"content": "a", "children": ["a1"]}, "x"]},
+                         monkeypatch=monkeypatch)
+        r = _move_many(double, ["a1", "a"], "--after", "x", *dry)
+        error = json.loads(self._refused(double, r, "source_in_source").stderr)
+        assert (error["source"], error["inside"]) == (double.uuid_of("a1"), double.uuid_of("a"))
+
+    def test_target_in_the_list(self, monkeypatch, dry):
+        double = _double({"page a": ["a", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "x"], "--after", "x", *dry)
+        self._refused(double, r, None)
+        assert "same block" in r.stderr
+
+    def test_target_inside_a_later_source(self, monkeypatch, dry):
+        double = _double({"page a": ["a", {"content": "b", "children": ["b1"]}]},
+                         monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "b"], "--under", "b1", *dry)
+        self._refused(double, r, None)
+        assert "own subtree" in r.stderr
+
+    def test_wrong_number_of_hashes(self, monkeypatch, dry):
+        from logseq_cli.blocktext import block_hash
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "b"], "--after", "x", "--expect-hash",
+                       block_hash("a"), *dry)
+        error = json.loads(self._refused(double, r, "expect_hash_count").stderr)
+        assert error["ids"] == 2 and error["hashes"] == 1
+
+    def test_second_hash_that_does_not_match(self, monkeypatch, dry):
+        from logseq_cli.blocktext import block_hash
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "b"], "--after", "x", "--expect-hash", block_hash("a"),
+                       "--expect-hash", block_hash("not b"), *dry)
+        self._refused(double, r, "precondition_failed")
+
+    def test_matching_hashes_move(self, monkeypatch):
+        from logseq_cli.blocktext import block_hash
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["a", "b"], "--after", "x", "--expect-hash", block_hash("a"),
+                       "--expect-hash", block_hash("b"))
+        assert r.exit_code == 0, r.stderr
+        assert [n for n, _ in double.tree("page a")] == ["x", "a", "b"]
+
+
+class TestPartialMove:
+    def test_what_landed_stays_and_is_named(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "c", "x"]}, monkeypatch=monkeypatch)
+        double.set_mode("moveBlock", "noop", from_call=2)
+        r = _move_many(double, ["a", "b", "c"], "--after", "x")
+        assert r.exit_code == 1
+        error = json.loads(r.stderr)
+        assert error["reason"] == "write_not_verified"
+        assert error["writes_landed"] == 1
+        assert error["moved"] == [double.uuid_of("a")]
+        assert "move only the rest" in error["error"]
+        assert [n for n, _ in double.tree("page a")] == ["b", "c", "x", "a"]
+
+
+class TestDryRunWithSeveral:
+    def test_previews_each_root_and_writes_nothing(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        r = _move_many(double, ["b", "a"], "--after", "x", "--dry-run")
+        assert r.exit_code == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["dry_run"] is True and out["blocks"] == 2
+        assert out["source_ids"] == [double.uuid_of("b"), double.uuid_of("a")]
+        assert double.sent("moveBlock") == []
+
+
+class TestASourceGoneMidChain:
+    """Someone deletes the second block in Logseq after the first move
+    landed: the failure is a write that did not show, with what stayed in
+    ``moved``, not a "Nothing was moved" from a check run again."""
+
+    def test_the_landed_move_is_named(self, monkeypatch):
+        double = _double({"page a": ["a", "b", "x"]}, monkeypatch=monkeypatch)
+        b = double.uuid_of("b")
+        move = double._handlers["logseq.Editor.moveBlock"]
+
+        def move_then_delete_b(args):
+            result = move(args)
+            if double._locate(b):
+                double._remove_block([b])
+            return result
+
+        double._handlers["logseq.Editor.moveBlock"] = move_then_delete_b
+        r = _move_many(double, ["a", "b"], "--after", "x")
+        assert r.exit_code == 1
+        error = json.loads(r.stderr)
+        assert error["writes_landed"] == 1
+        assert error["moved"] == [double.uuid_of("a")]
+        assert "Nothing was moved" not in error["error"]

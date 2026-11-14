@@ -96,6 +96,26 @@ class PreconditionRequired(WriteRefused):
     reason = "precondition_required"
 
 
+class DuplicateSource(WriteRefused):
+    """move-block got the same block twice in its --id list (compared in lower
+    case). Field: ids (the list as given)."""
+    reason = "duplicate_source"
+
+
+class SourceInSource(WriteRefused):
+    """move-block got a block and also one inside its subtree: moving the
+    outer one takes the inner one along, so naming it as well is a second
+    reading the CLI does not guess at. Fields: source, inside (the block it
+    lies in)."""
+    reason = "source_in_source"
+
+
+class ExpectHashCount(WriteRefused):
+    """move-block got --expect-hash, but not one per --id; the n-th hash
+    belongs to the n-th id. Fields: ids, hashes (the two counts)."""
+    reason = "expect_hash_count"
+
+
 class RenameRefused(WriteRefused):
     """renamePage onto an empty or taken name. Fields: old, new, why ("empty" | "exists")."""
     reason = "rename_refused"
